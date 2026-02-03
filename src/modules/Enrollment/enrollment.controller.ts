@@ -140,7 +140,8 @@ const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
         {
             $lookup: {
                 from: 'users',
-                localField: 'id',
+                // Enrollment documents reference users via `userId` in the schema
+                localField: 'userId',
                 foreignField: '_id',
                 as: 'id',
             },

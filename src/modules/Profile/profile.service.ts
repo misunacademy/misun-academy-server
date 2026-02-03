@@ -1,12 +1,11 @@
-import { Types } from 'mongoose';
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../../errors/ApiError';
 import { ProfileModel } from './profile.model';
 import { EnrollmentModel } from '../Enrollment/enrollment.model';
-import { BatchModel } from '../Batch/batch.model';
 import { EnrollmentStatus } from '../../types/common';
 import { IProfile } from './profile.interface';
 import mongoose from 'mongoose';
+import { UserModel } from '../User/user.model';
 
 const createProfile = async (userId: string, profileData: Partial<IProfile>) => {
   const profile = await ProfileModel.create({
@@ -21,12 +20,25 @@ const getProfile = async (userId: string) => {
   return profile;
 };
 
-const updateProfile = async (userId: string, updateData: Partial<IProfile>) => {
+const updateProfile = async (userId: string, updateData: any) => {
+  const { avatar, name, ...profileData } = updateData;
+
+  // Update user model if avatar or name is provided
+  if (avatar || name) {
+    await UserModel.findOneAndUpdate(
+      { _id: userId },
+      { $set: { ...(avatar && { image: avatar }), ...(name && { name }) } },
+      { new: true, runValidators: true }
+    );
+  }
+
+  // Update or create profile with remaining data
   const profile = await ProfileModel.findOneAndUpdate(
     { user: userId },
-    { $set: updateData },
+    { $set: profileData },
     { new: true, upsert: true, runValidators: true }
   );
+
   return profile;
 };
 

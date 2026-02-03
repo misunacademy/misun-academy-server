@@ -17,6 +17,7 @@ export const seedSuperAdmin = async () => {
                 name: 'Super Admin',
                 email: env.SUPER_ADMIN_EMAIL,
                 password: env.SUPER_ADMIN_PASSWORD, // hashed in pre-save hook
+                emailVerified:true,
                 role: Role.SUPERADMIN,
             });
             console.log('✅ Super Admin created in Admin collection');
