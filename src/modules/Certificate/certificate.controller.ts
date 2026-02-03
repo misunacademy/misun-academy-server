@@ -8,12 +8,12 @@ import { CertificateService } from './certificate.service';
  * Get certificate for enrollment
  */
 const getCertificate = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { enrollmentId } = req.params as { enrollmentId: string };
 
     const certificate = await CertificateService.getCertificateByEnrollment(
         enrollmentId,
-        userId
+        id
     );
 
     sendResponse(res, {
@@ -28,9 +28,9 @@ const getCertificate = catchAsync(async (req: Request, res: Response) => {
  * Get all user certificates
  */
 const getMyCertificates = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
 
-    const certificates = await CertificateService.getUserCertificates(userId);
+    const certificates = await CertificateService.getUserCertificates(id);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -60,10 +60,10 @@ const verifyCertificate = catchAsync(async (req: Request, res: Response) => {
  * Student: Request certificate (creates pending request)
  */
 const requestCertificate = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { enrollmentId } = req.params as { enrollmentId: string };
 
-    const certificate = await CertificateService.requestCertificate(enrollmentId, userId);
+    const certificate = await CertificateService.requestCertificate(enrollmentId, id);
 
     sendResponse(res, {
         statusCode: StatusCodes.CREATED,
@@ -77,10 +77,10 @@ const requestCertificate = catchAsync(async (req: Request, res: Response) => {
  * Admin: Approve pending certificate
  */
 const approveCertificate = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { certificateId } = req.params as { certificateId: string };
 
-    const certificate = await CertificateService.approveCertificate(certificateId, userId);
+    const certificate = await CertificateService.approveCertificate(certificateId, id);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -108,10 +108,10 @@ const getPendingCertificates = catchAsync(async (req: Request, res: Response) =>
  * Admin: Issue certificate manually (direct issuance, skips approval)
  */
 const issueCertificate = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { enrollmentId } = req.params as { enrollmentId: string };
 
-    const certificate = await CertificateService.issueCertificate(enrollmentId, userId);
+    const certificate = await CertificateService.issueCertificate(enrollmentId, id);
 
     sendResponse(res, {
         statusCode: StatusCodes.CREATED,
@@ -125,14 +125,14 @@ const issueCertificate = catchAsync(async (req: Request, res: Response) => {
  * Admin: Revoke certificate
  */
 const revokeCertificate = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { certificateId } = req.params as { certificateId: string };
     const { reason } = req.body;
 
     const certificate = await CertificateService.revokeCertificate(
         certificateId,
         reason,
-        userId
+        id
     );
 
     sendResponse(res, {
@@ -147,13 +147,13 @@ const revokeCertificate = catchAsync(async (req: Request, res: Response) => {
  * Check certificate eligibility
  */
 const checkEligibility = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { enrollmentId } = req.params as { enrollmentId: string };
 
     // Verify user owns this enrollment
     const enrollment = await require('../Enrollment/enrollment.model').EnrollmentModel.findOne({
         _id: enrollmentId,
-        userId,
+        id,
     });
 
     if (!enrollment) {

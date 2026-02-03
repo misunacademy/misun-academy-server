@@ -13,10 +13,10 @@ import { UserModel } from '../User/user.model';
  * Creates pending enrollment and returns payment URL
  */
 const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { batchId } = req.body;
 
-    const result = await EnrollmentService.initiateEnrollment(userId, batchId);
+    const result = await EnrollmentService.initiateEnrollment(id, batchId);
 
     // If existing pending enrollment found, return it
     if (result.isExisting) {
@@ -25,7 +25,7 @@ const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
         
         const paymentResult = await PaymentService.initiateSSLCommerzPayment(
             result.enrollment.enrollmentId,
-            userId
+            id
         );
 
         return sendResponse(res, {
@@ -56,7 +56,7 @@ const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
     const PaymentService = require('../Payment/payment.service').PaymentService;
     const paymentResult = await PaymentService.initiateSSLCommerzPayment(
         enrollmentId,
-        userId
+        id
     );
 
     sendResponse(res, {
@@ -80,11 +80,11 @@ const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
  * Get current user's enrollments
  */
 const getMyEnrollments = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { status } = req.query;
 
     const enrollments = await EnrollmentService.getUserEnrollments(
-        userId,
+        id,
         status as any
     );
 
@@ -100,10 +100,10 @@ const getMyEnrollments = catchAsync(async (req: Request, res: Response) => {
  * Get enrollment details
  */
 const getEnrollmentDetails = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { enrollmentId } = req.params as { enrollmentId: string };
 
-    const enrollment = await EnrollmentService.getEnrollmentDetails(enrollmentId, userId);
+    const enrollment = await EnrollmentService.getEnrollmentDetails(enrollmentId, id);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -140,16 +140,16 @@ const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
         {
             $lookup: {
                 from: 'users',
-                localField: 'userId',
+                localField: 'id',
                 foreignField: '_id',
-                as: 'userId',
+                as: 'id',
             },
         },
-        { $unwind: { path: '$userId', preserveNullAndEmptyArrays: true } },
+        { $unwind: { path: '$id', preserveNullAndEmptyArrays: true } },
         {
             $lookup: {
                 from: 'profiles',
-                localField: 'userId._id',
+                localField: 'id._id',
                 foreignField: 'user',
                 as: 'userProfile',
             },
@@ -184,9 +184,9 @@ const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
             $match: {
                 $or: [
                     { enrollmentId: searchRegex },
-                    { 'userId.name': searchRegex },
-                    { 'userId.email': searchRegex },
-                    { 'userId.phone': searchRegex },
+                    { 'id.name': searchRegex },
+                    { 'id.email': searchRegex },
+                    { 'id.phone': searchRegex },
                 ],
             },
         });
@@ -217,11 +217,11 @@ const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
     const transformedData = enrollments.map((enrollment: any) => ({
         _id: enrollment._id,
         studentId: enrollment.enrollmentId,
-        student: enrollment.userId ? {
-            _id: enrollment.userId._id,
-            name: enrollment.userId.name,
-            email: enrollment.userId.email,
-            phone: enrollment.userId.phone,
+        student: enrollment.id ? {
+            _id: enrollment.id._id,
+            name: enrollment.id.name,
+            email: enrollment.id.email,
+            phone: enrollment.id.phone,
             address: enrollment.userProfile?.address || null,
         } : null,
         batch: enrollment.batchId ? {
@@ -277,7 +277,7 @@ const updateEnrollmentStatus = catchAsync(async (req: Request, res: Response) =>
  * Creates enrollment awaiting admin verification
  */
 const enrollWithManualPayment = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { batchId, paymentData } = req.body;
 
     if (!paymentData?.senderNumber || !paymentData?.transactionId) {
@@ -288,13 +288,13 @@ const enrollWithManualPayment = catchAsync(async (req: Request, res: Response) =
     }
 
     const result = await EnrollmentService.enrollWithManualPayment(
-        userId,
+        id,
         batchId,
         paymentData
     );
 
     // Send payment verification pending email
-    const user = await UserModel.findById(userId);
+    const user = await UserModel.findById(id);
     if (user) {
         sendWaitingPaymentVerificationEmail(
             user,

@@ -1,7 +1,7 @@
 import express from 'express';
 import validateRequest from '../../middlewares/validateRequest';
 import { BatchController } from './batch.controller';
-import auth from '../../middlewares/auth';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
 import { Role } from '../../types/role';
 import { createBatchSchema, updateBatchSchema } from './batch.validation';
 const router = express.Router();
@@ -14,14 +14,16 @@ router.get('/:id', BatchController.getBatchById);
 
 router.put(
     '/:id',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     validateRequest(updateBatchSchema),
     BatchController.updateBatch
 );
 
 router.post(
     '/',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     validateRequest(createBatchSchema),
     BatchController.createBatch
 );
@@ -29,21 +31,24 @@ router.post(
 // Manual status transition
 router.post(
     '/:id/transition',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     BatchController.transitionBatchStatus
 );
 
 // Trigger auto-transition (admin can run manually)
 router.post(
     '/auto-transition/run',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     BatchController.runAutoTransition
 );
 
 // Delete batch
 router.delete(
     '/:id',
-    auth(Role.SUPERADMIN,Role.ADMIN),
+    requireAuth,
+    requireAdmin,
     BatchController.deleteBatch
 );
 

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { initializeAuth } from "./betterAuth";
 
 let isConnected = false;
 
@@ -17,9 +18,13 @@ export const connectDB = async () => {
             socketTimeoutMS: 45000,
         });
         isConnected = db.connections[0].readyState === 1;
-        console.log("✅ MongoDB connected");
+        console.log(" MongoDB connected");
+        
+        // Initialize Better Auth after database connection
+        initializeAuth();
+        console.log(" Better Auth initialized");
     } catch (error) {
-        console.error("❌ MongoDB connection error:", error);
+        console.error(" MongoDB connection error:", error);
         throw error;
     }
 };

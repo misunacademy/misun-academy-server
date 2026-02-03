@@ -1,7 +1,6 @@
 import express from 'express';
 import { PaymentController } from './payment.controller';
-import auth from '../../middlewares/auth';
-import { Role } from '../../types/role';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
 
 const router = express.Router();
 
@@ -15,32 +14,35 @@ router.get('/status', PaymentController.checkPaymentStatus);
 // Authenticated routes
 router.get(
     '/me',
-    auth(Role.LEARNER, Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
     PaymentController.getMyPayments
 );
 
 router.post(
     '/checkout',
-    auth(Role.LEARNER, Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
     PaymentController.initiateCheckout
 );
 
 // Admin routes
 router.get(
     '/history',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     PaymentController.getPaymentHistory
 );
 
 router.post(
     '/:transactionId/verify',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     PaymentController.verifyManualPayment
 );
 
 router.put(
     '/:tran_id/status',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     PaymentController.updatePaymentWithEnrollStatus
 );
 

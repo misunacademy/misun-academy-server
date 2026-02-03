@@ -14,9 +14,19 @@ const EnvSchema = z.object({
     SUPER_ADMIN_EMAIL: z.string(),
     SUPER_ADMIN_PASSWORD: z.string(),
 
-    JWT_SECRET: z.string(),
+    // Better Auth (NEW)
+    BETTER_AUTH_SECRET: z.string(),
+    BETTER_AUTH_URL: z.string(),
+    RESEND_API_KEY: z.string(),
+    GOOGLE_CLIENT_ID: z.string(),
+    GOOGLE_CLIENT_SECRET: z.string(),
+    CLIENT_URL: z.string().optional(),
+
+    // JWT (DEPRECATED - will be removed after migration)
+    JWT_SECRET: z.string().optional(),
     JWT_REFRESH_SECRET: z.string().optional().default("yourRefreshSecretKey"),
-    JWT_EXPIRY: z.string(),
+    JWT_EXPIRY: z.string().optional(),
+    
     SSL_STORE_ID: z.string(),
     SSL_STORE_PASSWORD: z.string(),
     SSL_IS_LIVE: z.string(),

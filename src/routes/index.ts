@@ -5,7 +5,7 @@ import { PaymentRoutes } from '../modules/Payment/payment.routes';
 import { DashboardRoutes } from '../modules/Dashboard/dashboard.routes';
 import { CourseRoutes } from '../modules/Course/course.routes';
 import { ContentRoutes } from '../modules/Content/content.routes';
-import { AuthRoutes } from '../modules/Auth/auth.route';
+import BetterAuthRoutes from './betterAuth.routes';
 import { EnrollmentRoutes } from '../modules/Enrollment/enrollment.routes';
 import { CourseEnrollmentRoutes } from '../modules/Enrollment/courseEnrollment.routes';
 import { InstructorRoutes } from '../modules/Instructor/instructor.routes';
@@ -24,7 +24,7 @@ const router = express.Router();
 const moduleRoutes = [
     {
         path: '/auth',
-        route: AuthRoutes,
+        route: BetterAuthRoutes,
     },
     {
         path: '/admin',

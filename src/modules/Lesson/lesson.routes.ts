@@ -1,12 +1,12 @@
 import express from 'express';
 import { LessonController } from './lesson.controller';
-import auth from '../../middlewares/auth';
-import { Role } from '../../types/role';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
 
 const router = express.Router();
 
 // All routes require admin authentication
-router.use(auth(Role.ADMIN, Role.SUPERADMIN));
+router.use(requireAuth);
+router.use(requireAdmin);
 
 // Create lesson for a module
 router.post('/modules/:moduleId/lessons', LessonController.createLesson);

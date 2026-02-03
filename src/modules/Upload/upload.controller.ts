@@ -107,7 +107,7 @@ const uploadWithData = catchAsync(async (req: Request, res: Response) => {
                 description: description || '',
                 category: category || 'general',
             },
-            uploadedBy: (req as any).user?.userId || 'anonymous', // If auth is implemented
+            uploadedBy: (req as any).user?.id || 'anonymous', // If auth is implemented
         };
 
         sendResponse(res, {

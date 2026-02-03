@@ -12,9 +12,9 @@ import ApiError from '../../errors/ApiError';
  * Get instructor profile
  */
 const getProfile = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
 
-    const instructor = await InstructorModel.findOne({ userId });
+    const instructor = await InstructorModel.findOne({ id });
     if (!instructor) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor profile not found');
     }
@@ -31,11 +31,11 @@ const getProfile = catchAsync(async (req: Request, res: Response) => {
  * Update instructor profile
  */
 const updateProfile = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { bio, expertise, socialLinks, profilePicture } = req.body;
 
     const instructor = await InstructorModel.findOneAndUpdate(
-        { userId },
+        { id },
         { bio, expertise, socialLinks, profilePicture },
         { new: true, runValidators: true }
     );
@@ -56,9 +56,9 @@ const updateProfile = catchAsync(async (req: Request, res: Response) => {
  * Get instructor dashboard stats
  */
 const getDashboard = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
 
-    const instructor = await InstructorModel.findOne({ userId }).populate('userId', 'name email');
+    const instructor = await InstructorModel.findOne({ id }).populate('id', 'name email');
     if (!instructor) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor profile not found');
     }
@@ -79,7 +79,7 @@ const getDashboard = catchAsync(async (req: Request, res: Response) => {
         message: 'Dashboard data retrieved successfully',
         data: {
             instructor: {
-                name: (instructor.userId as any).name,
+                name: (instructor.id as any).name,
                 rating: instructor.rating,
                 totalBatches: instructor.totalBatchesTaught,
                 totalStudents: totalStudents,
@@ -97,10 +97,10 @@ const getDashboard = catchAsync(async (req: Request, res: Response) => {
  * Get assigned batches
  */
 const getAssignedBatches = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { status } = req.query;
 
-    const instructor = await InstructorModel.findOne({ userId });
+    const instructor = await InstructorModel.findOne({ id });
     if (!instructor) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor profile not found');
     }
@@ -127,10 +127,10 @@ const getAssignedBatches = catchAsync(async (req: Request, res: Response) => {
  */
 const getBatchStudents = catchAsync(async (req: Request, res: Response) => {
     const { batchId } = req.params;
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
 
     // Verify instructor is assigned to this batch
-    const instructor = await InstructorModel.findOne({ userId });
+    const instructor = await InstructorModel.findOne({ id });
     if (!instructor) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor profile not found');
     }
@@ -146,7 +146,7 @@ const getBatchStudents = catchAsync(async (req: Request, res: Response) => {
 
     // Get enrollments with user and progress data
     const enrollments = await EnrollmentModel.find({ batchId })
-        .populate('userId', 'name email profilePicture')
+        .populate('id', 'name email profilePicture')
         .select('enrollmentId status enrolledAt accessExpiresAt');
 
     // Get progress for each enrollment
@@ -185,10 +185,10 @@ const getBatchStudents = catchAsync(async (req: Request, res: Response) => {
  */
 const getBatchStatistics = catchAsync(async (req: Request, res: Response) => {
     const { batchId } = req.params;
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
 
     // Verify instructor is assigned to this batch
-    const instructor = await InstructorModel.findOne({ userId });
+    const instructor = await InstructorModel.findOne({ id });
     if (!instructor) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor profile not found');
     }

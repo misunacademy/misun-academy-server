@@ -1,6 +1,6 @@
 import express from 'express';
 import { CourseController } from './course.controller';
-import auth from '../../middlewares/auth';
+import { requireAuth, requireSuperAdmin, requireInstructor, requireRole } from '../../middlewares/betterAuth';
 import { Role } from '../../types/role';
 
 const router = express.Router();
@@ -13,20 +13,23 @@ router.get('/:id', CourseController.getCourseById);
 // Admin and Lead Instructor routes (instructors can edit courses they teach)
 router.post(
     '/',
-    auth(Role.ADMIN, Role.SUPERADMIN, Role.INSTRUCTOR),
+    requireAuth,
+    requireInstructor,
     CourseController.createCourse
 );
 
 router.put(
     '/:id',
-    auth(Role.ADMIN, Role.SUPERADMIN, Role.INSTRUCTOR),
+    requireAuth,
+    requireInstructor,
     CourseController.updateCourse
 );
 
 // Only SuperAdmins can delete courses
 router.delete(
     '/:id',
-    auth(Role.SUPERADMIN),
+    requireAuth,
+    requireSuperAdmin,
     CourseController.deleteCourse
 );
 

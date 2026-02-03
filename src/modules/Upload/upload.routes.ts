@@ -1,7 +1,7 @@
 import express from 'express';
 import { UploadController } from './upload.controller';
 import { upload, handleMulterError } from '../../middlewares/upload';
-import auth from '../../middlewares/auth';
+import { requireAuth } from '../../middlewares/betterAuth';
 
 const router = express.Router();
 
@@ -12,7 +12,7 @@ const router = express.Router();
  */
 router.post(
     '/single',
-    auth(),  // All authenticated users can upload
+    requireAuth,  // All authenticated users can upload
     upload.single('image'), // Field name must be 'image'
     handleMulterError,
     UploadController.uploadSingle
@@ -25,7 +25,7 @@ router.post(
  */
 router.post(
     '/multiple',
-    auth(),
+    requireAuth,
     upload.array('images', 10), // Field name must be 'images', max 10 files
     handleMulterError,
     UploadController.uploadMultiple
@@ -38,7 +38,7 @@ router.post(
  */
 router.post(
     '/with-data',
-    auth(),
+    requireAuth,
     upload.single('image'),
     handleMulterError,
     UploadController.uploadWithData
@@ -51,7 +51,7 @@ router.post(
  */
 router.delete(
     '/:publicId',
-    auth(),
+    requireAuth,
     UploadController.deleteImage
 );
 

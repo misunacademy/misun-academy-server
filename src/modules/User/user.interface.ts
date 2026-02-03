@@ -6,13 +6,9 @@ import { Document } from 'mongoose';
 export interface IUser {
     name: string;
     email: string;
-    password: string;
+    password?: string; // Optional for OAuth users
     role: Role;
-    emailVerified: boolean;
-    emailVerificationToken?: string;
-    emailVerificationExpiry?: Date;
-    passwordResetToken?: string;
-    passwordResetExpiry?: Date;
+    emailVerified: Date | null; // Better Auth uses Date instead of Boolean
     image?: string;
     avatar?: string;
     phone?: string;
@@ -23,7 +19,8 @@ export interface IUser {
 }
 
 export interface IUserDocument extends IUser, Document {
-    comparePassword(password: string): Promise<boolean>;
+    comparePassword?(password: string): Promise<boolean>;
+    profilePicture?: string; // Virtual field
 }
 
 export interface GetUsersParams {

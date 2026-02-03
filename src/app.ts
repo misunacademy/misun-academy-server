@@ -7,7 +7,6 @@ import rateLimit from 'express-rate-limit';
 import router from './routes';
 import globalErrorHandler from './middlewares/globalErrorHandler';
 import env from './config/env';
-import { seedSuperAdmin } from './scripts/seedSuperAdmin';
 import { connectDB } from './config/database';
 
 const app = express();
@@ -36,17 +35,63 @@ app.use(async (req, res, next) => {
 
 // Middleware
 app.use(cors({
-    origin: env.FRONTEND_URL,
-    credentials: true
+    origin: [
+        env.FRONTEND_URL,
+        env.CLIENT_URL!,
+        'http://localhost:3000' // Fallback for development
+    ].filter(Boolean),
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
 }));                // Enables Cross-Origin Resource Sharing
-app.use(helmet());              // Adds security headers to protect against vulnerabilities
+
+// Enhanced Security Headers with Helmet
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            scriptSrc: ["'self'"],
+            imgSrc: ["'self'", "data:", "https:"],
+            connectSrc: ["'self'"],
+            fontSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            mediaSrc: ["'self'"],
+            frameSrc: ["'none'"],
+        },
+    },
+    crossOriginEmbedderPolicy: false, // Allow embedding for OAuth
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    hsts: {
+        maxAge: 31536000, // 1 year in seconds
+        includeSubDomains: true,
+        preload: true,
+    },
+    noSniff: true,
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    xssFilter: true,
+}));
 app.use(morgan('dev'));         // Logs HTTP requests for better monitoring
 app.use(compression());         // Compresses response bodies for faster delivery
 app.use(express.urlencoded({ extended: true })); // FOR FORM DATA
 app.use(express.json()); // FOR JSON (not needed by SSLCommerz)
 
-// Rate Limiter
-app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 80 }));
+// Global Rate Limiter
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
+
+// Stricter Rate Limiter for Auth Routes (prevents brute force attacks)
+const authRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5, // Limit each IP to 5 requests per windowMs
+    message: 'Too many authentication attempts, please try again after 15 minutes',
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+app.use('/api/v1/auth/sign-in', authRateLimiter);
+app.use('/api/v1/auth/sign-up', authRateLimiter);
+app.use('/api/v1/auth/forget-password', authRateLimiter);
+app.use('/api/v1/auth/reset-password', authRateLimiter);
 
 // Routes
 app.use('/api/v1', router);

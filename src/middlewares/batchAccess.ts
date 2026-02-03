@@ -12,7 +12,7 @@ import { ModuleProgressModel } from '../modules/Progress/moduleProgress.model';
 export const checkBatchEnrollment = async (req: any, res: Response, next: NextFunction) => {
     try {
         const { batchId } = req.params;
-        const userId = req.user?.userId;
+        const userId = req.user?.id;
 
         if (!userId) {
             throw new ApiError(StatusCodes.UNAUTHORIZED, 'User not authenticated');

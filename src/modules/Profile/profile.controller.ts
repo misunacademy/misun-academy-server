@@ -6,11 +6,11 @@ import  catchAsync  from '../../utils/catchAsync';
 import sendResponse from '../../utils/sendResponse';
 
 const createProfile = catchAsync(async (req: Request, res: Response) => {
-  if (!req.user?.userId) {
+  if (!req.user?.id) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'User not authenticated');
   }
 
-  const userId = req.user.userId;
+  const userId = req.user.id;
   const profileData = req.body;
 
   const result = await ProfileService.createProfile(userId, profileData);
@@ -24,11 +24,11 @@ const createProfile = catchAsync(async (req: Request, res: Response) => {
 });
 
 const getProfile = catchAsync(async (req: Request, res: Response) => {
-  if (!req.user?.userId) {
+  if (!req.user?.id) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'User not authenticated');
   }
 
-  const userId = req.user.userId;
+  const userId = req.user.id;
   const result = await ProfileService.getProfile(userId);
 
   sendResponse(res, {
@@ -40,11 +40,11 @@ const getProfile = catchAsync(async (req: Request, res: Response) => {
 });
 
 const updateProfile = catchAsync(async (req: Request, res: Response) => {
-  if (!req.user?.userId) {
+  if (!req.user?.id) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'User not authenticated');
   }
 
-  const userId = req.user.userId;
+  const userId = req.user.id;
   const updateData = req.body;
 
   const result = await ProfileService.updateProfile(userId, updateData);
@@ -58,11 +58,11 @@ const updateProfile = catchAsync(async (req: Request, res: Response) => {
 });
 
 const deleteProfile = catchAsync(async (req: Request, res: Response) => {
-  if (!req.user?.userId) {
+  if (!req.user?.id) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'User not authenticated');
   }
 
-  const userId = req.user.userId;
+  const userId = req.user.id;
   const result = await ProfileService.deleteProfile(userId);
 
   sendResponse(res, {
@@ -74,11 +74,11 @@ const deleteProfile = catchAsync(async (req: Request, res: Response) => {
 });
 
 const updateInterests = catchAsync(async (req: Request, res: Response) => {
-  if (!req.user?.userId) {
+  if (!req.user?.id) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'User not authenticated');
   }
 
-  const userId = req.user.userId;
+  const userId = req.user.id;
   const { interests } = req.body;
 
   if (!Array.isArray(interests)) {
@@ -96,11 +96,11 @@ const updateInterests = catchAsync(async (req: Request, res: Response) => {
 });
 
 const addInterest = catchAsync(async (req: Request, res: Response) => {
-  if (!req.user?.userId) {
+  if (!req.user?.id) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'User not authenticated');
   }
 
-  const userId = req.user.userId;
+  const userId = req.user.id;
   const { interest } = req.body;
 
   if (!interest || typeof interest !== 'string') {
@@ -118,11 +118,11 @@ const addInterest = catchAsync(async (req: Request, res: Response) => {
 });
 
 const removeInterest = catchAsync(async (req: Request, res: Response) => {
-  if (!req.user?.userId) {
+  if (!req.user?.id) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'User not authenticated');
   }
 
-  const userId = req.user.userId;
+  const userId = req.user.id;
   const { interest } = req.body;
 
   if (!interest || typeof interest !== 'string') {
@@ -140,11 +140,11 @@ const removeInterest = catchAsync(async (req: Request, res: Response) => {
 });
 
 const getCompleteStudentProfile = catchAsync(async (req: Request, res: Response) => {
-  if (!req.user?.userId) {
+  if (!req.user?.id) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'User not authenticated');
   }
 
-  const userId = req.user.userId;
+  const userId = req.user.id;
   const result = await ProfileService.getCompleteStudentProfile(userId);
 
   sendResponse(res, {
@@ -156,11 +156,11 @@ const getCompleteStudentProfile = catchAsync(async (req: Request, res: Response)
 });
 
 const syncAllUserEnrollmentsToProfile = catchAsync(async (req: Request, res: Response) => {
-  if (!req.user?.userId) {
+  if (!req.user?.id) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'User not authenticated');
   }
 
-  const userId = req.user.userId;
+  const userId = req.user.id;
   await ProfileService.syncAllUserEnrollmentsToProfile(userId);
 
   sendResponse(res, {

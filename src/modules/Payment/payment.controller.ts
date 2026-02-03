@@ -46,7 +46,7 @@ const updatePaymentWithEnrollStatus = catchAsync(async (req: Request, res: Respo
 });
 
 const getMyPayments = catchAsync(async (req: Request, res: Response) => {
-  const userId = req.user?.userId;
+  const userId = req.user?.id;
 
   if (!userId) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'User not authenticated');
@@ -447,9 +447,9 @@ export const sslCommerzWebhook = catchAsync(
  */
 const initiateCheckout = catchAsync(async (req: Request, res: Response) => {
   const { enrollmentId } = req.body;
-  const { userId } = req.user as any;
+  const { id } = req.user as any;
 
-  const enrollment = await EnrollmentModel.findOne({ enrollmentId, userId })
+  const enrollment = await EnrollmentModel.findOne({ enrollmentId, id })
     .populate('batchId');
 
   if (!enrollment) {
@@ -484,7 +484,7 @@ const initiateCheckout = catchAsync(async (req: Request, res: Response) => {
 const verifyManualPayment = catchAsync(async (req: Request, res: Response) => {
   const { transactionId } = req.params as { transactionId: string };
   const { approved } = req.body;
-  const adminId = req.user?.userId;
+  const adminId = req.user?.id;
 
   if (!adminId) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'Admin authentication required');

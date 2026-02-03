@@ -1,13 +1,12 @@
 import express from 'express';
 import { ContentController } from './content.controller';
-import auth from '../../middlewares/auth';
+import { requireAuth } from '../../middlewares/betterAuth';
 import { checkBatchEnrollment } from '../../middlewares/batchAccess';
-import { Role } from '../../types/role';
 
 const router = express.Router();
 
 // All routes require authentication and batch enrollment
-router.use(auth(Role.LEARNER, Role.ADMIN, Role.SUPERADMIN));
+router.use(requireAuth);
 
 // Get modules for a batch
 router.get(

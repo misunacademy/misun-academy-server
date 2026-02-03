@@ -1,7 +1,6 @@
 import express from 'express';
 import { SettingsController } from './settings.controller';
-import auth from '../../middlewares/auth';
-import { Role } from '../../types/role';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
 
 const router = express.Router();
 
@@ -9,7 +8,8 @@ router.get('/', SettingsController.getSettings);
 
 router.patch(
   '/',
-  auth(Role.ADMIN, Role.SUPERADMIN,),
+  requireAuth,
+  requireAdmin,
   SettingsController.updateSettings
 );
 

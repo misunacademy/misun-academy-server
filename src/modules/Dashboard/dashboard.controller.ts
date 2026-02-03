@@ -34,8 +34,8 @@ const getUserStats = catchAsync(async (req: Request, res: Response) => {
 });
 
 const getStudentDashboard = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
-    const result = await DashboardService.getStudentDashboard(userId);
+    const { id } = req.user as any;
+    const result = await DashboardService.getStudentDashboard(id);
     sendResponse(res, {
         statusCode: 200,
         success: true,

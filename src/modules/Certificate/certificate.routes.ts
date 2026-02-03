@@ -1,7 +1,6 @@
 import express from 'express';
 import { CertificateController } from './certificate.controller';
-import auth from '../../middlewares/auth';
-import { Role } from '../../types/role';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
 
 const router = express.Router();
 
@@ -11,51 +10,55 @@ router.get('/verify/:certificateId', CertificateController.verifyCertificate);
 // Student routes - request certificate
 router.post(
     '/request/:enrollmentId',
-    auth(Role.LEARNER),
+    requireAuth,
     CertificateController.requestCertificate
 );
 
 // Authenticated routes - view certificates
 router.get(
     '/my-certificates',
-    auth(Role.LEARNER, Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
     CertificateController.getMyCertificates
 );
 
 router.get(
     '/enrollment/:enrollmentId',
-    auth(Role.LEARNER, Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
     CertificateController.getCertificate
 );
 
 router.get(
     '/enrollment/:enrollmentId/eligibility',
-    auth(Role.LEARNER, Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
     CertificateController.checkEligibility
 );
 
 // Admin routes - manage certificates
 router.get(
     '/pending',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     CertificateController.getPendingCertificates
 );
 
 router.post(
     '/approve/:certificateId',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     CertificateController.approveCertificate
 );
 
 router.post(
     '/issue/:enrollmentId',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     CertificateController.issueCertificate
 );
 
 router.put(
     '/revoke/:certificateId',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     CertificateController.revokeCertificate
 );
 

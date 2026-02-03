@@ -1,12 +1,11 @@
 import express from 'express';
-import auth from '../../middlewares/auth';
-import { Role } from '../../types/role';
+import { requireAuth } from '../../middlewares/betterAuth';
 import { CourseEnrollmentController } from './courseEnrollment.controller';
 
 const router = express.Router();
 
 // All routes require learner authentication
-router.use(auth(Role.LEARNER, Role.ADMIN, Role.SUPERADMIN));
+router.use(requireAuth);
 
 // Get course progress
 router.get('/:courseId/progress', CourseEnrollmentController.getCourseProgress);

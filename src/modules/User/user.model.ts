@@ -8,7 +8,7 @@ const userSchema = new Schema<IUserDocument>(
     {
         name: { type: String, required: true },
         email: { type: String, required: true, unique: true, lowercase: true },
-        password: { type: String, required: true, select: false },
+        password: { type: String, select: false }, // Optional for OAuth users
         role: {
             type: String,
             enum: Object.values(Role),
@@ -16,11 +16,7 @@ const userSchema = new Schema<IUserDocument>(
             required: true,
         },
         image: { type: String },
-        emailVerified: { type: Boolean, default: false },
-        emailVerificationToken: { type: String, select: false },
-        emailVerificationExpiry: { type: Date, select: false },
-        passwordResetToken: { type: String, select: false },
-        passwordResetExpiry: { type: Date, select: false },
+        emailVerified: { type: Date, default: null }, // Better Auth uses Date, null means not verified
         avatar: { type: String },
         phone: { type: String },
         address: { type: String },
@@ -50,8 +46,9 @@ userSchema.pre('save', async function (next) {
     next();
 });
 
-// Compare password method
+// Compare password method (for backwards compatibility, though Better Auth handles this)
 userSchema.methods.comparePassword = async function (password: string): Promise<boolean> {
+    if (!this.password) return false;
     return await bcrypt.compare(password, this.password);
 };
 

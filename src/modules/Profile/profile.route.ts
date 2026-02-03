@@ -1,6 +1,6 @@
 import express from 'express';
 import { ProfileController } from './profile.controller';
-import auth from '../../middlewares/auth';
+import { requireAuth } from '../../middlewares/betterAuth';
 import validateRequest from '../../middlewares/validateRequest';
 import {
   createProfileSchema,
@@ -13,7 +13,7 @@ import {
 const router = express.Router();
 
 // All profile routes require authentication
-router.use(auth());
+router.use(requireAuth);
 
 // Profile CRUD operations
 router.post('/', validateRequest(createProfileSchema), ProfileController.createProfile);

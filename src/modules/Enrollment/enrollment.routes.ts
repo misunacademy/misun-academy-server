@@ -1,45 +1,46 @@
 import express from 'express';
 import { EnrollmentController } from './enrollment.controller';
-import auth from '../../middlewares/auth';
-import { Role } from '../../types/role';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
 
 const router = express.Router();
 
 // Learner routes
 router.post(
     '/',
-    auth(Role.LEARNER, Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
     EnrollmentController.initiateEnrollment
 );
 
 router.post(
     '/manual',
-    auth(Role.LEARNER, Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
     EnrollmentController.enrollWithManualPayment
 );
 
 router.get(
     '/me',
-    auth(Role.LEARNER, Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
     EnrollmentController.getMyEnrollments
 );
 
 router.get(
     '/:enrollmentId',
-    auth(Role.LEARNER, Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
     EnrollmentController.getEnrollmentDetails
 );
 
 // Admin routes
 router.get(
     '/',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     EnrollmentController.getAllEnrollments
 );
 
 router.put(
     '/:enrollmentId/status',
-    auth(Role.ADMIN, Role.SUPERADMIN),
+    requireAuth,
+    requireAdmin,
     EnrollmentController.updateEnrollmentStatus
 );
 

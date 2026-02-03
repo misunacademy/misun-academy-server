@@ -5,8 +5,8 @@ import sendResponse from '../../utils/sendResponse';
 import { CourseService } from './course.service';
 
 const createCourse = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
-    const courseData = { ...req.body, createdBy: userId };
+    const { id } = req.user as any;
+    const courseData = { ...req.body, createdBy: id };
     const course = await CourseService.createCourse(courseData);
 
     sendResponse(res, {

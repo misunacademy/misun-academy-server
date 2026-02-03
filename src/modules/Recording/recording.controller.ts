@@ -6,7 +6,7 @@ import { RecordingService } from './recording.service';
 
 // Admin: Create recording
 const createRecording = catchAsync(async (req: Request, res: Response) => {
-    const userId = (req as any).user.userId;
+    const userId = (req as any).user.id;
     const recording = await RecordingService.createRecording(req.body, userId);
 
     sendResponse(res, {
@@ -66,7 +66,7 @@ const getBatchRecordings = catchAsync(async (req: Request, res: Response) => {
 
 // Student: Get all recordings for all enrolled batches
 const getStudentRecordings = catchAsync(async (req: Request, res: Response) => {
-    const userId = (req as any).user.userId;
+    const userId = (req as any).user.id;
     const recordings = await RecordingService.getStudentRecordings(userId);
 
     sendResponse(res, {

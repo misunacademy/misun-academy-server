@@ -8,10 +8,10 @@ import { CourseEnrollmentService } from './courseEnrollment.service';
  * Get course progress for the authenticated user
  */
 const getCourseProgress = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { courseId } = req.params as { courseId: string };
 
-    const progress = await CourseEnrollmentService.getCourseProgress(userId, courseId);
+    const progress = await CourseEnrollmentService.getCourseProgress(id, courseId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -25,11 +25,11 @@ const getCourseProgress = catchAsync(async (req: Request, res: Response) => {
  * Complete a lesson for the authenticated user
  */
 const completeLesson = catchAsync(async (req: Request, res: Response) => {
-    const { userId } = req.user as any;
+    const { id } = req.user as any;
     const { courseId } = req.params;
     const { moduleId, lessonId } = req.body;
 
-    const result = await CourseEnrollmentService.completeLesson(userId, courseId as string, moduleId, lessonId);
+    const result = await CourseEnrollmentService.completeLesson(id, courseId as string, moduleId, lessonId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
