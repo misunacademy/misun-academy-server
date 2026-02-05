@@ -5,7 +5,7 @@ import { PaymentRoutes } from '../modules/Payment/payment.routes';
 import { DashboardRoutes } from '../modules/Dashboard/dashboard.routes';
 import { CourseRoutes } from '../modules/Course/course.routes';
 import { ContentRoutes } from '../modules/Content/content.routes';
-import BetterAuthRoutes from './betterAuth.routes';
+// BetterAuthRoutes moved to app.ts (must be before express.json())
 import { EnrollmentRoutes } from '../modules/Enrollment/enrollment.routes';
 import { CourseEnrollmentRoutes } from '../modules/Enrollment/courseEnrollment.routes';
 import { InstructorRoutes } from '../modules/Instructor/instructor.routes';
@@ -22,10 +22,7 @@ import { SettingsRoutes } from '../modules/Settings/settings.routes';
 const router = express.Router();
 
 const moduleRoutes = [
-    {
-        path: '/auth',
-        route: BetterAuthRoutes,
-    },
+    // Better Auth route is now mounted directly in app.ts before express.json()
     {
         path: '/admin',
         route: AdminAuthRoutes,

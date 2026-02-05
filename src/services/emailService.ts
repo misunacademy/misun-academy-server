@@ -282,7 +282,14 @@ export const sendVerificationEmail = async (email: string, name: string, token: 
 };
 
 export const sendPasswordResetEmail = async (email: string, name: string, token: string) => {
+    console.log('[EmailService] 📧 Preparing password reset email');
+    console.log('[EmailService] Recipient:', email);
+    console.log('[EmailService] Name:', name);
+    console.log('[EmailService] Token (first 15):', token.substring(0, 15) + '...');
+    
     const link = `${env.FRONTEND_URL}/reset-password?token=${token}`;
+    console.log('[EmailService] Reset link:', link);
+    
     const html = getEmailTemplate(`
         <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);">
             <h1>Reset Password</h1>
@@ -299,11 +306,13 @@ export const sendPasswordResetEmail = async (email: string, name: string, token:
         </div>
     `, "#ef4444");
 
+    console.log('[EmailService] Queueing email...');
     await queueEmail(email, 'Reset Password Request', html, {
         priority: 'high',
         eventType: 'reset_pass',
         eventId: token
     });
+    console.log('[EmailService] ✅ Email queued successfully');
 };
 
 // --- PAYMENTS & ENROLLMENT ---

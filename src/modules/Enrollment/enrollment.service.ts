@@ -1,6 +1,7 @@
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../../errors/ApiError';
 import { EnrollmentModel } from './enrollment.model';
+import { EnrollmentCounterModel } from './enrollmentCounter.model';
 import { BatchModel } from '../Batch/batch.model';
 import { BatchStatus, EnrollmentStatus } from '../../types/common';
 import { ModuleModel } from '../Module/module.model';
@@ -17,13 +18,25 @@ import { ProfileService } from '../Profile/profile.service';
 /**
  * Generate unique enrollment ID
  */
+// const generateEnrollmentId = async (batch: string = '6'): Promise<string> => {
+//     const year = new Date().getFullYear();
+//     const count = await EnrollmentModel.countDocuments();
+//     const paddedCount = String(count + 1).padStart(5, '0');
+//     return `MA-${batch}${year}${paddedCount}`;
+// };
 const generateEnrollmentId = async (batch: string = '6'): Promise<string> => {
     const year = new Date().getFullYear();
-    const count = await EnrollmentModel.countDocuments();
-    const paddedCount = String(count + 1).padStart(5, '0');
+    
+    // Use findByIdAndUpdate for atomic increment per batch
+    const counter = await EnrollmentCounterModel.findByIdAndUpdate(
+        { _id: batch }, // Counter per batch
+        { $inc: { count: 1 } },
+        { new: true, upsert: true }
+    );
+    
+    const paddedCount = String(counter.count).padStart(5, '0');
     return `MA-${batch}${year}${paddedCount}`;
 };
-
 /**
  * Generate a unique transaction ID for payments
  * Format: TXN-{timestamp}-{random}

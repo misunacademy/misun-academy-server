@@ -73,6 +73,13 @@ app.use(helmet({
 }));
 app.use(morgan('dev'));         // Logs HTTP requests for better monitoring
 app.use(compression());         // Compresses response bodies for faster delivery
+
+// ⚠️ IMPORTANT: Better Auth routes MUST be mounted BEFORE express.json()
+// to prevent client API from hanging. See: https://www.better-auth.com/docs/integrations/express
+import BetterAuthRoutes from './routes/betterAuth.routes';
+app.use('/api/v1/auth', BetterAuthRoutes);
+
+// Now safe to apply express.json() for other routes
 app.use(express.urlencoded({ extended: true })); // FOR FORM DATA
 app.use(express.json()); // FOR JSON (not needed by SSLCommerz)
 
@@ -82,18 +89,23 @@ app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 // Stricter Rate Limiter for Auth Routes (prevents brute force attacks)
 const authRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // Limit each IP to 5 requests per windowMs
+    max: 10, // Limit each IP to 10 requests per windowMs (more reasonable)
     message: 'Too many authentication attempts, please try again after 15 minutes',
     standardHeaders: true,
     legacyHeaders: false,
 });
 
-app.use('/api/v1/auth/sign-in', authRateLimiter);
-app.use('/api/v1/auth/sign-up', authRateLimiter);
+// Apply to Better Auth endpoints (note: these are already mounted above)
+app.use('/api/v1/auth/sign-in/email', authRateLimiter);
+app.use('/api/v1/auth/sign-up/email', authRateLimiter);
 app.use('/api/v1/auth/forget-password', authRateLimiter);
 app.use('/api/v1/auth/reset-password', authRateLimiter);
+app.use('/api/v1/auth/callback/google', authRateLimiter);
+app.use('/api/v1/auth/reset-password', authRateLimiter);
+app.use('/api/v1/auth/forget-password', authRateLimiter);
+app.use('/api/v1/auth/send-verification-email', authRateLimiter);
 
-// Routes
+// Routes (Better Auth already mounted above)
 app.use('/api/v1', router);
 
 // Default route for testing
