@@ -74,7 +74,6 @@ app.use(helmet({
 app.use(morgan('dev'));         // Logs HTTP requests for better monitoring
 app.use(compression());         // Compresses response bodies for faster delivery
 
-// ⚠️ IMPORTANT: Better Auth routes MUST be mounted BEFORE express.json()
 // to prevent client API from hanging. See: https://www.better-auth.com/docs/integrations/express
 import BetterAuthRoutes from './routes/betterAuth.routes';
 app.use('/api/v1/auth', BetterAuthRoutes);
