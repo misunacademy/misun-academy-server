@@ -8,6 +8,7 @@ import { BatchModel } from "../Batch/batch.model";
 import { EnrollmentStatus, UserStatus } from "../../types/common";
 import ApiError from "../../errors/ApiError";
 import { StatusCodes } from "http-status-codes";
+import { sendEnrollmentReminderEmail, sendNewsUpdateEmail } from "../../services/emailService";
 
 const loginUser = catchAsync(async (req: Request, res: Response) => {
     const email = req.body.email;
@@ -281,6 +282,94 @@ const deleteUser = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+/**
+ * Send enrollment reminder to registered but not enrolled users
+ * POST /api/v1/admin/send-enrollment-reminder
+ */
+const sendEnrollmentReminder = catchAsync(async (req: Request, res: Response) => {
+    // Find users who are registered but not enrolled in any active/completed course
+    const enrolledUserIds = await EnrollmentModel.distinct('userId', {
+        status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] }
+    });
+
+    const nonEnrolledUsers = await UserModel.find({
+        _id: { $nin: enrolledUserIds },
+        status: UserStatus.Active,
+        emailVerified: { $ne: null }, // Only send to verified emails
+        role: 'learner' // Only send to learners, not admins
+    }).select('name email').lean();
+
+    if (nonEnrolledUsers.length === 0) {
+        return sendResponse(res, {
+            statusCode: 200,
+            success: true,
+            message: 'No non-enrolled users found',
+            data: { count: 0 },
+        });
+    }
+
+    // Queue emails for all non-enrolled users
+    const emailPromises = nonEnrolledUsers.map((user: any) =>
+        sendEnrollmentReminderEmail(user.email, user.name)
+    );
+
+    await Promise.all(emailPromises);
+
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: `Enrollment reminder emails queued for ${nonEnrolledUsers.length} users`,
+        data: { count: nonEnrolledUsers.length },
+    });
+});
+
+/**
+ * Send news and updates to all enrolled students
+ * POST /api/v1/admin/send-news-update
+ * Body: { subject: string, message: string }
+ */
+const sendNewsUpdate = catchAsync(async (req: Request, res: Response) => {
+    const { subject, message } = req.body;
+
+    if (!subject || !message) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Subject and message are required');
+    }
+
+    // Find all users with active or completed enrollments
+    const enrolledUserIds = await EnrollmentModel.distinct('userId', {
+        status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] }
+    });
+
+    const enrolledUsers = await UserModel.find({
+        _id: { $in: enrolledUserIds },
+        status: UserStatus.Active,
+        emailVerified: { $ne: null } // Only send to verified emails
+    }).select('name email').lean();
+
+    if (enrolledUsers.length === 0) {
+        return sendResponse(res, {
+            statusCode: 200,
+            success: true,
+            message: 'No enrolled users found',
+            data: { count: 0 },
+        });
+    }
+
+    // Queue emails for all enrolled users
+    const emailPromises = enrolledUsers.map((user: any) =>
+        sendNewsUpdateEmail(user.email, user.name, subject, message)
+    );
+
+    await Promise.all(emailPromises);
+
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: `News update emails queued for ${enrolledUsers.length} enrolled students`,
+        data: { count: enrolledUsers.length },
+    });
+});
+
 export const AdminAuthController = {
     loginUser,
     getAllUsers,
@@ -289,4 +378,6 @@ export const AdminAuthController = {
     updateUser,
     updateUserStatus,
     deleteUser,
+    sendEnrollmentReminder,
+    sendNewsUpdate,
 };

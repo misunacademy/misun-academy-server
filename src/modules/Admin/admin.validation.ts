@@ -14,3 +14,10 @@ export const loginValidationSchema = z.object({
         password: z.string().min(6, { message: 'Password must be at least 8 characters' }),
     }),
 });
+
+export const sendNewsUpdateSchema = z.object({
+    body: z.object({
+        subject: z.string().min(1, { message: 'Subject is required' }).max(200, { message: 'Subject must be less than 200 characters' }),
+        message: z.string().min(1, { message: 'Message is required' }),
+    }),
+});

@@ -526,3 +526,73 @@ export const sendWaitingPaymentVerificationEmail = async (student: any, courseNa
     `, "#f59e0b");
     await queueEmail(student.email, 'Payment Verification Pending', html, { eventType: 'payment_verification', eventId: transactionId });
 };
+
+// --- ADMIN BULK EMAILS ---
+
+/**
+ * Send enrollment reminder to registered but not enrolled users
+ */
+export const sendEnrollmentReminderEmail = async (email: string, name: string) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);">
+            <h1>📚 Start Your Learning Journey!</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${name}</strong>,</p>
+            <p>We noticed you registered with Misun Academy but haven't enrolled in any course yet.</p>
+            
+            <div class="highlight-box" style="border-color: #8b5cf6;">
+                <h3 style="color: #8b5cf6; margin-top: 0;">Why Choose Misun Academy?</h3>
+                <ul style="margin: 10px 0; padding-left: 20px;">
+                    <li>Industry-standard curriculum</li>
+                    <li>Expert instructors with real-world experience</li>
+                    <li>Hands-on projects and assignments</li>
+                    <li>Lifetime access to course materials</li>
+                    <li>Certificate upon completion</li>
+                </ul>
+            </div>
+            
+            <p>Don't miss out on this opportunity to upskill yourself and advance your career!</p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="${env.FRONTEND_URL}/courses" class="button" style="background: #8b5cf6;">Browse Courses</a>
+            </div>
+            
+            <p style="font-size: 14px; color: #666;">Have questions? Feel free to reach out to us at <a href="mailto:misunacademybd@gmail.com">misunacademybd@gmail.com</a></p>
+        </div>
+    `, "#8b5cf6");
+
+    await queueEmail(email, 'Complete Your Enrollment - Misun Academy', html, { 
+        priority: 'normal',
+        eventType: 'enrollment_reminder'
+    });
+};
+
+/**
+ * Send news and updates to all enrolled students
+ */
+export const sendNewsUpdateEmail = async (email: string, name: string, subject: string, message: string) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
+            <h1>📢 ${subject}</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${name}</strong>,</p>
+            
+            <div style="margin: 30px 0; font-size: 16px; line-height: 1.8;">
+                ${message}
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="${env.FRONTEND_URL}/dashboard/student" class="button" style="background: #3b82f6;">Go to Dashboard</a>
+            </div>
+            
+            <p style="font-size: 14px; color: #666;">Stay tuned for more updates!</p>
+        </div>
+    `, "#3b82f6");
+
+    await queueEmail(email, subject, html, { 
+        priority: 'normal',
+        eventType: 'news_update'
+    });
+};

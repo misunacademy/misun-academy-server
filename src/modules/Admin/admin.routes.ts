@@ -1,6 +1,6 @@
 import express from 'express';
 import validateRequest from '../../middlewares/validateRequest';
-import { loginValidationSchema } from './admin.validation';
+import { loginValidationSchema, sendNewsUpdateSchema } from './admin.validation';
 import { AdminAuthController } from './admin.controller';
 import { requireAuth, requireAdmin, requireSuperAdmin, requireRole } from '../../middlewares/betterAuth';
 import { Role } from '../../types/role';
@@ -55,6 +55,22 @@ router.delete(
     requireAuth,
     requireSuperAdmin,  // Only SuperAdmin can delete
     AdminAuthController.deleteUser
+);
+
+// Email management routes
+router.post(
+    '/send-enrollment-reminder',
+    requireAuth,
+    requireAdmin,
+    AdminAuthController.sendEnrollmentReminder
+);
+
+router.post(
+    '/send-news-update',
+    requireAuth,
+    requireAdmin,
+    validateRequest(sendNewsUpdateSchema),
+    AdminAuthController.sendNewsUpdate
 );
 
 export const AdminAuthRoutes = router;
