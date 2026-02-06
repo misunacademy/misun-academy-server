@@ -28,8 +28,8 @@ export const initializeAuth = () => {
     // Redirect to client after OAuth
     redirects: {
       // After successful OAuth, redirect to client's callback page
-      afterSignIn: `${process.env.FRONTEND_URL || process.env.CLIENT_URL}/auth/callback`,
-      afterSignUp: `${process.env.FRONTEND_URL || process.env.CLIENT_URL}/auth/callback`,
+      afterSignIn: `${process.env.FRONTEND_URL!}/auth/callback`,
+      afterSignUp: `${process.env.FRONTEND_URL!}/auth/callback`,
     },
     
     // Enable experimental features for better performance
@@ -45,7 +45,6 @@ export const initializeAuth = () => {
       sendResetPassword: async ({ user, url }: { user: any; url: string }) => {
         try {
           // Extract token from the Better Auth generated URL
-          // Better Auth sends URL like: http://localhost:5000/api/v1/auth/reset-password/TOKEN?callbackURL=...
           // The token is in the path, not query params
           const parsed = new URL(url);
           const pathParts = parsed.pathname.split('/');
