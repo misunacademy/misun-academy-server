@@ -411,8 +411,9 @@ const enrollWithManualPayment = async (
             batchId,
             transactionId: paymentTransactionId,
             // idempotencyKey: paymentTransactionId,
-            amount: batch.price,
-            currency: batch.currency || 'BDT',
+            // PhonePe manual payments use a fixed INR 3,000 amount per product decision
+            amount: 3000,
+            currency: 'BDT',
             status: Status.Review,
             method: 'PhonePay',
             gatewayResponse: {

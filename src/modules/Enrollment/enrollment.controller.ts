@@ -5,6 +5,7 @@ import sendResponse from '../../utils/sendResponse';
 import { EnrollmentService } from './enrollment.service';
 import ApiError from '../../errors/ApiError';
 import mongoose from 'mongoose';
+import { EnrollmentStatus } from '../../types/common';
 import { sendWaitingPaymentVerificationEmail } from '../../services/emailService';
 import { UserModel } from '../User/user.model';
 
@@ -128,9 +129,18 @@ const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
 
     // Match stage for basic filters
     const matchStage: any = {};
+
+    // Only include enrollments that have a generated enrollmentId and are Active
+    matchStage.enrollmentId = { $exists: true, $ne: null };
+const requestedStatus =
+  typeof status === 'string' && Object.values(EnrollmentStatus).includes(status as EnrollmentStatus)
+    ? (status as EnrollmentStatus)
+    : EnrollmentStatus.Active;
+
+matchStage.status = requestedStatus;
     if (batchId) matchStage.batchId = new mongoose.Types.ObjectId(batchId as string);
-    if (status) matchStage.status = status;
-    
+    // Intentionally ignore incoming `status` query param since this endpoint should return only active enrollments
+
     if (Object.keys(matchStage).length > 0) {
         pipeline.push({ $match: matchStage });
     }
