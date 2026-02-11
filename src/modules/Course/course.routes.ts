@@ -1,6 +1,6 @@
 import express from 'express';
 import { CourseController } from './course.controller';
-import { requireAuth, requireSuperAdmin, requireInstructor, requireRole } from '../../middlewares/betterAuth';
+import { requireAuth, requireAdmin, requireSuperAdmin, requireInstructor, requireRole } from '../../middlewares/betterAuth';
 import { Role } from '../../types/role';
 import validateRequest from '../../middlewares/validateRequest';
 import { createCourseSchema, updateCourseSchema } from '../../validations/course.validation';
@@ -12,11 +12,11 @@ router.get('/', CourseController.getAllCourses);
 router.get('/slug/:slug', CourseController.getCourseBySlug);
 router.get('/:id', CourseController.getCourseById);
 
-// Admin and Lead Instructor routes (instructors can edit courses they teach)
+// Admin routes (only Admins and SuperAdmins can create and edit courses)
 router.post(
     '/',
     requireAuth,
-    requireInstructor,
+    requireAdmin,
     validateRequest(createCourseSchema),
     CourseController.createCourse
 );
@@ -24,16 +24,16 @@ router.post(
 router.put(
     '/:id',
     requireAuth,
-    requireInstructor,
+    requireAdmin,
     validateRequest(updateCourseSchema),
     CourseController.updateCourse
 );
 
-// Only SuperAdmins can delete courses
+// Admins and SuperAdmins can delete courses
 router.delete(
     '/:id',
     requireAuth,
-    requireSuperAdmin,
+    requireAdmin,
     CourseController.deleteCourse
 );
 
