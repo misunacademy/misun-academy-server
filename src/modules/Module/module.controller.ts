@@ -2,9 +2,7 @@ import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync';
 import sendResponse from '../../utils/sendResponse';
-import { ModuleModel } from './module.model';
-import { LessonModel } from '../Lesson/lesson.model';
-import ApiError from '../../errors/ApiError';
+import { ModuleService } from './module.service';
 
 /**
  * Create a new module for a course
@@ -13,29 +11,7 @@ const createModule = catchAsync(async (req: Request, res: Response) => {
     const { courseId } = req.params;
     const moduleData = req.body;
 
-    // Check if order index exists
-    if (moduleData.orderIndex !== undefined) {
-        const existingModule = await ModuleModel.findOne({
-            courseId,
-            orderIndex: moduleData.orderIndex,
-        });
-
-        if (existingModule) {
-            throw new ApiError(
-                StatusCodes.CONFLICT,
-                'Module with this order index already exists'
-            );
-        }
-    } else {
-        // Auto-assign order index
-        const maxOrder = await ModuleModel.findOne({ courseId }).sort({ orderIndex: -1 });
-        moduleData.orderIndex = maxOrder ? maxOrder.orderIndex + 1 : 0;
-    }
-
-    const module = await ModuleModel.create({
-        ...moduleData,
-        courseId,
-    });
+    const module = await ModuleService.createModule(courseId, moduleData);
 
     sendResponse(res, {
         statusCode: StatusCodes.CREATED,
@@ -50,29 +26,15 @@ const createModule = catchAsync(async (req: Request, res: Response) => {
  */
 const getCourseModules = catchAsync(async (req: Request, res: Response) => {
     const { courseId } = req.params;
-    const { status } = req.query;
+    const { status } = req.query as { status?: string };
 
-    const query: any = { courseId };
-    if (status) query.status = status;
-
-    const modules = await ModuleModel.find(query).sort({ orderIndex: 1 });
-
-    // Get lesson count for each module
-    const modulesWithLessonCount = await Promise.all(
-        modules.map(async (module) => {
-            const lessonCount = await LessonModel.countDocuments({ moduleId: module._id });
-            return {
-                ...module.toObject(),
-                lessonCount,
-            };
-        })
-    );
+    const modules = await ModuleService.getCourseModules(courseId, status);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
         message: 'Modules retrieved successfully',
-        data: modulesWithLessonCount,
+        data: modules,
     });
 });
 
@@ -82,22 +44,13 @@ const getCourseModules = catchAsync(async (req: Request, res: Response) => {
 const getModuleById = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params;
 
-    const module = await ModuleModel.findById(moduleId);
-
-    if (!module) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
-    }
-
-    const lessonCount = await LessonModel.countDocuments({ moduleId: module._id });
+    const module = await ModuleService.getModuleById(moduleId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
         message: 'Module retrieved successfully',
-        data: {
-            ...module.toObject(),
-            lessonCount,
-        },
+        data: module,
     });
 });
 
@@ -108,30 +61,7 @@ const updateModule = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params;
     const updateData = req.body;
 
-    const module = await ModuleModel.findById(moduleId);
-
-    if (!module) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
-    }
-
-    // Check order index conflict
-    if (updateData.orderIndex !== undefined && updateData.orderIndex !== module.orderIndex) {
-        const existingModule = await ModuleModel.findOne({
-            courseId: module.courseId,
-            orderIndex: updateData.orderIndex,
-            _id: { $ne: moduleId },
-        });
-
-        if (existingModule) {
-            throw new ApiError(
-                StatusCodes.CONFLICT,
-                'Module with this order index already exists'
-            );
-        }
-    }
-
-    Object.assign(module, updateData);
-    await module.save();
+    const module = await ModuleService.updateModule(moduleId, updateData);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -147,23 +77,7 @@ const updateModule = catchAsync(async (req: Request, res: Response) => {
 const deleteModule = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params;
 
-    const module = await ModuleModel.findById(moduleId);
-
-    if (!module) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
-    }
-
-    // Check if module has lessons
-    const lessonCount = await LessonModel.countDocuments({ moduleId });
-
-    if (lessonCount > 0) {
-        throw new ApiError(
-            StatusCodes.BAD_REQUEST,
-            'Cannot delete module with existing lessons. Delete lessons first.'
-        );
-    }
-
-    await ModuleModel.findByIdAndDelete(moduleId);
+    await ModuleService.deleteModule(moduleId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -178,20 +92,9 @@ const deleteModule = catchAsync(async (req: Request, res: Response) => {
  */
 const reorderModules = catchAsync(async (req: Request, res: Response) => {
     const { courseId } = req.params;
-    const { moduleOrders } = req.body; // Array of { moduleId, orderIndex }
+    const { moduleOrders } = req.body;
 
-    if (!Array.isArray(moduleOrders)) {
-        throw new ApiError(StatusCodes.BAD_REQUEST, 'moduleOrders must be an array');
-    }
-
-    // Update order indexes
-    await Promise.all(
-        moduleOrders.map(({ moduleId, orderIndex }: any) =>
-            ModuleModel.findByIdAndUpdate(moduleId, { orderIndex })
-        )
-    );
-
-    const modules = await ModuleModel.find({ courseId }).sort({ orderIndex: 1 });
+    const modules = await ModuleService.reorderModules(courseId, moduleOrders);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,

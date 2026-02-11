@@ -12,8 +12,6 @@
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
     "seed:courses": "ts-node src/scripts/seedCourses.ts",
     "seed:superAdmin": "ts-node src/scripts/seedsuperAdmin.ts",
     "migrate:emailVerification": "ts-node src/scripts/migrateEmailVerification.ts",

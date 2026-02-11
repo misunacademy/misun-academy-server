@@ -15,7 +15,7 @@ import { UserRoutes } from '../modules/User/user.routes';
 import { ModuleRoutes } from '../modules/Module/module.routes';
 import { LessonRoutes } from '../modules/Lesson/lesson.routes';
 import { RecordingRoutes } from '../modules/Recording/recording.routes';
-import { ProfileRoutes } from '../modules/Profile/profile.route';
+import { ProfileRoutes } from '../modules/Profile/profile.routes';
 import { SettingsRoutes } from '../modules/Settings/settings.routes';
 
 

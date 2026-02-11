@@ -67,7 +67,7 @@ const globalErrorHandler: ErrorRequestHandler = (
         success: false,
         message,
         errorMessages,
-        stack: env.NODE_ENV !== 'production' ? error?.stack : undefined,
+        stack: env.NODE_ENV === 'development' ? error?.stack : undefined,
     });
 };
 

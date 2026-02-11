@@ -18,12 +18,6 @@ router.get(
     PaymentController.getMyPayments
 );
 
-router.post(
-    '/checkout',
-    requireAuth,
-    PaymentController.initiateCheckout
-);
-
 // Admin routes
 router.get(
     '/history',

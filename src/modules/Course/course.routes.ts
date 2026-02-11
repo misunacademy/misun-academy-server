@@ -2,6 +2,8 @@ import express from 'express';
 import { CourseController } from './course.controller';
 import { requireAuth, requireSuperAdmin, requireInstructor, requireRole } from '../../middlewares/betterAuth';
 import { Role } from '../../types/role';
+import validateRequest from '../../middlewares/validateRequest';
+import { createCourseSchema, updateCourseSchema } from '../../validations/course.validation';
 
 const router = express.Router();
 
@@ -15,6 +17,7 @@ router.post(
     '/',
     requireAuth,
     requireInstructor,
+    validateRequest(createCourseSchema),
     CourseController.createCourse
 );
 
@@ -22,6 +25,7 @@ router.put(
     '/:id',
     requireAuth,
     requireInstructor,
+    validateRequest(updateCourseSchema),
     CourseController.updateCourse
 );
 

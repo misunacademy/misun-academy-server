@@ -445,38 +445,7 @@ export const sslCommerzWebhook = catchAsync(
 /**
  * Initiate payment checkout
  */
-const initiateCheckout = catchAsync(async (req: Request, res: Response) => {
-  const { enrollmentId } = req.body;
-  const { id } = req.user as any;
 
-  const enrollment = await EnrollmentModel.findOne({ enrollmentId, id })
-    .populate('batchId');
-
-  if (!enrollment) {
-    throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
-  }
-
-  if (enrollment.status !== EnrollmentStatus.Pending) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment is not pending payment');
-  }
-
-  const batch = enrollment.batchId as any;
-
-  // Create payment gateway URL
-  const paymentUrl = `/api/payments/checkout/${enrollmentId}`;
-
-  sendResponse(res, {
-    statusCode: StatusCodes.OK,
-    success: true,
-    message: 'Payment checkout initiated',
-    data: {
-      paymentUrl,
-      enrollmentId,
-      amount: batch.price,
-      currency: batch.currency,
-    },
-  });
-});
 
 /**
  * Admin: Verify manual payment
@@ -510,6 +479,5 @@ export const PaymentController = {
   checkPaymentStatus,
   getMyPayments,
   sslCommerzWebhook,
-  initiateCheckout,
   verifyManualPayment,
 }

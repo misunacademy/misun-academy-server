@@ -15,23 +15,26 @@ app.set("trust proxy", 1);
 
 let dbConnected = false;
 
-// Initialize database connection on first request (for Vercel serverless)
-app.use(async (req, res, next) => {
-    if (!dbConnected) {
-        try {
-            await connectDB();
-            console.log('✅ Database connected');
-            dbConnected = true;
-        } catch (error) {
-            console.error('❌ Database connection failed:', error);
-            return res.status(500).json({ 
-                success: false, 
-                message: 'Database connection failed' 
-            });
+// Initialize database connection on first request (ONLY for Vercel serverless)
+// For VPS/traditional deployment, DB is connected in server.ts before listening
+if (process.env.VERCEL) {
+    app.use(async (req, res, next) => {
+        if (!dbConnected) {
+            try {
+                await connectDB();
+                console.log('✅ Database connected (Vercel serverless)');
+                dbConnected = true;
+            } catch (error) {
+                console.error('❌ Database connection failed:', error);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Database connection failed'
+                });
+            }
         }
-    }
-    next();
-});
+        next();
+    });
+}
 
 // Middleware
 app.use(cors({
@@ -76,36 +79,67 @@ app.use(compression());         // Compresses response bodies for faster deliver
 
 // to prevent client API from hanging. See: https://www.better-auth.com/docs/integrations/express
 import BetterAuthRoutes from './routes/betterAuth.routes';
-app.use('/api/v1/auth', BetterAuthRoutes);
 
-// Now safe to apply express.json() for other routes
+// Enable body parsing BEFORE auth routes so Better Auth can read request body
 app.use(express.urlencoded({ extended: true })); // FOR FORM DATA
-app.use(express.json()); // FOR JSON (not needed by SSLCommerz)
-
-// Global Rate Limiter
-app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
+app.use(express.json()); // FOR JSON
 
 // Stricter Rate Limiter for Auth Routes (prevents brute force attacks)
-const authRateLimiter = rateLimit({
+// IMPORTANT: Apply BEFORE mounting auth routes
+// 1. Strict Rate Limiter for sensitive routes (Login, Signup, Password Reset)
+// Prevents brute force attacks
+const strictAuthLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 10, // Limit each IP to 10 requests per windowMs (more reasonable)
-    message: 'Too many authentication attempts, please try again after 15 minutes',
+    max: 20, // Limit to 20 requests per 15 mins (slightly relaxed from 15)
+    message: 'Too many login/signup attempts, please try again after 15 minutes',
     standardHeaders: true,
     legacyHeaders: false,
 });
 
-// Apply to Better Auth endpoints (note: these are already mounted above)
-app.use('/api/v1/auth/sign-in/email', authRateLimiter);
-app.use('/api/v1/auth/sign-up/email', authRateLimiter);
-app.use('/api/v1/auth/forget-password', authRateLimiter);
-app.use('/api/v1/auth/reset-password', authRateLimiter);
-app.use('/api/v1/auth/callback/google', authRateLimiter);
-app.use('/api/v1/auth/reset-password', authRateLimiter);
-app.use('/api/v1/auth/forget-password', authRateLimiter);
-app.use('/api/v1/auth/send-verification-email', authRateLimiter);
+// 2. General Rate Limiter for other auth routes (get-session, etc.)
+// Allows frequent polling/validation without blocking legitimate users
+const generalAuthLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 1000, // Generous limit for session checks
+    message: 'Too many auth requests, please try again later',
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Apply STRICT limiter to sensitive endpoints
+// Note: These prefixes match Better Auth's default paths
+app.use('/api/v1/auth/sign-in', strictAuthLimiter);
+app.use('/api/v1/auth/sign-up', strictAuthLimiter);
+app.use('/api/v1/auth/verify-email', strictAuthLimiter);
+app.use('/api/v1/auth/forget-password', strictAuthLimiter);
+app.use('/api/v1/auth/reset-password', strictAuthLimiter);
+app.use('/api/v1/auth/change-password', strictAuthLimiter);
+
+// Apply GENERAL limiter to all auth routes (acts as a baseline/fallback)
+// Since rate limiters call next(), requests to /sign-in will go through 
+// strictAuthLimiter -> generalAuthLimiter -> handler
+// This is fine as the strict limit will trigger first/fail first if exceeded.
+app.use('/api/v1/auth', generalAuthLimiter);
+
+// Mount Better Auth routes (inherits auth rate limiter above)
+app.use('/api/v1/auth', BetterAuthRoutes);
+
+// Now safe to apply express.json() for other routes
+// app.use(express.urlencoded({ extended: true })); // FOR FORM DATA
+// app.use(express.json()); // FOR JSON
+
+// API Rate Limiter (for non-auth routes)
+const apiRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 300, // Limit each IP to 300 requests per windowMs (approx 1 req/3sec)
+    message: 'Too many requests, please try again later',
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 
 // Routes (Better Auth already mounted above)
-app.use('/api/v1', router);
+// Apply rate limiter specifically to API routes
+app.use('/api/v1', apiRateLimiter, router);
 
 // Default route for testing
 app.get('/', (req, res) => {
