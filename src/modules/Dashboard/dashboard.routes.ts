@@ -1,6 +1,6 @@
 import express from 'express';
 import { DashboardController } from './dashboard.controller';
-import { requireAuth, requireAdmin, requireRole } from '../../middlewares/betterAuth';
+import { requireAuth, requireAdmin, requireEmployee } from '../../middlewares/betterAuth';
 import { Role } from '../../types/role';
 
 const router = express.Router();
@@ -35,5 +35,13 @@ router.get(
     DashboardController.getStudentDashboard
 );
 
+
+// Employee dashboard route
+router.get(
+    '/employee',
+    requireAuth,
+    requireEmployee,
+    DashboardController.getEmployeeDashboard
+);
 
 export const DashboardRoutes = router;

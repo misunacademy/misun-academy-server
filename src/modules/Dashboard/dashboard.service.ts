@@ -96,10 +96,10 @@ const getDashboardMetaData = async () => {
             $group: {
                 _id: "$batch._id",
                 batchTitle: { $first: "$batch.title" },
-                batchNumber: { 
-                    $first: { 
-                        $concat: ["Batch #", { $toString: "$batch.batchNumber" }] 
-                    } 
+                batchNumber: {
+                    $first: {
+                        $concat: ["Batch #", { $toString: "$batch.batchNumber" }]
+                    }
                 },
                 totalIncome: { $sum: "$amount" },
                 totalEnrollments: { $sum: 1 },
@@ -109,9 +109,9 @@ const getDashboardMetaData = async () => {
     ]);
 
     const [
-        totalEnrolled, 
-        batchWiseEnrolled, 
-        totalIncomeResult, 
+        totalEnrolled,
+        batchWiseEnrolled,
+        totalIncomeResult,
         dayWiseStats,
         courseWiseStats,
         batchWiseIncome
@@ -164,14 +164,14 @@ const getAdminDashboard = async () => {
     const totalUsers = await UserModel.countDocuments();
     const totalCourses = await CourseModel.countDocuments({ status: 'Published' });
     const totalBatches = await BatchModel.countDocuments();
-    const activeEnrollments = await EnrollmentModel.countDocuments({ 
-        status: EnrollmentStatus.Active 
+    const activeEnrollments = await EnrollmentModel.countDocuments({
+        status: EnrollmentStatus.Active
     });
 
     // Revenue stats (last 30 days)
     const revenueData = await PaymentModel.aggregate([
-        { 
-            $match: { 
+        {
+            $match: {
                 status: 'Success',
                 createdAt: { $gte: thirtyDaysAgo }
             }
@@ -189,8 +189,8 @@ const getAdminDashboard = async () => {
 
     // Enrollment trends (last 30 days)
     const enrollmentTrends = await EnrollmentModel.aggregate([
-        { 
-            $match: { 
+        {
+            $match: {
                 createdAt: { $gte: thirtyDaysAgo }
             }
         },
@@ -243,7 +243,7 @@ const getUserStats = async () => {
     const totalUsers = await UserModel.countDocuments();
     const activeUsers = await UserModel.countDocuments({ status: 'Active' });
     const suspendedUsers = await UserModel.countDocuments({ status: 'Suspended' });
-    
+
     const usersByRole = await UserModel.aggregate([
         {
             $group: {
@@ -267,9 +267,9 @@ const getUserStats = async () => {
  */
 const getStudentDashboard = async (userId: string) => {
     // Get student's enrollments
-    const enrollments = await EnrollmentModel.find({ 
+    const enrollments = await EnrollmentModel.find({
         userId,
-        status: EnrollmentStatus.Active 
+        status: EnrollmentStatus.Active
     })
         .populate({
             path: 'batchId',
@@ -278,7 +278,7 @@ const getStudentDashboard = async (userId: string) => {
         .sort({ createdAt: -1 });
 
     const enrolledCoursesCount = enrollments.length;
-    
+
     // Count completed courses (status could be 'Completed' if you have that)
     const completedCoursesCount = await EnrollmentModel.countDocuments({
         userId,
@@ -323,9 +323,46 @@ const getStudentDashboard = async (userId: string) => {
     };
 };
 
+
+/**
+ * Get employee dashboard data
+ */
+const getEmployeeDashboard = async (userId: string) => {
+    const { SalaryModel } = await import('../Employee/salary.model');
+    const { LeaveRequestModel } = await import('../Employee/leaveRequest.model');
+
+    const totalSalaryPaid = await SalaryModel.aggregate([
+        { $match: { employeeId: userId, status: 'Paid' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]);
+
+    const pendingLeaveCount = await LeaveRequestModel.countDocuments({
+        employeeId: userId,
+        status: 'Pending',
+    });
+
+    const approvedLeaveCount = await LeaveRequestModel.countDocuments({
+        employeeId: userId,
+        status: 'Approved',
+    });
+
+    const recentSalaries = await SalaryModel.find({ employeeId: userId })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .lean();
+
+    return {
+        totalSalaryPaid: totalSalaryPaid[0]?.total ?? 0,
+        pendingLeaveCount,
+        approvedLeaveCount,
+        recentSalaries,
+    };
+};
+
 export const DashboardService = {
     getDashboardMetaData,
     getAdminDashboard,
     getUserStats,
     getStudentDashboard,
+    getEmployeeDashboard,
 }

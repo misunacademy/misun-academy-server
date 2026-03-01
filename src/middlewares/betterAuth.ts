@@ -132,6 +132,16 @@ export const requireInstructor = requireRole(
 );
 
 /**
+ * Middleware to require EMPLOYEE role or higher (admin can also access)
+ */
+export const requireEmployee = requireRole(
+  Role.EMPLOYEE,
+  Role.ADMIN,
+  Role.SUPERADMIN
+);
+
+
+/**
  * Optional auth middleware - attaches user if session exists, but doesn't require it
  */
 export const optionalAuth = async (

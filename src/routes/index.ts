@@ -17,6 +17,7 @@ import { LessonRoutes } from '../modules/Lesson/lesson.routes';
 import { RecordingRoutes } from '../modules/Recording/recording.routes';
 import { ProfileRoutes } from '../modules/Profile/profile.routes';
 import { SettingsRoutes } from '../modules/Settings/settings.routes';
+import { EmployeeRoutes } from '../modules/Employee/employee.routes';
 
 
 const router = express.Router();
@@ -91,7 +92,10 @@ const moduleRoutes = [
         path: '/',
         route: UserRoutes,
     },
-
+    {
+        path: '/employee',
+        route: EmployeeRoutes,
+    },
 ];
 
 moduleRoutes.forEach(route => router.use(route.path, route.route));
