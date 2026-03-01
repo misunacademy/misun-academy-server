@@ -11,7 +11,8 @@ const getNextBatchNumber = async (courseId: string): Promise<number> => {
     const lastBatch = await BatchModel.findOne({ courseId })
         .sort({ batchNumber: -1 })
         .select('batchNumber');
-    return lastBatch ? lastBatch.batchNumber + 1 : 6;
+    // Start from 1 for any new course; increment from the last batch number for existing ones
+    return lastBatch ? lastBatch.batchNumber + 1 : 1;
 };
 
 export const BatchService = {
@@ -72,12 +73,15 @@ export const BatchService = {
      * Get current enrollment batch (where enrollment is open)
      */
     getCurrentEnrollmentBatch: async (courseId?: string) => {
+        console.log(courseId)
         const now = new Date();
         const query: any = {
             enrollmentEndDate: { $gte: now },
         };
 
-        if (courseId) query.courseId = courseId;
+        if (courseId){
+             query.courseId = courseId;
+            }
 
         const batch = await BatchModel.findOne(query)
             .populate('courseId')
@@ -142,7 +146,7 @@ export const BatchService = {
         if (newEnrollmentStartDate >= newEnrollmentEndDate) {
             throw new ApiError(StatusCodes.BAD_REQUEST, "Enrollment end date must be after enrollment start date");
         }
-console.log({ id, data })
+
         // Allow admin to extend end date even for running batches
         const updated = await BatchModel.findByIdAndUpdate(id, data, {
             new: true,

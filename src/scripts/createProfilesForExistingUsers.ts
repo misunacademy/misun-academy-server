@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import env from '../config/env';
-import { AuthModel } from '../modules/Auth/auth.model';
+import { UserModel } from '../modules/User/user.model';
 import { ProfileService } from '../modules/Profile/profile.service';
 
 dotenv.config();
@@ -12,7 +12,7 @@ export const createProfilesForExistingUsers = async () => {
         console.log('Connected to DB');
 
         // Find all users
-        const users = await AuthModel.find({}, '_id name email');
+        const users = await UserModel.find({}, '_id name email');
         console.log(`Found ${users.length} users`);
 
         let profilesCreated = 0;

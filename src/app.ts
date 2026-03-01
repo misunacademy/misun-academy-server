@@ -39,7 +39,7 @@ if (process.env.VERCEL) {
 // Middleware
 app.use(cors({
     origin: [
-        env.FRONTEND_URL,
+        env.FRONTEND_URL!,
         env.CLIENT_URL!,
         'http://localhost:3000' // Fallback for development
     ].filter(Boolean),
@@ -77,7 +77,7 @@ app.use(helmet({
 app.use(morgan('dev'));         // Logs HTTP requests for better monitoring
 app.use(compression());         // Compresses response bodies for faster delivery
 
-// to prevent client API from hanging. See: https://www.better-auth.com/docs/integrations/express
+// to prevent client API from hanging.
 import BetterAuthRoutes from './routes/betterAuth.routes';
 
 // Enable body parsing BEFORE auth routes so Better Auth can read request body
