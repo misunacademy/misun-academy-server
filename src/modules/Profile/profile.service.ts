@@ -16,7 +16,16 @@ const createProfile = async (userId: string, profileData: Partial<IProfile>) => 
 };
 
 const getProfile = async (userId: string) => {
-  const profile = await ProfileModel.findOne({ user: userId });
+  const profile = await ProfileModel.findOne({ user: userId })
+    .populate({path: 'user'})
+    .populate({
+      path: 'enrollments.courseId',
+      select: 'title thumbnailImage',
+    })
+    .populate({
+      path: 'enrollments.batchId',
+      select: 'batchName batchNumber price',
+    });
   return profile;
 };
 
@@ -86,12 +95,15 @@ const removeInterest = async (userId: string, interest: string) => {
  */
 const createOrUpdateProfileAfterEnrollment = async (
   userId: string,
-  enrollmentId: string
+  enrollmentId: string,
+  providedSession?: mongoose.ClientSession
 ): Promise<void> => {
-  const session = await mongoose.startSession();
+  const session = providedSession || await mongoose.startSession();
 
   try {
-    await session.startTransaction();
+    if (!providedSession) {
+      session.startTransaction();
+    }
 
     // Get enrollment details with batch and course info
     const enrollment = await EnrollmentModel.findOne({ enrollmentId })
@@ -161,12 +173,18 @@ const createOrUpdateProfileAfterEnrollment = async (
       await profile.save({ session });
     }
 
-    await session.commitTransaction();
+    if (!providedSession) {
+      await session.commitTransaction();
+    }
   } catch (error) {
-    await session.abortTransaction();
+    if (!providedSession) {
+      await session.abortTransaction();
+    }
     throw error;
   } finally {
-    session.endSession();
+    if (!providedSession) {
+      session.endSession();
+    }
   }
 };
 

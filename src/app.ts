@@ -39,9 +39,10 @@ if (process.env.VERCEL) {
 // Middleware
 app.use(cors({
     origin: [
-        env.FRONTEND_URL!,
-        env.CLIENT_URL!,
-        'http://localhost:3000' // Fallback for development
+        env.MA_FRONTEND_URL!,
+        env.EP_FRONTEND_URL!,
+        'http://localhost:3000', // Fallback for development
+        'http://localhost:3001'
     ].filter(Boolean),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

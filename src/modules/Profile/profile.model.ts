@@ -1,41 +1,29 @@
 import { Schema, model } from 'mongoose';
-import { IProfile, IProfileModel } from './profile.interface';
+import { IProfile, IProfileModel, IEnrollmentMapping } from './profile.interface';
 
-const enrollmentMappingSchema = new Schema({
-  enrollmentId: {
-    type: String,
-    required: true,
+const EnrollmentMappingSchema = new Schema<IEnrollmentMapping>(
+  {
+    enrollmentId: { type: String, required: true },
+    courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
+    batchId: { type: Schema.Types.ObjectId, ref: 'Batch', required: true },
+    status: { type: String, required: true },
+    enrolledAt: { type: Date, required: true },
+    completedAt: { type: Date },
+    certificateIssued: { type: Boolean, default: false },
+    certificateId: { type: String },
   },
-  courseId: {
-    type: Schema.Types.ObjectId,
-    ref: 'Course',
-    required: true,
+  { _id: false },
+);
+
+const EducationSchema = new Schema(
+  {
+    degree: { type: String, required: true },
+    institution: { type: String, required: true },
+    passingYear: { type: String, required: true },
+    result: { type: String },
   },
-  batchId: {
-    type: Schema.Types.ObjectId,
-    ref: 'Batch',
-    required: true,
-  },
-  status: {
-    type: String,
-    enum: ['pending', 'payment_pending', 'active', 'completed', 'cancelled', 'suspended'],
-    required: true,
-  },
-  enrolledAt: {
-    type: Date,
-    required: true,
-  },
-  completedAt: {
-    type: Date,
-  },
-  certificateIssued: {
-    type: Boolean,
-    default: false,
-  },
-  certificateId: {
-    type: String,
-  },
-}, { _id: false });
+  { _id: true }
+);
 
 const profileSchema = new Schema<IProfile>(
   {
@@ -61,6 +49,9 @@ const profileSchema = new Schema<IProfile>(
     },
     company: { type: String },
     linkedinUrl: { type: String },
+
+    // Education
+    education: [EducationSchema],
 
     // Learning Information
     skillLevel: {
@@ -88,7 +79,7 @@ const profileSchema = new Schema<IProfile>(
     profileVisibility: { type: Boolean, default: true },
 
     // Enrollment & Course Mapping (Centralized Student Data)
-    enrollments: [enrollmentMappingSchema],
+    enrollments: [EnrollmentMappingSchema],
   },
   {
     timestamps: true,

@@ -70,25 +70,44 @@ export const BatchService = {
     },
 
     /**
-     * Get current enrollment batch (where enrollment is open)
+     * Get current enrollment batch for a specific course
+     * Returns batches with status 'upcoming' where enrollment window has not yet expired
      */
     getCurrentEnrollmentBatch: async (courseId?: string) => {
-        console.log(courseId)
         const now = new Date();
         const query: any = {
+            status: { $in: ['upcoming', 'running'] },
             enrollmentEndDate: { $gte: now },
         };
 
-        if (courseId){
-             query.courseId = courseId;
-            }
+        if (courseId) {
+            query.courseId = courseId;
+        }
 
         const batch = await BatchModel.findOne(query)
             .populate('courseId')
             .populate('instructors', 'name')
-            .sort({ enrollmentStartDate: 1 }); // Get the earliest one if multiple
+            .sort({ enrollmentStartDate: 1 });
 
         return batch;
+    },
+
+    /**
+     * Get all batches across all courses where:
+     * - status is 'upcoming'
+     * - enrollment window has not yet expired (enrollmentEndDate >= now)
+     * Used by the home page EnrollmentSection to show all open/upcoming enrollments.
+     */
+    getCurrentEnrollmentBatchesForCourses: async () => {
+        const now = new Date();
+        const batches = await BatchModel.find({
+            status: 'upcoming',
+            enrollmentEndDate: { $gte: now },
+        })
+            .populate('courseId', 'title slug thumbnailImage shortDescription instructor')
+            .sort({ enrollmentStartDate: 1 });
+
+        return batches;
     },
 
     /**

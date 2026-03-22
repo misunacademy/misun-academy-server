@@ -10,6 +10,9 @@ import crypto from 'crypto';
 import { BatchModel } from "../Batch/batch.model";
 import { ProfileService } from "../Profile/profile.service";
 import { ProfileModel } from "../Profile/profile.model";
+import axios from 'axios';
+import env from '../../config/env';
+import { sslcommerzConfig } from '../../config/sslcommerz';
 
 interface PaymentHistoryQuery {
     page?: number;
@@ -233,7 +236,8 @@ const updatePaymentWithEnrollStatus = async (
                 try {
                     await ProfileService.createOrUpdateProfileAfterEnrollment(
                         enrollment.userId.toString(),
-                        updatedPayment.enrollmentId!
+                        updatedPayment.enrollmentId!,
+                        session
                     );
                 } catch (profileError) {
                     console.error('Failed to update student profile after SSLCommerz payment:', profileError);
@@ -331,7 +335,13 @@ const updatePayment = async (paymentData: {
 
 const checkPaymentStatus = async (transactionId: string) => {
     // Find payment record by transaction ID
-    const payment = await PaymentModel.findOne({ transactionId }).populate('batchId');
+    const payment = await PaymentModel.findOne({ transactionId }).populate({
+        path: 'batchId',
+        populate: {
+            path: 'courseId',
+            select: 'slug',
+        },
+    });
     if (!payment) {
         throw new ApiError(StatusCodes.NOT_FOUND, "Payment data not found!");
     }
@@ -340,19 +350,19 @@ const checkPaymentStatus = async (transactionId: string) => {
     let redirectUrl = "/";
     switch (payment.status) {
         case Status.Success:
-            redirectUrl = "/payment?status=success";
+            redirectUrl = `/payment?status=success&t=${encodeURIComponent(transactionId)}`;
             break;
         case Status.Pending:
-            redirectUrl = "/payment?status=pending";
+            redirectUrl = `/payment?status=pending&t=${encodeURIComponent(transactionId)}`;
             break;
         case Status.Failed:
-            redirectUrl = "/payment?status=failed";
+            redirectUrl = `/payment?status=failed&t=${encodeURIComponent(transactionId)}`;
             break;
         case Status.Cancel:
-            redirectUrl = "/payment?status=cancelled";
+            redirectUrl = `/payment?status=cancelled&t=${encodeURIComponent(transactionId)}`;
             break;
         default:
-            redirectUrl = "/payment?status=failed";
+            redirectUrl = `/payment?status=failed&t=${encodeURIComponent(transactionId)}`;
     }
 
     return {
@@ -364,6 +374,139 @@ const checkPaymentStatus = async (transactionId: string) => {
             method: payment.method,
         }
     };
+};
+
+const validateSSLCommerzPayment = async (valId: string) => {
+    const isLive = env.SSL_IS_LIVE === 'true';
+    const url = isLive
+        ? env.SSL_VALIDATION_API
+        : 'https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php';
+
+    const { data } = await axios.get(url, {
+        params: {
+            val_id: valId,
+            store_id: sslcommerzConfig.store_id,
+            store_passwd: sslcommerzConfig.store_passwd,
+            format: 'json',
+        },
+    });
+
+    return data;
+};
+
+const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) => {
+    const session = await mongoose.startSession();
+
+    try {
+        await session.startTransaction();
+
+        const payment = await PaymentModel.findOne({ transactionId }).session(session);
+        if (!payment) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Payment not found');
+        }
+
+        if (payment.status === Status.Success) {
+            await session.commitTransaction();
+            return payment;
+        }
+
+        const validation = await validateSSLCommerzPayment(valId);
+
+        if (validation.status !== 'VALID' && validation.status !== 'VALIDATED') {
+            payment.status = Status.Failed;
+            payment.gatewayResponse = {
+                ...payment.gatewayResponse,
+                val_id: valId,
+                status: validation.status,
+                processedAt: new Date(),
+            };
+            await payment.save({ session });
+            await session.commitTransaction();
+            return payment;
+        }
+
+        if (
+            validation.tran_id !== payment.transactionId ||
+            Number(validation.amount) !== Number(payment.amount) ||
+            validation.currency !== payment.currency
+        ) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Payment data mismatch detected');
+        }
+
+        payment.status = Status.Success;
+        payment.gatewayResponse = {
+            ...payment.gatewayResponse,
+            val_id: valId,
+            status: validation.status,
+            amount: validation.amount,
+            store_amount: validation.store_amount,
+            card_type: validation.card_type,
+            card_issuer: validation.card_issuer,
+            bank_tran_id: validation.bank_tran_id,
+            currency: validation.currency,
+            tran_date: validation.tran_date,
+            processedAt: new Date(),
+        };
+        await payment.save({ session });
+
+        if (payment.enrollmentId) {
+            const enrollment = await EnrollmentModel.findOne({
+                enrollmentId: payment.enrollmentId,
+            }).session(session);
+
+            if (enrollment) {
+                const wasAlreadyActive = enrollment.status === EnrollmentStatus.Active;
+
+                enrollment.status = EnrollmentStatus.Active;
+                enrollment.paymentId = payment._id as any;
+                enrollment.enrolledAt = enrollment.enrolledAt || new Date();
+                await enrollment.save({ session });
+
+                if (!wasAlreadyActive) {
+                    await BatchModel.findByIdAndUpdate(
+                        payment.batchId,
+                        { $inc: { currentEnrollment: 1 } },
+                        { session }
+                    );
+                }
+
+                await ProfileService.createOrUpdateProfileAfterEnrollment(
+                    enrollment.userId.toString(),
+                    enrollment.enrollmentId!,
+                    session
+                );
+
+                const user = await UserModel.findById(payment.userId).session(session);
+                const batch = await BatchModel.findById(payment.batchId).session(session);
+
+                if (user && batch) {
+                    sendPaymentSuccessEmail(
+                        user.email,
+                        user.name,
+                        payment.amount,
+                        payment.currency || 'BDT',
+                        batch.title,
+                        payment.transactionId
+                    );
+
+                    sendEnrollmentConfirmationEmail(
+                        user,
+                        batch.title,
+                        enrollment.enrollmentId!,
+                        payment.amount
+                    );
+                }
+            }
+        }
+
+        await session.commitTransaction();
+        return payment;
+    } catch (error) {
+        await session.abortTransaction();
+        throw error;
+    } finally {
+        session.endSession();
+    }
 };
 
 /**
@@ -442,9 +585,9 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         total_amount: batch.price,
         currency: "BDT",
         tran_id: transactionId,
-        success_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=success`,
-        fail_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=failed`,
-        cancel_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=cancel`,
+        success_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}`,
+        fail_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}`,
+        cancel_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}`,
         ipn_url: `${config.SERVER_URL}/api/v1/payments/webhook`,
         product_name: `Graphics Design Course - ${batch.title}`,
         cus_name: user.name,
@@ -559,14 +702,15 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
 
         if (approved) {
             // Get batch information for enrollment ID generation
-            const batch = await BatchModel.findById(payment.batchId).session(session);
+            const batch = await BatchModel.findById(payment.batchId).populate('courseId').session(session);
             if (!batch) {
                 throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
             }
 
             // Generate enrollment ID for approved payment
             const EnrollmentService = require('../Enrollment/enrollment.service').EnrollmentService;
-            const enrollmentId = await EnrollmentService.generateEnrollmentId(batch.batchNumber.toString());
+            const courseSlug = (batch.courseId as any)?.slug || '';
+            const enrollmentId = await EnrollmentService.generateEnrollmentId(batch.batchNumber.toString(), courseSlug);
 
             // Update payment to success and link enrollment
             payment.status = Status.Success;
@@ -631,78 +775,15 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
                 );
             }
 
-            // AUTOMATIC PROFILE CREATION/UPDATE - Single source of truth for PhonePe payments
-            // Must happen within the same transaction to see the enrollment changes
+            // AUTOMATIC PROFILE CREATION/UPDATE - Single source of truth for payments
             try {
-                // Get enrollment details with batch and course info within the same session
-                const enrollmentWithDetails = await EnrollmentModel.findOne({ enrollmentId })
-                    .populate({
-                        path: 'batchId',
-                        populate: {
-                            path: 'courseId',
-                            select: '_id title'
-                        }
-                    })
-                    .session(session);
-
-                if (!enrollmentWithDetails) {
-                    throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found for profile creation');
-                }
-
-                if (!enrollmentWithDetails.batchId || !(enrollmentWithDetails.batchId as any).courseId) {
-                    throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Enrollment missing batch or course data');
-                }
-
-                // Find existing profile or create new one within the same session
-                let profile = await ProfileModel.findOne({ user: enrollment.userId }).session(session);
-
-                if (!profile) {
-                    // Create new profile with basic enrollment data
-                    const profiles = await ProfileModel.create([{
-                        user: enrollment.userId,
-                        areasOfInterest: [],
-                        enrollments: [{
-                            enrollmentId: enrollmentWithDetails.enrollmentId!,
-                            courseId: (enrollmentWithDetails.batchId as any).courseId._id,
-                            batchId: enrollmentWithDetails.batchId._id,
-                            status: enrollmentWithDetails.status,
-                            enrolledAt: enrollmentWithDetails.enrolledAt,
-                            completedAt: enrollmentWithDetails.completedAt,
-                            certificateIssued: enrollmentWithDetails.certificateIssued,
-                            certificateId: enrollmentWithDetails.certificateId,
-                        }],
-                    }], { session });
-
-                    profile = profiles[0];
-                } else {
-                    // Update existing profile - add or update enrollment
-                    const existingEnrollmentIndex = profile.enrollments.findIndex(
-                        (e) => e.enrollmentId === enrollmentWithDetails.enrollmentId
-                    );
-
-                    const enrollmentData = {
-                        enrollmentId: enrollmentWithDetails.enrollmentId!,
-                        courseId: (enrollmentWithDetails.batchId as any).courseId._id,
-                        batchId: enrollmentWithDetails.batchId._id,
-                        status: enrollmentWithDetails.status,
-                        enrolledAt: enrollmentWithDetails.enrolledAt,
-                        completedAt: enrollmentWithDetails.completedAt,
-                        certificateIssued: enrollmentWithDetails.certificateIssued,
-                        certificateId: enrollmentWithDetails.certificateId,
-                    };
-
-                    if (existingEnrollmentIndex >= 0) {
-                        // Update existing enrollment
-                        profile.enrollments[existingEnrollmentIndex] = enrollmentData;
-                    } else {
-                        // Add new enrollment
-                        profile.enrollments.push(enrollmentData);
-                    }
-
-                    await profile.save({ session });
-                }
+                await ProfileService.createOrUpdateProfileAfterEnrollment(
+                    enrollment.userId.toString(),
+                    enrollmentId,
+                    session
+                );
             } catch (profileError) {
-                console.error('Failed to update student profile after PhonePe payment approval:', profileError);
+                console.error('Failed to update student profile after payment approval:', profileError);
                 // Don't fail the payment approval, but log the error
             }
         } else {
@@ -753,6 +834,7 @@ export const PaymentService = {
     getPaymentHistory,
     updatePaymentWithEnrollStatus,
     checkPaymentStatus,
+    finalizeSSLCommerzPayment,
     updatePayment,
     getMyPayments,
     initiateSSLCommerzPayment,

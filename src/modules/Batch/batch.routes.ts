@@ -9,6 +9,7 @@ const router = express.Router();
 // Public access for listing batches (used by student-facing views)
 router.get('/', BatchController.getAllBatches);
 router.get('/upcoming', BatchController.getUpcomingBatches);
+router.get('/current-enrollments', BatchController.getCurrentEnrollmentBatches); // Note plural `enrollments` to differentiate
 router.get('/current-enrollment', BatchController.getCurrentEnrollmentBatch);
 router.get('/:id', BatchController.getBatchById);
 

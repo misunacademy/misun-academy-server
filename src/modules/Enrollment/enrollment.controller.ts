@@ -47,7 +47,9 @@ const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
     }
 
     // Generate enrollment ID for SSLCommerz payments
-    const enrollmentId = await EnrollmentService.generateEnrollmentId();
+    const batchNumber = (result.batch as any).batchNumber?.toString() || '6';
+    const courseSlug = (result.batch as any).courseId?.slug || '';
+    const enrollmentId = await EnrollmentService.generateEnrollmentId(batchNumber, courseSlug);
     
     // Update enrollment with ID
     result.enrollment.enrollmentId = enrollmentId;

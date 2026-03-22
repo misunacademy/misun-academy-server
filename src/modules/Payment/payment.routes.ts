@@ -11,6 +11,12 @@ router.post('/webhook', PaymentController.sslCommerzWebhook);
 router.post('/status', PaymentController.checkPaymentStatus);
 router.get('/status', PaymentController.checkPaymentStatus);
 
+router.get(
+    '/verify',
+    requireAuth,
+    PaymentController.verifyPaymentSuccessForCurrentUser
+);
+
 // Authenticated routes
 router.get(
     '/me',

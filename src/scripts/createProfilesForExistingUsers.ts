@@ -8,7 +8,7 @@ dotenv.config();
 
 export const createProfilesForExistingUsers = async () => {
     try {
-        await mongoose.connect(env.MONGO_URI as string);
+        await mongoose.connect(env.MONGO_URI);
         console.log('Connected to DB');
 
         // Find all users

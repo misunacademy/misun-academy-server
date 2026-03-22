@@ -34,7 +34,7 @@ const checkEligibility = async (enrollmentId: string): Promise<boolean> => {
 
     // Check if all modules are completed (100%)
     const moduleProgress = await ModuleProgressModel.find({ enrollmentId });
-    
+
     if (moduleProgress.length === 0) {
         return false;  // No progress tracked
     }
@@ -83,7 +83,7 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
 
     // Generate certificate ID
     const certificateId = generateCertificateId();
-    const verificationUrl = `${process.env.FRONTEND_URL || process.env.CLIENT_URL}/verify-certificate/${certificateId}`;
+    const verificationUrl = `${process.env.MA_FRONTEND_URL || process.env.CLIENT_URL}/verify-certificate/${certificateId}`;
 
     // Create PENDING certificate awaiting admin approval
     const certificate = await CertificateModel.create({
@@ -187,7 +187,7 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
 
     // Generate certificate
     const certificateId = generateCertificateId();
-    const verificationUrl = `${process.env.FRONTEND_URL || process.env.CLIENT_URL}/verify-certificate/${certificateId}`;
+    const verificationUrl = `${process.env.MA_FRONTEND_URL || process.env.CLIENT_URL}/verify-certificate/${certificateId}`;
 
     const certificate = await CertificateModel.create({
         enrollmentId,

@@ -26,14 +26,15 @@ const EnvSchema = z.object({
     JWT_SECRET: z.string().optional(),
     JWT_REFRESH_SECRET: z.string().optional().default("yourRefreshSecretKey"),
     JWT_EXPIRY: z.string().optional(),
-    
+
     SSL_STORE_ID: z.string(),
     SSL_STORE_PASSWORD: z.string(),
     SSL_IS_LIVE: z.string(),
     SSL_PAYMENT_API: z.string(),
     SSL_VALIDATION_API: z.string(),
     SERVER_URL: z.string(),
-    FRONTEND_URL: z.string(),
+    MA_FRONTEND_URL: z.string(),
+    EP_FRONTEND_URL: z.string(),
     // Email provider settings (optional - sensible defaults used)
     EMAIL_USER: z.string(),
     EMAIL_PASS: z.string(),

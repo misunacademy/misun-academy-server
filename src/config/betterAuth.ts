@@ -1,18 +1,24 @@
-import { betterAuth } from 'better-auth';
-import { mongodbAdapter } from 'better-auth/adapters/mongodb';
+// Static imports for CJS-compatible packages only
 import mongoose from 'mongoose';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../services/emailService';
 import { Role } from '../types/role';
 import { UserStatus } from '../types/common';
 import { ProfileModel } from '../modules/Profile/profile.model';
+import { dynamicImport } from '../utils/dynamicImport';
 
 // Use the shared email service for auth emails (reuse SMTP config & retry logic)
 let authInstance: any = null;
 
-export const initializeAuth = () => {
+// initializeAuth is async because better-auth is ESM-only (.mjs) and cannot be
+// statically require()'d from CommonJS. We use dynamic import() to load it at runtime.
+export const initializeAuth = async () => {
   if (authInstance) {
     return authInstance;
   }
+
+  // Dynamically import ESM-only packages at runtime (prevents ERR_REQUIRE_ESM)
+  const { betterAuth } = await dynamicImport('better-auth');
+  const { mongodbAdapter } = await dynamicImport('better-auth/adapters/mongodb');
 
   authInstance = betterAuth({
     database: mongodbAdapter(mongoose.connection.getClient().db(), {
@@ -24,14 +30,14 @@ export const initializeAuth = () => {
     // 'http://localhost:5000/api/v1/auth'
     baseURL: process.env.BETTER_AUTH_URL!,
     secret: process.env.BETTER_AUTH_SECRET!,
-    
+
     // Redirect to client after OAuth
     redirects: {
       // After successful OAuth, redirect to client's callback page
-      afterSignIn: `${process.env.FRONTEND_URL!}/auth/callback`,
-      afterSignUp: `${process.env.FRONTEND_URL!}/auth/callback`,
+      afterSignIn: `${process.env.MA_FRONTEND_URL!}/auth/callback`,
+      afterSignUp: `${process.env.MA_FRONTEND_URL!}/auth/callback`,
     },
-    
+
     // Enable experimental features for better performance
     experimental: {
       joins: true, // 2-3x performance improvement for MongoDB queries
@@ -49,16 +55,16 @@ export const initializeAuth = () => {
           const parsed = new URL(url);
           const pathParts = parsed.pathname.split('/');
           const token = pathParts[pathParts.length - 1]; // Get last part of path
-          
+
           if (!token || token.length < 10) {
             console.error('[BetterAuth] No valid token found in reset password URL:', url);
             console.error('[BetterAuth] Parsed pathname:', parsed.pathname);
             console.error('[BetterAuth] Path parts:', pathParts);
             return;
           }
-          
 
-          
+
+
           // Send email asynchronously but log any errors
           sendPasswordResetEmail(user.email, user.name, token)
             .then(() => {
@@ -144,15 +150,17 @@ export const initializeAuth = () => {
     advanced: {
       cookiePrefix: 'better-auth',
       crossSubDomainCookies: {
-        enabled: false,
+        enabled: process.env.NODE_ENV === 'production',
+        domain: process.env.AUTH_COOKIE_DOMAIN || '.maindomain.com',
       },
       useSecureCookies: process.env.NODE_ENV === 'production',
       // Let MongoDB adapter handle ObjectId generation natively
     },
 
     trustedOrigins: [
-      process.env.FRONTEND_URL!,
+      process.env.MA_FRONTEND_URL!,
       process.env.CLIENT_URL!,
+      process.env.EP_FRONTEND_URL!,
     ].filter(Boolean), // Filter out any undefined values
 
     // Database hooks for custom logic

@@ -7,7 +7,7 @@ dotenv.config();
 
 export const seedCourses = async () => {
     try {
-        await mongoose.connect(env.MONGO_URI as string);
+        await mongoose.connect(env.MONGO_URI);
         console.log('Connected to DB');
 
         // Try to require the client mock file

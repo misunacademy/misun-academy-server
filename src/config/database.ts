@@ -19,9 +19,9 @@ export const connectDB = async () => {
         });
         isConnected = db.connections[0].readyState === 1;
         console.log(" MongoDB connected");
-        
-        // Initialize Better Auth after database connection
-        initializeAuth();
+
+        // Initialize Better Auth after database connection (await since it uses dynamic import)
+        await initializeAuth();
         console.log(" Better Auth initialized");
     } catch (error) {
         console.error(" MongoDB connection error:", error);

@@ -12,6 +12,13 @@ export interface IEnrollmentMapping {
   certificateId?: string;
 }
 
+export interface IEducation {
+  degree: string;
+  institution: string;
+  passingYear: string;
+  result?: string;
+}
+
 export interface IProfile {
   user: Types.ObjectId;
   // Personal Information
@@ -26,6 +33,9 @@ export interface IProfile {
   experience?: string; // '0-1', '1-3', '3-5', '5-10', '10+'
   company?: string;
   linkedinUrl?: string;
+
+  // Education
+  education?: IEducation[];
 
   // Learning Information
   skillLevel?: 'beginner' | 'intermediate' | 'advanced' | 'expert';
@@ -51,4 +61,4 @@ export interface IProfile {
   updatedAt: Date;
 }
 
-export interface IProfileModel extends Model<IProfile> {}
+export interface IProfileModel extends Model<IProfile> { }

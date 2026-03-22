@@ -9,7 +9,7 @@ dotenv.config();
 
 export const migrateData = async () => {
     try {
-        await mongoose.connect(env.MONGO_URI as string);
+        await mongoose.connect(env.MONGO_URI);
         console.log('Connected to DB');
 
         // 1. Find or create a default course for existing data

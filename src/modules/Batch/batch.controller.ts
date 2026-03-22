@@ -57,6 +57,17 @@ const getCurrentEnrollmentBatch = catchAsync(async (req: Request, res: Response)
     });
 });
 
+const getCurrentEnrollmentBatches = catchAsync(async (req: Request, res: Response) => {
+    const result = await BatchService.getCurrentEnrollmentBatchesForCourses();
+
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: 'Current enrollment batches retrieved successfully',
+        data: result,
+    });
+});
+
 const getBatchById = catchAsync(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const result = await BatchService.getBatchById(id);
@@ -124,6 +135,7 @@ export const BatchController = {
     getAllBatches,
     getUpcomingBatches,
     getCurrentEnrollmentBatch,
+    getCurrentEnrollmentBatches,
     getBatchById,
     updateBatch,
     transitionBatchStatus,

@@ -259,7 +259,7 @@ const getEmailTemplate = (content: string, headerColor: string = "#10b981") => `
 // --- AUTHENTICATION ---
 
 export const sendVerificationEmail = async (email: string, name: string, token: string) => {
-    const link = `${env.FRONTEND_URL}/verify-email?token=${token}`;
+    const link = `${env.MA_FRONTEND_URL}/verify-email?token=${token}`;
     const html = getEmailTemplate(`
         <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
             <h1>Verify Your Email</h1>
@@ -286,10 +286,10 @@ export const sendPasswordResetEmail = async (email: string, name: string, token:
     console.log('[EmailService] Recipient:', email);
     console.log('[EmailService] Name:', name);
     console.log('[EmailService] Token (first 15):', token.substring(0, 15) + '...');
-    
-    const link = `${env.FRONTEND_URL}/reset-password?token=${token}`;
+
+    const link = `${env.MA_FRONTEND_URL}/reset-password?token=${token}`;
     console.log('[EmailService] Reset link:', link);
-    
+
     const html = getEmailTemplate(`
         <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);">
             <h1>Reset Password</h1>
@@ -334,7 +334,7 @@ export const sendPaymentSuccessEmail = async (email: string, name: string, amoun
             
             <p>You can now access your dashboard and start learning!</p>
             <div style="text-align: center;">
-                <a href="${env.FRONTEND_URL}/dashboard/student" class="button">Go to Dashboard</a>
+                <a href="${env.MA_FRONTEND_URL}/dashboard/student" class="button">Go to Dashboard</a>
             </div>
         </div>
     `, "#10b981");
@@ -389,7 +389,7 @@ export const sendBatchStartReminderEmail = async (studentEmail: string, studentN
             <p>Get ready! Your batch <strong>${batchName}</strong> is starting on <strong>${startDate}</strong>.</p>
             <p>Make sure you have joined the WhatsApp/Facebook groups.</p>
             <div style="text-align: center;">
-                <a href="${env.FRONTEND_URL}/classroom" class="button" style="background: #3b82f6;">Enter Classroom</a>
+                <a href="${env.MA_FRONTEND_URL}/classroom" class="button" style="background: #3b82f6;">Enter Classroom</a>
             </div>
         </div>
     `, "#3b82f6");
@@ -494,7 +494,7 @@ export const sendEnrollmentConfirmationEmail = async (user: any, courseName: str
                         <td style="padding: 0 40px 40px 40px; text-align: center;">
                             <hr style="border: 0; border-top: 1px solid #eeeeee; margin: 20px 0;">
                             <p style="margin-bottom: 20px; color: #666;">You can now access your dashboard and start learning!</p>
-                            <a href="${env.FRONTEND_URL}/dashboard/student" style="display: inline-block; padding: 14px 30px; background-color: #10b981; color: #ffffff; text-decoration: none; border-radius: 50px; font-weight: bold; font-size: 16px;">Go to Dashboard</a>
+                            <a href="${env.MA_FRONTEND_URL}/dashboard/student" style="display: inline-block; padding: 14px 30px; background-color: #10b981; color: #ffffff; text-decoration: none; border-radius: 50px; font-weight: bold; font-size: 16px;">Go to Dashboard</a>
                         </td>
                     </tr>
                     
@@ -555,14 +555,14 @@ export const sendEnrollmentReminderEmail = async (email: string, name: string) =
             <p>Don't miss out on this opportunity to upskill yourself and advance your career!</p>
             
             <div style="text-align: center; margin: 30px 0;">
-                <a href="${env.FRONTEND_URL}/courses" class="button" style="background: #8b5cf6;">Browse Courses</a>
+                <a href="${env.MA_FRONTEND_URL}/courses" class="button" style="background: #8b5cf6;">Browse Courses</a>
             </div>
             
             <p style="font-size: 14px; color: #666;">Have questions? Feel free to reach out to us at <a href="mailto:misunacademybd@gmail.com">misunacademybd@gmail.com</a></p>
         </div>
     `, "#8b5cf6");
 
-    await queueEmail(email, 'Complete Your Enrollment - Misun Academy', html, { 
+    await queueEmail(email, 'Complete Your Enrollment - Misun Academy', html, {
         priority: 'normal',
         eventType: 'enrollment_reminder'
     });
@@ -584,14 +584,14 @@ export const sendNewsUpdateEmail = async (email: string, name: string, subject: 
             </div>
             
             <div style="text-align: center; margin: 30px 0;">
-                <a href="${env.FRONTEND_URL}/dashboard/student" class="button" style="background: #3b82f6;">Go to Dashboard</a>
+                <a href="${env.MA_FRONTEND_URL}/dashboard/student" class="button" style="background: #3b82f6;">Go to Dashboard</a>
             </div>
             
             <p style="font-size: 14px; color: #666;">Stay tuned for more updates!</p>
         </div>
     `, "#3b82f6");
 
-    await queueEmail(email, subject, html, { 
+    await queueEmail(email, subject, html, {
         priority: 'normal',
         eventType: 'news_update'
     });

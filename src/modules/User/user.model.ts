@@ -16,8 +16,9 @@ const userSchema = new Schema<IUserDocument>(
             required: true,
         },
         image: { type: String },
-        emailVerified: { type: Date, default: null }, // Better Auth uses Date, null means not verified
+        emailVerified: { type: Boolean, default: false }, // Better Auth uses Date, null means not verified
         avatar: { type: String },
+        studentId: { type: String, unique: true, sparse: true },
         phone: { type: String },
         address: { type: String },
         status: {
@@ -34,7 +35,7 @@ const userSchema = new Schema<IUserDocument>(
 );
 
 // Virtual field for profilePicture (alias for avatar/image)
-userSchema.virtual('profilePicture').get(function() {
+userSchema.virtual('profilePicture').get(function () {
     return this.avatar || this.image;
 });
 

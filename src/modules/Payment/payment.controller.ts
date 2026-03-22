@@ -7,16 +7,7 @@ import ApiError from "../../errors/ApiError";
 import { StatusCodes } from "http-status-codes";
 import { Status, EnrollmentStatus } from "../../types/common";
 import env from "../../config/env";
-import { EnrollmentService } from '../Enrollment/enrollment.service';
 import { EnrollmentModel } from '../Enrollment/enrollment.model';
-import { UserModel } from '../User/user.model';
-import { BatchModel } from '../Batch/batch.model';
-import { sendPaymentSuccessEmail, sendEnrollmentConfirmationEmail } from '../../services/emailService';
-import { ProfileService } from '../Profile/profile.service';
-import crypto from 'crypto';
-import mongoose from 'mongoose';
-import axios from "axios";
-import { sslcommerzConfig } from '../../config/sslcommerz';
 
 const getPaymentHistory = catchAsync(async (req: Request, res: Response) => {
   const result = await PaymentService.getPaymentHistory(req.query);
@@ -64,33 +55,88 @@ const getMyPayments = catchAsync(async (req: Request, res: Response) => {
 
 const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
   const transactionId = req.query.t as string;
-  const status = req.query.status as string;
+  const valId = (req.body?.val_id || req.query?.val_id) as string | undefined;
 
   if (!transactionId) {
     throw new ApiError(StatusCodes.BAD_REQUEST, "Transaction ID is required");
   }
 
-  // Handle direct status updates from query params (for redirects)
-  if (status) {
-    let paymentStatus: Status;
-    if (status === Status.Success || status === 'success') {
-      paymentStatus = Status.Success;
-    } else if (status === Status.Failed || status === 'failed') {
-      paymentStatus = Status.Failed;
-    } else if (status === Status.Cancel || status === 'cancel') {
-      paymentStatus = Status.Cancel;
-    } else {
-      paymentStatus = Status.Pending;
+  // SSLCommerz may hit this endpoint before webhook has settled the payment.
+  // Finalize immediately when callback payload includes val_id.
+  if (valId) {
+    try {
+      await PaymentService.finalizeSSLCommerzPayment(transactionId, valId);
+    } catch (error) {
+      console.error('Failed to finalize payment on status callback:', error);
     }
-
-    await PaymentService.updatePaymentWithEnrollStatus(transactionId, paymentStatus);
   }
 
   // Get current payment status
   const result = await PaymentService.checkPaymentStatus(transactionId);
 
   // Redirect based on status
-  return res.redirect(`${env.FRONTEND_URL}${result.redirectUrl}`);
+  return res.redirect(`${env.MA_FRONTEND_URL}${result.redirectUrl}`);
+});
+
+const verifyPaymentSuccessForCurrentUser = catchAsync(async (req: Request, res: Response) => {
+  const transactionId = req.query.t as string;
+  const userId = req.user?.id;
+
+  if (!transactionId) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Transaction ID is required');
+  }
+
+  if (!userId) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'User not authenticated');
+  }
+
+  const payment = await PaymentModel.findOne({
+    transactionId,
+    userId,
+  }).populate({
+    path: 'batchId',
+    populate: {
+      path: 'courseId',
+      select: 'slug title',
+    },
+  });
+
+  if (!payment) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Payment not found for this user');
+  }
+
+  if (payment.status !== Status.Success) {
+    return sendResponse(res, {
+      statusCode: StatusCodes.OK,
+      success: true,
+      message: 'Payment is not successful yet',
+      data: {
+        verified: false,
+        paymentStatus: payment.status,
+      },
+    });
+  }
+
+  const enrollment = payment.enrollmentId
+    ? await EnrollmentModel.findOne({ enrollmentId: payment.enrollmentId })
+    : null;
+
+  const enrollmentReady =
+    !!enrollment &&
+    (enrollment.status === EnrollmentStatus.Active ||
+      enrollment.status === EnrollmentStatus.Completed);
+
+  return sendResponse(res, {
+    statusCode: StatusCodes.OK,
+    success: true,
+    message: 'Payment verified successfully',
+    data: {
+      verified: enrollmentReady,
+      paymentStatus: payment.status,
+      courseSlug: (payment.batchId as any)?.courseId?.slug || '',
+      transactionId: payment.transactionId,
+    },
+  });
 });
 
 /**
@@ -263,24 +309,6 @@ const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
 //     }
 // });
 
-const validateSSLCommerzPayment = async (val_id: string) => {
-  const is_live = env.SSL_IS_LIVE === 'true';
-  const url = is_live
-    ? env.SSL_VALIDATION_API
-    : "https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php";
-
-  const { data } = await axios.get(url, {
-    params: {
-      val_id,
-      store_id: sslcommerzConfig.store_id,
-      store_passwd: sslcommerzConfig.store_passwd,
-      format: "json",
-    },
-  });
-
-  return data;
-};
-
 export const sslCommerzWebhook = catchAsync(
   async (req: Request, res: Response) => {
     const { val_id, tran_id } = req.body;
@@ -295,137 +323,8 @@ export const sslCommerzWebhook = catchAsync(
       });
     }
 
-    // 2️ Start DB session
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
     try {
-      // 3️ Find payment
-      const payment = await PaymentModel.findOne({
-        transactionId: tran_id,
-      }).session(session);
-
-      if (!payment) {
-        await session.abortTransaction();
-        return sendResponse(res, {
-          statusCode: StatusCodes.NOT_FOUND,
-          success: false,
-          message: "Payment not found",
-          data: null,
-        });
-      }
-
-      // 4️ Idempotency protection
-      if (payment.status === Status.Success) {
-        await session.commitTransaction();
-        return sendResponse(res, {
-          statusCode: StatusCodes.OK,
-          success: true,
-          message: "Payment already processed",
-          data: null,
-        });
-      }
-
-      // 5️ Validate payment from SSLCommerz server
-      const validation = await validateSSLCommerzPayment(val_id);
-
-      if (
-        validation.status !== "VALID" &&
-        validation.status !== "VALIDATED"
-      ) {
-        payment.status = Status.Failed;
-        await payment.save({ session });
-        await session.commitTransaction();
-
-        return sendResponse(res, {
-          statusCode: StatusCodes.OK,
-          success: false,
-          message: "Payment validation failed",
-          data: validation,
-        });
-      }
-
-      // 6️ HARD verification (must match DB)
-      if (
-        validation.tran_id !== payment.transactionId ||
-        Number(validation.amount) !== Number(payment.amount) ||
-        validation.currency !== payment.currency
-      ) {
-        throw new Error("Payment data mismatch detected");
-      }
-
-      // 7️ Update payment
-      payment.status = Status.Success;
-      payment.gatewayResponse = {
-        ...payment.gatewayResponse,
-        val_id,
-        status: validation.status,
-        amount: validation.amount,
-        store_amount: validation.store_amount,
-        card_type: validation.card_type,
-        card_issuer: validation.card_issuer,
-        bank_tran_id: validation.bank_tran_id,
-        currency: validation.currency,
-        tran_date: validation.tran_date,
-        processedAt: new Date(),
-      };
-
-      await payment.save({ session });
-
-      // 8️ Activate enrollment
-      if (payment.enrollmentId) {
-        const enrollment = await EnrollmentModel.findOne({
-          enrollmentId: payment.enrollmentId,
-        }).session(session);
-
-        if (enrollment) {
-          enrollment.status = EnrollmentStatus.Active;
-          enrollment.paymentId = payment._id;
-          enrollment.enrolledAt = new Date();
-          await enrollment.save({ session });
-
-          await BatchModel.findByIdAndUpdate(
-            payment.batchId,
-            { $inc: { currentEnrollment: 1 } },
-            { session }
-          );
-
-          // Profile update (non-blocking)
-          ProfileService.createOrUpdateProfileAfterEnrollment(
-            enrollment.userId.toString(),
-            enrollment.enrollmentId!
-          ).catch(console.error);
-
-          // Emails
-          const user = await UserModel.findById(payment.userId).session(
-            session
-          );
-          const batch = await BatchModel.findById(payment.batchId).session(
-            session
-          );
-
-          if (user && batch) {
-            sendPaymentSuccessEmail(
-              user.email,
-              user.name,
-              payment.amount,
-              payment.currency || "BDT",
-              batch.title,
-              payment.transactionId
-            );
-
-            sendEnrollmentConfirmationEmail(
-              user,
-              batch.title,
-              enrollment.enrollmentId!,
-              payment.amount
-            );
-          }
-        }
-      }
-
-      // 9️ Commit transaction
-      await session.commitTransaction();
+      await PaymentService.finalizeSSLCommerzPayment(tran_id, val_id);
 
       return sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -434,11 +333,8 @@ export const sslCommerzWebhook = catchAsync(
         data: null,
       });
     } catch (error) {
-      await session.abortTransaction();
       console.error("SSLCommerz webhook error:", error);
       throw error;
-    } finally {
-      session.endSession();
     }
   }
 );
@@ -477,6 +373,7 @@ export const PaymentController = {
   getPaymentHistory,
   updatePaymentWithEnrollStatus,
   checkPaymentStatus,
+  verifyPaymentSuccessForCurrentUser,
   getMyPayments,
   sslCommerzWebhook,
   verifyManualPayment,

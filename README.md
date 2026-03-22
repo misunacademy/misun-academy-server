@@ -151,7 +151,7 @@ CLOUDINARY_API_SECRET=your-api-secret
 ### Frontend URLs
 ```env
 SERVER_URL=http://localhost:5000
-FRONTEND_URL=http://localhost:3000
+MA_FRONTEND_URL=http://localhost:3000
 ```
 
 ## 📜 Available Scripts
