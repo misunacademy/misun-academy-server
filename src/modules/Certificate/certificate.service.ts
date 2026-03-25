@@ -7,6 +7,15 @@ import ApiError from '../../errors/ApiError';
 import { StatusCodes } from 'http-status-codes';
 import { sendCertificateApprovedEmail, sendCertificateIssuedEmail } from '../../services/emailService';
 import { UserModel } from '../User/user.model';
+import mongoose from 'mongoose';
+
+const findCertificateByIdentifier = async (identifier: string) => {
+    if (mongoose.Types.ObjectId.isValid(identifier)) {
+        const byId = await CertificateModel.findById(identifier);
+        if (byId) return byId;
+    }
+    return CertificateModel.findOne({ certificateId: identifier });
+};
 
 /**
  * Generate unique certificate ID
@@ -107,7 +116,7 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
  * Changes status from Pending to Active
  */
 const approveCertificate = async (certificateId: string, approvedBy: string) => {
-    const certificate = await CertificateModel.findOne({ certificateId });
+    const certificate = await findCertificateByIdentifier(certificateId);
     if (!certificate) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Certificate not found');
     }
@@ -305,7 +314,7 @@ const revokeCertificate = async (
     reason: string,
     revokedBy: string
 ) => {
-    const certificate = await CertificateModel.findOne({ certificateId });
+    const certificate = await findCertificateByIdentifier(certificateId);
     if (!certificate) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Certificate not found');
     }
@@ -321,6 +330,61 @@ const revokeCertificate = async (
     await certificate.save();
 
     return certificate;
+};
+
+const getAllCertificates = async (status?: string) => {
+    const normalizedStatus = status?.toLowerCase();
+    const statusFilter = normalizedStatus === 'approved'
+        ? CertificateStatus.Active
+        : normalizedStatus === 'rejected'
+            ? CertificateStatus.Revoked
+            : normalizedStatus === 'pending' || normalizedStatus === 'active' || normalizedStatus === 'revoked'
+                ? normalizedStatus
+                : undefined;
+
+    const query = statusFilter ? { status: statusFilter } : {};
+
+    return CertificateModel.find(query)
+        .populate('userId', 'name email')
+        .populate({
+            path: 'batchId',
+            populate: { path: 'courseId', select: 'title' },
+        })
+        .sort({ createdAt: -1 });
+};
+
+const updateCertificateStatus = async (
+    certificateId: string,
+    payload: { status?: string; reason?: string; rejectionReason?: string },
+    adminId: string
+) => {
+    const certificate = await findCertificateByIdentifier(certificateId);
+    if (!certificate) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Certificate not found');
+    }
+
+    const requestedStatus = payload.status?.toLowerCase();
+
+    if (requestedStatus === 'approved' || requestedStatus === 'active') {
+        if (certificate.status === CertificateStatus.Active) {
+            return certificate;
+        }
+        if (certificate.status !== CertificateStatus.Pending) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Only pending certificates can be approved');
+        }
+        return approveCertificate(certificate.certificateId, adminId);
+    }
+
+    if (requestedStatus === 'rejected' || requestedStatus === 'revoked') {
+        if (certificate.status === CertificateStatus.Revoked) {
+            return certificate;
+        }
+
+        const reason = payload.rejectionReason || payload.reason || 'Rejected by admin';
+        return revokeCertificate(certificate.certificateId, reason, adminId);
+    }
+
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid status. Use Approved/Rejected or Active/Revoked');
 };
 
 /**
@@ -359,6 +423,8 @@ export const CertificateService = {
     getCertificateByEnrollment,
     verifyCertificate,
     revokeCertificate,
+    updateCertificateStatus,
+    getAllCertificates,
     getUserCertificates,
     getPendingCertificates,
     checkEligibility,

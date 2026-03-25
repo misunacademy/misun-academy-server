@@ -8,21 +8,36 @@ import { ProgressStatus, LessonProgressStatus, EnrollmentStatus } from '../../ty
 import { LessonModel } from '../Lesson/lesson.model';
 import { ModuleModel } from '../Module/module.model';
 
+const findEnrollmentForCourse = async (
+    userId: string,
+    courseId: string,
+    statuses: EnrollmentStatus[]
+) => {
+    const batches = await BatchModel.find({ courseId }).select('_id');
+    const batchIds = batches.map((b) => b._id);
+
+    if (batchIds.length === 0) {
+        return null;
+    }
+
+    return EnrollmentModel.findOne({
+        userId,
+        status: { $in: statuses },
+        batchId: { $in: batchIds },
+    });
+};
+
 /**
  * Get course progress for a user
  */
 const getCourseProgress = async (userId: string, courseId: string) => {
-    // Find active enrollment for this course
-    const enrollment = await EnrollmentModel.findOne({
-        userId,
-        status: EnrollmentStatus.Active,
-    }).populate({
-        path: 'batchId',
-        match: { courseId },
-    });
+    const enrollment = await findEnrollmentForCourse(userId, courseId, [
+        EnrollmentStatus.Active,
+        EnrollmentStatus.Completed,
+    ]);
 
-    if (!enrollment || !enrollment.batchId) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'No active enrollment found for this course');
+    if (!enrollment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'No enrollment found for this course');
     }
 
     // Get module progress
@@ -37,14 +52,14 @@ const getCourseProgress = async (userId: string, courseId: string) => {
 
     // Calculate overall progress
     const totalModules = moduleProgress.length;
-    const completedModules = moduleProgress.filter(
-        (p) => p.status === ProgressStatus.Completed
-    ).length;
+    // const completedModules = moduleProgress.filter(
+    //     (p) => p.status === ProgressStatus.Completed
+    // ).length;
 
-    const totalLessons = lessonProgress.length;
-    const completedLessonsCount = lessonProgress.filter(
-        (p) => p.status === LessonProgressStatus.Completed
-    ).length;
+    // const totalLessons = lessonProgress.length;
+    // const completedLessonsCount = lessonProgress.filter(
+    //     (p) => p.status === LessonProgressStatus.Completed
+    // ).length;
 
     const overallProgress = totalModules > 0
         ? Math.round((moduleProgress.reduce((sum, m) => sum + m.completionPercentage, 0) / totalModules))
@@ -98,16 +113,11 @@ const getCourseProgress = async (userId: string, courseId: string) => {
  * Complete a lesson for a user
  */
 const completeLesson = async (userId: string, courseId: string, moduleId: string, lessonId: string) => {
-    // Find active enrollment for this course
-    const enrollment = await EnrollmentModel.findOne({
-        userId,
-        status: EnrollmentStatus.Active,
-    }).populate({
-        path: 'batchId',
-        match: { courseId },
-    });
+    const enrollment = await findEnrollmentForCourse(userId, courseId, [
+        EnrollmentStatus.Active,
+    ]);
 
-    if (!enrollment || !enrollment.batchId) {
+    if (!enrollment) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'No active enrollment found for this course');
     }
 

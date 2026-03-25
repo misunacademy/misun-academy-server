@@ -105,6 +105,21 @@ const getPendingCertificates = catchAsync(async (req: Request, res: Response) =>
 });
 
 /**
+ * Admin: Get all certificates (optional status filter)
+ */
+const getCertificates = catchAsync(async (req: Request, res: Response) => {
+    const { status } = req.query as { status?: string };
+    const certificates = await CertificateService.getAllCertificates(status);
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Certificates retrieved successfully',
+        data: certificates,
+    });
+});
+
+/**
  * Admin: Issue certificate manually (direct issuance, skips approval)
  */
 const issueCertificate = catchAsync(async (req: Request, res: Response) => {
@@ -144,6 +159,27 @@ const revokeCertificate = catchAsync(async (req: Request, res: Response) => {
 });
 
 /**
+ * Admin: Update certificate status (compatibility endpoint)
+ */
+const updateCertificate = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { certificateId } = req.params as { certificateId: string };
+
+    const certificate = await CertificateService.updateCertificateStatus(
+        certificateId,
+        req.body,
+        id
+    );
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Certificate status updated successfully',
+        data: certificate,
+    });
+});
+
+/**
  * Check certificate eligibility
  */
 const checkEligibility = catchAsync(async (req: Request, res: Response) => {
@@ -153,7 +189,7 @@ const checkEligibility = catchAsync(async (req: Request, res: Response) => {
     // Verify user owns this enrollment
     const enrollment = await require('../Enrollment/enrollment.model').EnrollmentModel.findOne({
         _id: enrollmentId,
-        id,
+        userId: id,
     });
 
     if (!enrollment) {
@@ -180,6 +216,8 @@ const checkEligibility = catchAsync(async (req: Request, res: Response) => {
 
 export const CertificateController = {
     requestCertificate,
+    getCertificates,
+    updateCertificate,
     approveCertificate,
     getPendingCertificates,
     getCertificate,

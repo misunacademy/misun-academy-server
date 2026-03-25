@@ -139,6 +139,12 @@ SSL_VALIDATION_API=https://sandbox.sslcommerz.com/validator/api/validationserver
 EMAIL_USER=your-smtp-email@gmail.com
 EMAIL_PASS=your-smtp-app-password
 EMAIL_FROM="Misun Academy" <no-reply@misun-academy.com>
+EMAIL_SOCIAL_YOUTUBE=https://www.youtube.com/@misunacademybd
+EMAIL_SOCIAL_FACEBOOK=https://www.facebook.com/misunacademybd
+EMAIL_SOCIAL_TWITTER=https://x.com/misunacademybd
+EMAIL_SOCIAL_LINKEDIN=https://www.linkedin.com/company/misun-academy
+EMAIL_SOCIAL_INSTAGRAM=https://www.instagram.com/misunacademybd
+EMAIL_SOCIAL_WEBSITE=http://localhost:3000
 ```
 
 ### Cloud Storage (Cloudinary)

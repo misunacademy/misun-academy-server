@@ -235,6 +235,16 @@ const getEmailTemplate = (content: string, headerColor: string = "#10b981") => `
         .highlight-box { background: #f9fafb; border-left: 4px solid ${headerColor}; padding: 16px; margin: 20px 0; border-radius: 4px; }
         .button { display: inline-block; padding: 12px 28px; background: ${headerColor}; color: white !important; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; }
         .footer { background: #1f2937; color: #9ca3af; padding: 24px; text-align: center; font-size: 13px; }
+        .footer a { color: #d1d5db; text-decoration: none; }
+        .footer a:hover { color: #ffffff; }
+        .footer-social { margin: 14px 0; }
+        .footer-social a { display: inline-block; width: 36px; height: 36px; line-height: 36px; margin: 0 5px 5px 5px; font-size: 14px; font-family: Arial, Helvetica, sans-serif; font-weight: 700; text-align: center; border: none; border-radius: 50%; color: #ffffff !important; text-decoration: none; transition: opacity 0.2s ease; }
+        .footer-social a:hover { opacity: 0.85; }
+        .footer-social .icon-facebook { background: #1877F2; }
+        .footer-social .icon-twitter { background: #000000; }
+        .footer-social .icon-youtube { background: #CD201F; font-size: 15px; line-height: 36px; }
+        .footer-social .icon-linkedin { background: #0A66C2; font-size: 13px; letter-spacing: -0.3px; }
+        .footer-social .icon-instagram { background: linear-gradient(135deg, #fd1d1d 0%, #833ab4 25%, #c13584 50%, #e1306c 75%, #fd1d1d 100%); font-size: 13px; }
         .badge { background: #e5e7eb; padding: 2px 8px; border-radius: 12px; font-size: 12px; color: #374151; }
         a { color: ${headerColor}; text-decoration: none; }
     </style>
@@ -245,6 +255,12 @@ const getEmailTemplate = (content: string, headerColor: string = "#10b981") => `
         <div class="footer">
             <p>Misun Academy | Learn. Grow. Succeed.</p>
             <p><a href="mailto:misunacademybd@gmail.com">misunacademybd@gmail.com</a></p>
+            <div class="footer-social">
+                <a class="icon-facebook" href="${env.EMAIL_SOCIAL_FACEBOOK || 'https://www.facebook.com/misunacademybd'}" target="_blank" rel="noopener noreferrer" title="Facebook" aria-label="Facebook">f</a>
+                <a class="icon-twitter" href="${env.EMAIL_SOCIAL_TWITTER || 'https://x.com'}" target="_blank" rel="noopener noreferrer" title="X" aria-label="X">𝕏</a>
+                <a class="icon-youtube" href="${env.EMAIL_SOCIAL_YOUTUBE || 'https://www.youtube.com/@misunacademybd'}" target="_blank" rel="noopener noreferrer" title="YouTube" aria-label="YouTube">▶️</a>
+                <a class="icon-linkedin" href="${env.EMAIL_SOCIAL_LINKEDIN || 'https://www.linkedin.com/company/misun-academy'}" target="_blank" rel="noopener noreferrer" title="LinkedIn" aria-label="LinkedIn">in</a>
+            </div>
             <p>© ${new Date().getFullYear()} Misun Academy. All rights reserved.</p>
         </div>
     </div>
@@ -334,7 +350,7 @@ export const sendPaymentSuccessEmail = async (email: string, name: string, amoun
             
             <p>You can now access your dashboard and start learning!</p>
             <div style="text-align: center;">
-                <a href="${env.MA_FRONTEND_URL}/dashboard/student" class="button">Go to Dashboard</a>
+                <a href="${env.MA_FRONTEND_URL}/my-classes" class="button">Go to Dashboard</a>
             </div>
         </div>
     `, "#10b981");
@@ -494,7 +510,7 @@ export const sendEnrollmentConfirmationEmail = async (user: any, courseName: str
                         <td style="padding: 0 40px 40px 40px; text-align: center;">
                             <hr style="border: 0; border-top: 1px solid #eeeeee; margin: 20px 0;">
                             <p style="margin-bottom: 20px; color: #666;">You can now access your dashboard and start learning!</p>
-                            <a href="${env.MA_FRONTEND_URL}/dashboard/student" style="display: inline-block; padding: 14px 30px; background-color: #10b981; color: #ffffff; text-decoration: none; border-radius: 50px; font-weight: bold; font-size: 16px;">Go to Dashboard</a>
+                            <a href="${env.MA_FRONTEND_URL}/my-classes" style="display: inline-block; padding: 14px 30px; background-color: #10b981; color: #ffffff; text-decoration: none; border-radius: 50px; font-weight: bold; font-size: 16px;">Go to Dashboard</a>
                         </td>
                     </tr>
                     
@@ -546,7 +562,6 @@ export const sendEnrollmentReminderEmail = async (email: string, name: string) =
                 <ul style="margin: 10px 0; padding-left: 20px;">
                     <li>Industry-standard curriculum</li>
                     <li>Expert instructors with real-world experience</li>
-                    <li>Hands-on projects and assignments</li>
                     <li>Lifetime access to course materials</li>
                     <li>Certificate upon completion</li>
                 </ul>
@@ -584,7 +599,7 @@ export const sendNewsUpdateEmail = async (email: string, name: string, subject: 
             </div>
             
             <div style="text-align: center; margin: 30px 0;">
-                <a href="${env.MA_FRONTEND_URL}/dashboard/student" class="button" style="background: #3b82f6;">Go to Dashboard</a>
+                <a href="${env.MA_FRONTEND_URL}/my-classes" class="button" style="background: #3b82f6;">Go to Dashboard</a>
             </div>
             
             <p style="font-size: 14px; color: #666;">Stay tuned for more updates!</p>

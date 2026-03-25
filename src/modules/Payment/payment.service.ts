@@ -346,23 +346,29 @@ const checkPaymentStatus = async (transactionId: string) => {
         throw new ApiError(StatusCodes.NOT_FOUND, "Payment data not found!");
     }
 
+    const rawCourse = (payment.batchId as any)?.courseId;
+    const courseSlug =
+        (typeof rawCourse === 'object' ? rawCourse?.slug : undefined) ||
+        (typeof rawCourse === 'string' ? rawCourse : '');
+    const courseQuery = courseSlug ? `&course=${encodeURIComponent(courseSlug)}` : '';
+
     // Determine frontend redirect URL based on status
     let redirectUrl = "/";
     switch (payment.status) {
         case Status.Success:
-            redirectUrl = `/payment?status=success&t=${encodeURIComponent(transactionId)}`;
+            redirectUrl = `/payment?status=success&t=${encodeURIComponent(transactionId)}${courseQuery}`;
             break;
         case Status.Pending:
-            redirectUrl = `/payment?status=pending&t=${encodeURIComponent(transactionId)}`;
+            redirectUrl = `/payment?status=pending&t=${encodeURIComponent(transactionId)}${courseQuery}`;
             break;
         case Status.Failed:
-            redirectUrl = `/payment?status=failed&t=${encodeURIComponent(transactionId)}`;
+            redirectUrl = `/payment?status=failed&t=${encodeURIComponent(transactionId)}${courseQuery}`;
             break;
         case Status.Cancel:
-            redirectUrl = `/payment?status=cancelled&t=${encodeURIComponent(transactionId)}`;
+            redirectUrl = `/payment?status=cancelled&t=${encodeURIComponent(transactionId)}${courseQuery}`;
             break;
         default:
-            redirectUrl = `/payment?status=failed&t=${encodeURIComponent(transactionId)}`;
+            redirectUrl = `/payment?status=failed&t=${encodeURIComponent(transactionId)}${courseQuery}`;
     }
 
     return {

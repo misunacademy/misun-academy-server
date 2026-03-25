@@ -570,6 +570,15 @@ const enrollWithManualPayment = async (
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment period is not active');
     }
 
+    const courseSlug = (batch.courseId as any)?.slug || '';
+    const isEnglishCourse = /english/i.test(courseSlug);
+    const manualPaymentAmount =
+        typeof (batch as any).manualPaymentPrice === 'number'
+            ? (batch as any).manualPaymentPrice
+            : isEnglishCourse
+                ? 2000
+                : 3000;
+
     // Use MongoDB transaction for atomicity
     const session = await mongoose.startSession();
 
@@ -592,8 +601,7 @@ const enrollWithManualPayment = async (
             batchId,
             transactionId: paymentTransactionId,
             // idempotencyKey: paymentTransactionId,
-            // PhonePe manual payments use a fixed INR 3,000 amount per product decision
-            amount: 3000,
+            amount: manualPaymentAmount,
             currency: 'BDT',
             status: Status.Review,
             method: 'PhonePay',

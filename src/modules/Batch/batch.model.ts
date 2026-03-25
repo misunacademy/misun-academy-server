@@ -11,6 +11,7 @@ export interface IBatch extends Document {
     enrollmentStartDate: Date;
     enrollmentEndDate: Date;
     price: number;
+    manualPaymentPrice?: number;
     currency: string;
     currentEnrollment: number;
     status: BatchStatus;
@@ -59,6 +60,10 @@ const batchSchema = new Schema<IBatch>(
         price: {
             type: Number,
             required: true,
+            min: 0,
+        },
+        manualPaymentPrice: {
+            type: Number,
             min: 0,
         },
         currency: {

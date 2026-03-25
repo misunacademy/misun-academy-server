@@ -35,6 +35,13 @@ router.get(
 
 // Admin routes - manage certificates
 router.get(
+    '/',
+    requireAuth,
+    requireAdmin,
+    CertificateController.getCertificates
+);
+
+router.get(
     '/pending',
     requireAuth,
     requireAdmin,
@@ -53,6 +60,13 @@ router.post(
     requireAuth,
     requireAdmin,
     CertificateController.issueCertificate
+);
+
+router.put(
+    '/:certificateId',
+    requireAuth,
+    requireAdmin,
+    CertificateController.updateCertificate
 );
 
 router.put(

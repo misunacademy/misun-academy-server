@@ -19,6 +19,12 @@ export const createBatchSchema = z.object({
                 invalid_type_error: 'Price must be a number',
             })
             .nonnegative('Price must be zero or greater'),
+        manualPaymentPrice: z
+            .number({
+                invalid_type_error: 'Manual payment price must be a number',
+            })
+            .nonnegative('Manual payment price must be zero or greater')
+            .optional(),
         startDate: z
             .string({
                 required_error: 'Start date is required',
@@ -54,6 +60,12 @@ export const updateBatchSchema = z.object({
                 invalid_type_error: 'Price must be a number',
             })
             .nonnegative('Price must be zero or greater')
+            .optional(),
+        manualPaymentPrice: z
+            .number({
+                invalid_type_error: 'Manual payment price must be a number',
+            })
+            .nonnegative('Manual payment price must be zero or greater')
             .optional(),
         startDate: z
             .string()

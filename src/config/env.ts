@@ -48,6 +48,12 @@ const EnvSchema = z.object({
     // Social media group links (optional)
     FACEBOOK_GROUP_LINK: z.string().optional(),
     WHATSAPP_GROUP_LINK: z.string().optional(),
+    EMAIL_SOCIAL_YOUTUBE: z.string().optional(),
+    EMAIL_SOCIAL_FACEBOOK: z.string().optional(),
+    EMAIL_SOCIAL_TWITTER: z.string().optional(),
+    EMAIL_SOCIAL_LINKEDIN: z.string().optional(),
+    EMAIL_SOCIAL_INSTAGRAM: z.string().optional(),
+    EMAIL_SOCIAL_WEBSITE: z.string().optional(),
 
     // Cloudinary config (required for image uploads)
     CLOUDINARY_CLOUD_NAME: z.string(),
