@@ -97,68 +97,7 @@ A robust, secure Express.js backend server for the Misun Academy Learning Manage
 
 Create a `.env` file based on `.env.example`. Required variables:
 
-### General
-```env
-PORT=5000
-NODE_ENV=development
-LOG_LEVEL=info
-```
 
-### Database
-```env
-MONGO_URI=mongodb://localhost:27017/misun-academy
-```
-
-### BetterAuth (Required)
-```env
-BETTER_AUTH_SECRET=<32-character-random-string>
-BETTER_AUTH_URL=http://localhost:5000/api/v1/auth
-RESEND_API_KEY=re_your_resend_api_key
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-CLIENT_URL=http://localhost:3000
-```
-
-### Admin Credentials
-```env
-SUPER_ADMIN_EMAIL=admin@misunacademy.com
-SUPER_ADMIN_PASSWORD=your-secure-password
-```
-
-### Payment Gateway (SSLCommerz)
-```env
-SSL_STORE_ID=your-store-id
-SSL_STORE_PASSWORD=your-store-password
-SSL_IS_LIVE=false
-SSL_PAYMENT_API=https://sandbox.sslcommerz.com/gwprocess/v4/api.php
-SSL_VALIDATION_API=https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php
-```
-
-### Email Configuration
-```env
-EMAIL_USER=your-smtp-email@gmail.com
-EMAIL_PASS=your-smtp-app-password
-EMAIL_FROM="Misun Academy" <no-reply@misun-academy.com>
-EMAIL_SOCIAL_YOUTUBE=https://www.youtube.com/@misunacademybd
-EMAIL_SOCIAL_FACEBOOK=https://www.facebook.com/misunacademybd
-EMAIL_SOCIAL_TWITTER=https://x.com/misunacademybd
-EMAIL_SOCIAL_LINKEDIN=https://www.linkedin.com/company/misun-academy
-EMAIL_SOCIAL_INSTAGRAM=https://www.instagram.com/misunacademybd
-EMAIL_SOCIAL_WEBSITE=http://localhost:3000
-```
-
-### Cloud Storage (Cloudinary)
-```env
-CLOUDINARY_CLOUD_NAME=your-cloud-name
-CLOUDINARY_API_KEY=your-api-key
-CLOUDINARY_API_SECRET=your-api-secret
-```
-
-### Frontend URLs
-```env
-SERVER_URL=http://localhost:5000
-MA_FRONTEND_URL=http://localhost:3000
-```
 
 ## 📜 Available Scripts
 
