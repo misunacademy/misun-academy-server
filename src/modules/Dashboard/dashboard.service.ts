@@ -266,14 +266,14 @@ const getUserStats = async () => {
  * Get student dashboard data
  */
 const getStudentDashboard = async (userId: string) => {
-    // Get student's enrollments
+    // Get student's enrollments (active and completed courses should remain accessible lifetime)
     const enrollments = await EnrollmentModel.find({
         userId,
-        status: EnrollmentStatus.Active
+        status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] }
     })
         .populate({
             path: 'batchId',
-            populate: { path: 'courseId', select: 'title slug' }
+            populate: { path: 'courseId', select: 'title slug thumbnailImage' }
         })
         .sort({ createdAt: -1 });
 
@@ -297,9 +297,12 @@ const getStudentDashboard = async (userId: string) => {
         courseId: enrollment.batchId?.courseId?._id || enrollment.batchId?.courseId,
         courseTitle: enrollment.batchId?.courseId?.title || 'Unknown Course',
         courseSlug: enrollment.batchId?.courseId?.slug || '',
+        thumbnailImage: enrollment.batchId?.courseId?.thumbnailImage || '',
         shortDescription: enrollment.batchId?.courseId?.shortDescription || '',
         instructor: enrollment.batchId?.courseId?.instructor || null,
         batchTitle: enrollment.batchId?.title || 'Unknown Batch',
+        isCertificateAvailable: enrollment.batchId?.courseId?.isCertificateAvailable ?? true,
+
         batchNumber: enrollment.batchId?.batchNumber || '',
         enrolledAt: enrollment.createdAt,
         status: enrollment.status,
@@ -324,45 +327,45 @@ const getStudentDashboard = async (userId: string) => {
 };
 
 
-/**
- * Get employee dashboard data
- */
-const getEmployeeDashboard = async (userId: string) => {
-    const { SalaryModel } = await import('../Employee/salary.model');
-    const { LeaveRequestModel } = await import('../Employee/leaveRequest.model');
+// /**
+//  * Get employee dashboard data
+//  */
+// const getEmployeeDashboard = async (userId: string) => {
+//     const { SalaryModel } = await import('../Employee/salary.model');
+//     const { LeaveRequestModel } = await import('../Employee/leaveRequest.model');
 
-    const totalSalaryPaid = await SalaryModel.aggregate([
-        { $match: { employeeId: userId, status: 'Paid' } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]);
+//     const totalSalaryPaid = await SalaryModel.aggregate([
+//         { $match: { employeeId: userId, status: 'Paid' } },
+//         { $group: { _id: null, total: { $sum: '$amount' } } },
+//     ]);
 
-    const pendingLeaveCount = await LeaveRequestModel.countDocuments({
-        employeeId: userId,
-        status: 'Pending',
-    });
+//     const pendingLeaveCount = await LeaveRequestModel.countDocuments({
+//         employeeId: userId,
+//         status: 'Pending',
+//     });
 
-    const approvedLeaveCount = await LeaveRequestModel.countDocuments({
-        employeeId: userId,
-        status: 'Approved',
-    });
+//     const approvedLeaveCount = await LeaveRequestModel.countDocuments({
+//         employeeId: userId,
+//         status: 'Approved',
+//     });
 
-    const recentSalaries = await SalaryModel.find({ employeeId: userId })
-        .sort({ createdAt: -1 })
-        .limit(5)
-        .lean();
+//     const recentSalaries = await SalaryModel.find({ employeeId: userId })
+//         .sort({ createdAt: -1 })
+//         .limit(5)
+//         .lean();
 
-    return {
-        totalSalaryPaid: totalSalaryPaid[0]?.total ?? 0,
-        pendingLeaveCount,
-        approvedLeaveCount,
-        recentSalaries,
-    };
-};
+//     return {
+//         totalSalaryPaid: totalSalaryPaid[0]?.total ?? 0,
+//         pendingLeaveCount,
+//         approvedLeaveCount,
+//         recentSalaries,
+//     };
+// };
 
 export const DashboardService = {
     getDashboardMetaData,
     getAdminDashboard,
     getUserStats,
     getStudentDashboard,
-    getEmployeeDashboard,
+    // getEmployeeDashboard,
 }

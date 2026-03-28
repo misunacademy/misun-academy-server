@@ -1,4 +1,5 @@
 export interface ISettings {
-  featuredEnrollmentCourse?: string;
-  featuredEnrollmentBatch?: string;
+  popupEnabled?: boolean;
+  popupImageUrl?: string;
+  popupLink?: string;
 }

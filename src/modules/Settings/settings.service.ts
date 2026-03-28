@@ -2,7 +2,7 @@ import { Settings } from './settings.model';
 import { ISettings } from './settings.interface';
 
 const getSettings = async (): Promise<ISettings | null> => {
-  return await Settings.findOne().populate('featuredEnrollmentCourse').populate('featuredEnrollmentBatch');
+  return await Settings.findOne()
 };
 
 const updateSettings = async (payload: Partial<ISettings>): Promise<ISettings | null> => {

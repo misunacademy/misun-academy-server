@@ -35,6 +35,7 @@ export const createCourseSchema = z.object({
         prerequisites: z.array(z.string()).optional(),
         learningOutcomes: z.array(z.string()),
         status: z.enum(['Draft', 'Published', 'Archived']).optional(),
+        isCertificateAvailable: z.boolean().optional(),
     })),
 });
 
@@ -51,5 +52,6 @@ export const updateCourseSchema = z.object({
         prerequisites: z.array(z.string()).optional(),
         learningOutcomes: z.array(z.string()).optional(),
         status: z.enum(['Draft', 'Published', 'Archived']).optional(),
+        isCertificateAvailable: z.boolean().optional(),
     })),
 });

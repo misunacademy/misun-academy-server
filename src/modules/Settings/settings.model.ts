@@ -1,19 +1,23 @@
 import { Schema, model } from 'mongoose';
 
 export interface ISettings {
-  featuredEnrollmentCourse?: string; // Course ID
-  featuredEnrollmentBatch?: string; // Batch ID
-
+  popupEnabled?: boolean;
+  popupImageUrl?: string;
+  popupLink?: string;
 }
 
 const settingsSchema = new Schema<ISettings>({
-  featuredEnrollmentCourse: {
-    type: String,
-    ref: 'Course',
+  popupEnabled: {
+    type: Boolean,
+    default: false,
   },
-  featuredEnrollmentBatch: {
+  popupImageUrl: {
     type: String,
-    ref: 'Batch',
+    default: '',
+  },
+  popupLink: {
+    type: String,
+    default: '',
   },
 }, {
   timestamps: true,

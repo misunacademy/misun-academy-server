@@ -2,8 +2,9 @@ import { z } from 'zod';
 
 const updateSettings = z.object({
   body: z.object({
-    featuredEnrollmentCourse: z.string().optional(),
-    featuredEnrollmentBatch: z.string().optional(),
+    popupEnabled: z.boolean().optional(),
+    popupImageUrl: z.string().optional(),
+    popupLink: z.string().optional(),
   }),
 });
 

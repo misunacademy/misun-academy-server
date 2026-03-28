@@ -2,6 +2,7 @@ import { CertificateModel } from './certificate.model';
 import { EnrollmentModel } from '../Enrollment/enrollment.model';
 import { BatchModel } from '../Batch/batch.model';
 import { ModuleProgressModel } from '../Progress/moduleProgress.model';
+import { ProgressService } from '../Progress/progress.service';
 import { CertificateStatus, EnrollmentStatus } from '../../types/common';
 import ApiError from '../../errors/ApiError';
 import { StatusCodes } from 'http-status-codes';
@@ -31,13 +32,22 @@ const generateCertificateId = (): string => {
  * Requirements: All modules must be at 100% completion
  */
 const checkEligibility = async (enrollmentId: string): Promise<boolean> => {
-    const enrollment = await EnrollmentModel.findById(enrollmentId).populate('batchId');
+    const enrollment = await EnrollmentModel.findById(enrollmentId).populate({
+        path: 'batchId',
+        populate: { path: 'courseId' },
+    });
     if (!enrollment) {
         return false;
     }
 
     // Check if enrollment is active or completed
     if (enrollment.status !== EnrollmentStatus.Active && enrollment.status !== EnrollmentStatus.Completed) {
+        return false;
+    }
+
+    // When certificate is not available for the course, not eligible
+    const course = (enrollment.batchId as any)?.courseId;
+    if (!course || course.isCertificateAvailable === false) {
         return false;
     }
 
@@ -90,9 +100,15 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
     }
 
+    const course = (batch.courseId as any);
+    if (!course || course.isCertificateAvailable === false) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Certificates are not available for this course');
+    }
+
     // Generate certificate ID
     const certificateId = generateCertificateId();
-    const verificationUrl = `${process.env.MA_FRONTEND_URL || process.env.CLIENT_URL}/verify-certificate/${certificateId}`;
+    const frontendBaseUrl = process.env.MA_FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:3000';
+    const verificationUrl = `${frontendBaseUrl}/verify-certificate/${certificateId}`;
 
     // Create PENDING certificate awaiting admin approval
     const certificate = await CertificateModel.create({
@@ -196,7 +212,8 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
 
     // Generate certificate
     const certificateId = generateCertificateId();
-    const verificationUrl = `${process.env.MA_FRONTEND_URL || process.env.CLIENT_URL}/verify-certificate/${certificateId}`;
+    const frontendBaseUrl = process.env.MA_FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:3000';
+    const verificationUrl = `${frontendBaseUrl}/verify-certificate/${certificateId}`;
 
     const certificate = await CertificateModel.create({
         enrollmentId,
@@ -257,7 +274,7 @@ const getCertificateByEnrollment = async (enrollmentId: string, userId: string) 
         throw new ApiError(StatusCodes.NOT_FOUND, 'Certificate not found');
     }
 
-    return certificate;
+    return enrichCertificateWithCompletion(certificate);
 };
 
 /**
@@ -300,6 +317,7 @@ const verifyCertificate = async (certificateId: string) => {
             certificateId: certificate.certificateId,
             recipientName: (certificate.userId as any).name,
             courseName: ((certificate.batchId as any).courseId as any).title,
+            batchName: (certificate.batchId as any).title,
             batchId: certificate.batchId,
             issuedDate: certificate.issueDate,
         },
@@ -332,6 +350,26 @@ const revokeCertificate = async (
     return certificate;
 };
 
+/**
+ * Attach enrollment progress percentage to certificates
+ */
+const enrichCertificateWithCompletion = async (certificate: any) => {
+    let completionPercentage = 0;
+
+    try {
+        const progress = await ProgressService.getBatchProgress(certificate.enrollmentId.toString());
+        completionPercentage = progress?.overallProgress ?? 0;
+    } catch (err) {
+        completionPercentage = 0;
+    }
+
+    const plainData = certificate.toObject ? certificate.toObject() : certificate;
+    return {
+        ...plainData,
+        completionPercentage,
+    };
+};
+
 const getAllCertificates = async (status?: string) => {
     const normalizedStatus = status?.toLowerCase();
     const statusFilter = normalizedStatus === 'approved'
@@ -344,13 +382,15 @@ const getAllCertificates = async (status?: string) => {
 
     const query = statusFilter ? { status: statusFilter } : {};
 
-    return CertificateModel.find(query)
+    const certificates = await CertificateModel.find(query)
         .populate('userId', 'name email')
         .populate({
             path: 'batchId',
             populate: { path: 'courseId', select: 'title' },
         })
         .sort({ createdAt: -1 });
+
+    return Promise.all(certificates.map(enrichCertificateWithCompletion));
 };
 
 const updateCertificateStatus = async (
@@ -398,7 +438,7 @@ const getUserCertificates = async (userId: string) => {
         })
         .sort({ issueDate: -1 });
 
-    return certificates;
+    return Promise.all(certificates.map(enrichCertificateWithCompletion));
 };
 
 /**
@@ -413,7 +453,7 @@ const getPendingCertificates = async () => {
         })
         .sort({ issueDate: -1 });
 
-    return certificates;
+    return Promise.all(certificates.map(enrichCertificateWithCompletion));
 };
 
 export const CertificateService = {

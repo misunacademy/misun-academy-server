@@ -2,8 +2,8 @@ import express from 'express';
 import validateRequest from '../../middlewares/validateRequest';
 import { loginValidationSchema, sendNewsUpdateSchema } from './admin.validation';
 import { AdminAuthController } from './admin.controller';
-import { requireAuth, requireAdmin, requireSuperAdmin, requireRole } from '../../middlewares/betterAuth';
-import { Role } from '../../types/role';
+import { requireAuth, requireAdmin, requireSuperAdmin } from '../../middlewares/betterAuth';
+
 
 const router = express.Router();
 

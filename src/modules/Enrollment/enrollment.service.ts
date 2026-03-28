@@ -450,7 +450,7 @@ const getUserEnrollments = async (userId: string, status?: EnrollmentStatus) => 
             path: 'batchId',
             populate: {
                 path: 'courseId',
-                select: 'title thumbnailImage category level',
+                select: 'title thumbnailImage category level isCertificateAvailable',
             },
         })
         .sort({ createdAt: -1 })
@@ -470,6 +470,10 @@ const getUserEnrollments = async (userId: string, status?: EnrollmentStatus) => 
 
             return {
                 ...enrollment,
+                isCertificateAvailable:
+                    (enrollment.batchId as any)?.courseId?.isCertificateAvailable !== undefined
+                        ? (enrollment.batchId as any).courseId.isCertificateAvailable
+                        : true,
                 progress: {
                     totalModules,
                     completedModules,

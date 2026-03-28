@@ -1,7 +1,7 @@
 import express from 'express';
 import { DashboardController } from './dashboard.controller';
 import { requireAuth, requireAdmin, requireEmployee } from '../../middlewares/betterAuth';
-import { Role } from '../../types/role';
+// import { Role } from '../../types/role';
 
 const router = express.Router();
 
@@ -37,11 +37,11 @@ router.get(
 
 
 // Employee dashboard route
-router.get(
-    '/employee',
-    requireAuth,
-    requireEmployee,
-    DashboardController.getEmployeeDashboard
-);
+// router.get(
+//     '/employee',
+//     requireAuth,
+//     requireEmployee,
+//     DashboardController.getEmployeeDashboard
+// );
 
 export const DashboardRoutes = router;

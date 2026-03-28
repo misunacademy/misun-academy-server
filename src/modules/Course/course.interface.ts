@@ -18,6 +18,7 @@ export interface ICourse {
     tags: string[];
     featured: boolean;
     status: CourseStatus;
+    isCertificateAvailable?: boolean;
     price: number;
     discountPercentage?: number;
     instructor?: string;

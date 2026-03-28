@@ -45,21 +45,21 @@ const getStudentDashboard = catchAsync(async (req: Request, res: Response) => {
 });
 
 
-const getEmployeeDashboard = catchAsync(async (req: Request, res: Response) => {
-    const { id } = req.user as any;
-    const result = await DashboardService.getEmployeeDashboard(id);
-    sendResponse(res, {
-        statusCode: 200,
-        success: true,
-        message: 'Employee dashboard data retrieved successfully',
-        data: result,
-    });
-});
+// const getEmployeeDashboard = catchAsync(async (req: Request, res: Response) => {
+//     const { id } = req.user as any;
+//     const result = await DashboardService.getEmployeeDashboard(id);
+//     sendResponse(res, {
+//         statusCode: 200,
+//         success: true,
+//         message: 'Employee dashboard data retrieved successfully',
+//         data: result,
+//     });
+// });
 
 export const DashboardController = {
     getDashboardMetaData,
     getAdminDashboard,
     getUserStats,
     getStudentDashboard,
-    getEmployeeDashboard,
+    // getEmployeeDashboard,
 }

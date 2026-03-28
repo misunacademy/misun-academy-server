@@ -63,6 +63,10 @@ const courseSchema = new Schema<ICourse>(
             enum: Object.values(CourseStatus),
             default: CourseStatus.Draft,
         },
+        isCertificateAvailable: {
+            type: Boolean,
+            default: true,
+        },
         instructor: {
             type: String,
         },
