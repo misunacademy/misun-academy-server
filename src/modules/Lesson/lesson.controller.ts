@@ -8,7 +8,7 @@ import { LessonService } from './lesson.service';
  * Create a new lesson for a module
  */
 const createLesson = catchAsync(async (req: Request, res: Response) => {
-    const { moduleId } = req.params;
+    const { moduleId } = req.params as { moduleId: string };
     const lessonData = req.body;
 
     const lesson = await LessonService.createLesson(moduleId, lessonData);
@@ -25,7 +25,7 @@ const createLesson = catchAsync(async (req: Request, res: Response) => {
  * Get all lessons for a module
  */
 const getModuleLessons = catchAsync(async (req: Request, res: Response) => {
-    const { moduleId } = req.params;
+    const { moduleId } = req.params as { moduleId: string };
     const { type } = req.query as { type?: string };
 
     const lessons = await LessonService.getModuleLessons(moduleId, type);
@@ -42,7 +42,7 @@ const getModuleLessons = catchAsync(async (req: Request, res: Response) => {
  * Get lesson by ID
  */
 const getLessonById = catchAsync(async (req: Request, res: Response) => {
-    const { lessonId } = req.params;
+    const { lessonId } = req.params as { lessonId: string };
 
     const lesson = await LessonService.getLessonById(lessonId);
 
@@ -58,7 +58,7 @@ const getLessonById = catchAsync(async (req: Request, res: Response) => {
  * Update lesson
  */
 const updateLesson = catchAsync(async (req: Request, res: Response) => {
-    const { lessonId } = req.params;
+    const { lessonId } = req.params as { lessonId: string };
     const updateData = req.body;
 
     const lesson = await LessonService.updateLesson(lessonId, updateData);
@@ -75,7 +75,7 @@ const updateLesson = catchAsync(async (req: Request, res: Response) => {
  * Delete lesson
  */
 const deleteLesson = catchAsync(async (req: Request, res: Response) => {
-    const { lessonId } = req.params;
+    const { lessonId } = req.params as { lessonId: string };
 
     await LessonService.deleteLesson(lessonId);
 
@@ -91,7 +91,7 @@ const deleteLesson = catchAsync(async (req: Request, res: Response) => {
  * Reorder lessons in a module
  */
 const reorderLessons = catchAsync(async (req: Request, res: Response) => {
-    const { moduleId } = req.params;
+    const { moduleId } = req.params as { moduleId: string };
     const { lessonOrders } = req.body;
 
     const lessons = await LessonService.reorderLessons(moduleId, lessonOrders);
