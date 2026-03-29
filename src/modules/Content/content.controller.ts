@@ -8,7 +8,7 @@ import { ContentService } from './content.service';
  * Get all modules for a batch with progress
  */
 const getBatchModules = catchAsync(async (req: Request, res: Response) => {
-    const { batchId } = req.params;
+    const { batchId } = req.params as { batchId: string };
     const enrollment = (req as any).enrollment;
 
     const result = await ContentService.getBatchModules(batchId, enrollment._id);
@@ -25,7 +25,7 @@ const getBatchModules = catchAsync(async (req: Request, res: Response) => {
  * Get lessons for a module with progress
  */
 const getModuleLessons = catchAsync(async (req: Request, res: Response) => {
-    const { moduleId } = req.params;
+    const { moduleId } = req.params as { moduleId: string };
     const enrollment = (req as any).enrollment;
 
     const result = await ContentService.getModuleLessons(enrollment._id, moduleId);
@@ -42,7 +42,7 @@ const getModuleLessons = catchAsync(async (req: Request, res: Response) => {
  * Get lesson details with video URL
  */
 const getLessonDetails = catchAsync(async (req: Request, res: Response) => {
-    const { moduleId, lessonId } = req.params;
+    const { moduleId, lessonId } = req.params as { moduleId: string; lessonId: string };
     const enrollment = (req as any).enrollment;
 
     const result = await ContentService.getLessonDetails(enrollment._id, moduleId, lessonId);
@@ -59,7 +59,7 @@ const getLessonDetails = catchAsync(async (req: Request, res: Response) => {
  * Get module resources
  */
 const getModuleResources = catchAsync(async (req: Request, res: Response) => {
-    const { moduleId } = req.params;
+    const { moduleId } = req.params as { moduleId: string };
     const enrollment = (req as any).enrollment;
 
     const result = await ContentService.getModuleResources(enrollment._id, moduleId);

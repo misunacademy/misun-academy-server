@@ -8,7 +8,7 @@ import { ModuleService } from './module.service';
  * Create a new module for a course
  */
 const createModule = catchAsync(async (req: Request, res: Response) => {
-    const { courseId } = req.params;
+    const { courseId } = req.params as { courseId: string };
     const moduleData = req.body;
 
     const module = await ModuleService.createModule(courseId, moduleData);
@@ -25,7 +25,7 @@ const createModule = catchAsync(async (req: Request, res: Response) => {
  * Get all modules for a course
  */
 const getCourseModules = catchAsync(async (req: Request, res: Response) => {
-    const { courseId } = req.params;
+    const { courseId } = req.params as { courseId: string };
     const { status } = req.query as { status?: string };
 
     const modules = await ModuleService.getCourseModules(courseId, status);
@@ -42,7 +42,7 @@ const getCourseModules = catchAsync(async (req: Request, res: Response) => {
  * Get module by ID
  */
 const getModuleById = catchAsync(async (req: Request, res: Response) => {
-    const { moduleId } = req.params;
+    const { moduleId } = req.params as { moduleId: string };
 
     const module = await ModuleService.getModuleById(moduleId);
 
@@ -58,7 +58,7 @@ const getModuleById = catchAsync(async (req: Request, res: Response) => {
  * Update module
  */
 const updateModule = catchAsync(async (req: Request, res: Response) => {
-    const { moduleId } = req.params;
+    const { moduleId } = req.params as { moduleId: string };
     const updateData = req.body;
 
     const module = await ModuleService.updateModule(moduleId, updateData);
@@ -75,7 +75,7 @@ const updateModule = catchAsync(async (req: Request, res: Response) => {
  * Delete module
  */
 const deleteModule = catchAsync(async (req: Request, res: Response) => {
-    const { moduleId } = req.params;
+    const { moduleId } = req.params as { moduleId: string };
 
     await ModuleService.deleteModule(moduleId);
 
@@ -91,7 +91,7 @@ const deleteModule = catchAsync(async (req: Request, res: Response) => {
  * Reorder modules
  */
 const reorderModules = catchAsync(async (req: Request, res: Response) => {
-    const { courseId } = req.params;
+    const { courseId } = req.params as { courseId: string };
     const { moduleOrders } = req.body;
 
     const modules = await ModuleService.reorderModules(courseId, moduleOrders);

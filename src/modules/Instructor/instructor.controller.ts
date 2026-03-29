@@ -74,7 +74,7 @@ const getAssignedBatches = catchAsync(async (req: Request, res: Response) => {
  * Get batch students roster
  */
 const getBatchStudents = catchAsync(async (req: Request, res: Response) => {
-    const { batchId } = req.params;
+    const { batchId } = req.params as { batchId: string };
     const { id } = req.user as any;
 
     const result = await InstructorService.getBatchStudents(id, batchId);
@@ -91,7 +91,7 @@ const getBatchStudents = catchAsync(async (req: Request, res: Response) => {
  * Get batch statistics
  */
 const getBatchStatistics = catchAsync(async (req: Request, res: Response) => {
-    const { batchId } = req.params;
+    const { batchId } = req.params as { batchId: string };
     const { id } = req.user as any;
 
     const result = await InstructorService.getBatchStatistics(id, batchId);
