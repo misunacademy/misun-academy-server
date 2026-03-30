@@ -1,6 +1,5 @@
 import express, { Router, Request, Response } from 'express';
 import { getAuth } from '../config/betterAuth';
-import { fromNodeHeaders } from 'better-auth/node';
 import { dynamicImport } from '../utils/dynamicImport';
 import { EnrollmentModel } from '../modules/Enrollment/enrollment.model';
 import { EnrollmentStatus } from '../types/common';
@@ -13,10 +12,18 @@ router.use('/server', express.json(), express.urlencoded({ extended: true }));
 
 let cachedBetterAuthHandler: ((req: Request, res: Response) => unknown) | null = null;
 
-const buildAuthContext = (req: Request) => ({
-  headers: fromNodeHeaders(req.headers as any),
-  asResponse: true as const,
-});
+const getFromNodeHeaders = async () => {
+  const { fromNodeHeaders } = await dynamicImport('better-auth/node');
+  return fromNodeHeaders as (headers: any) => Headers;
+};
+
+const buildAuthContext = async (req: Request) => {
+  const fromNodeHeaders = await getFromNodeHeaders();
+  return {
+    headers: fromNodeHeaders(req.headers as any),
+    asResponse: true as const,
+  };
+};
 
 const forwardBetterAuthResponse = async (res: Response, response: globalThis.Response) => {
   const headers = response.headers as any;
@@ -77,9 +84,9 @@ const runAuthAction = async (
 
 router.post('/server/sign-in/email', async (req: Request, res: Response) => {
   const auth = getAuth();
-  return runAuthAction(res, 'signInEmail', () =>
+  return runAuthAction(res, 'signInEmail', async () =>
     auth.api.signInEmail({
-      ...buildAuthContext(req),
+      ...(await buildAuthContext(req)),
       body: {
         email: req.body?.email,
         password: req.body?.password,
@@ -92,9 +99,9 @@ router.post('/server/sign-in/email', async (req: Request, res: Response) => {
 
 router.post('/server/sign-in/social', async (req: Request, res: Response) => {
   const auth = getAuth();
-  return runAuthAction(res, 'signInSocial', () =>
+  return runAuthAction(res, 'signInSocial', async () =>
     auth.api.signInSocial({
-      ...buildAuthContext(req),
+      ...(await buildAuthContext(req)),
       body: {
         provider: req.body?.provider,
         callbackURL: req.body?.callbackURL,
@@ -109,9 +116,9 @@ router.post('/server/sign-in/social', async (req: Request, res: Response) => {
 
 router.post('/server/sign-up/email', async (req: Request, res: Response) => {
   const auth = getAuth();
-  return runAuthAction(res, 'signUpEmail', () =>
+  return runAuthAction(res, 'signUpEmail', async () =>
     auth.api.signUpEmail({
-      ...buildAuthContext(req),
+      ...(await buildAuthContext(req)),
       body: {
         email: req.body?.email,
         password: req.body?.password,
@@ -125,9 +132,9 @@ router.post('/server/sign-up/email', async (req: Request, res: Response) => {
 
 router.post('/server/sign-out', async (req: Request, res: Response) => {
   const auth = getAuth();
-  return runAuthAction(res, 'signOut', () =>
+  return runAuthAction(res, 'signOut', async () =>
     auth.api.signOut({
-      ...buildAuthContext(req),
+      ...(await buildAuthContext(req)),
       body: req.body,
     })
   );
@@ -135,9 +142,9 @@ router.post('/server/sign-out', async (req: Request, res: Response) => {
 
 router.post('/server/request-password-reset', async (req: Request, res: Response) => {
   const auth = getAuth();
-  return runAuthAction(res, 'requestPasswordReset', () =>
+  return runAuthAction(res, 'requestPasswordReset', async () =>
     auth.api.requestPasswordReset({
-      ...buildAuthContext(req),
+      ...(await buildAuthContext(req)),
       body: {
         email: req.body?.email,
         redirectTo: req.body?.redirectTo,
@@ -148,9 +155,9 @@ router.post('/server/request-password-reset', async (req: Request, res: Response
 
 router.post('/server/reset-password', async (req: Request, res: Response) => {
   const auth = getAuth();
-  return runAuthAction(res, 'resetPassword', () =>
+  return runAuthAction(res, 'resetPassword', async () =>
     auth.api.resetPassword({
-      ...buildAuthContext(req),
+      ...(await buildAuthContext(req)),
       body: {
         newPassword: req.body?.newPassword,
         token: req.body?.token,
@@ -161,9 +168,9 @@ router.post('/server/reset-password', async (req: Request, res: Response) => {
 
 router.get('/server/verify-email', async (req: Request, res: Response) => {
   const auth = getAuth();
-  return runAuthAction(res, 'verifyEmail', () =>
+  return runAuthAction(res, 'verifyEmail', async () =>
     auth.api.verifyEmail({
-      ...buildAuthContext(req),
+      ...(await buildAuthContext(req)),
       query: {
         token: req.query?.token,
       },
@@ -173,9 +180,9 @@ router.get('/server/verify-email', async (req: Request, res: Response) => {
 
 router.post('/server/change-password', async (req: Request, res: Response) => {
   const auth = getAuth();
-  return runAuthAction(res, 'changePassword', () =>
+  return runAuthAction(res, 'changePassword', async () =>
     auth.api.changePassword({
-      ...buildAuthContext(req),
+      ...(await buildAuthContext(req)),
       body: {
         currentPassword: req.body?.currentPassword,
         newPassword: req.body?.newPassword,
@@ -187,9 +194,9 @@ router.post('/server/change-password', async (req: Request, res: Response) => {
 
 router.patch('/server/update-user', async (req: Request, res: Response) => {
   const auth = getAuth();
-  return runAuthAction(res, 'updateUser', () =>
+  return runAuthAction(res, 'updateUser', async () =>
     auth.api.updateUser({
-      ...buildAuthContext(req),
+      ...(await buildAuthContext(req)),
       body: req.body,
     })
   );
@@ -197,18 +204,18 @@ router.patch('/server/update-user', async (req: Request, res: Response) => {
 
 router.get('/server/list-sessions', async (req: Request, res: Response) => {
   const auth = getAuth();
-  return runAuthAction(res, 'listSessions', () =>
+  return runAuthAction(res, 'listSessions', async () =>
     auth.api.listSessions({
-      ...buildAuthContext(req),
+      ...(await buildAuthContext(req)),
     })
   );
 });
 
 router.post('/server/revoke-session', async (req: Request, res: Response) => {
   const auth = getAuth();
-  return runAuthAction(res, 'revokeSession', () =>
+  return runAuthAction(res, 'revokeSession', async () =>
     auth.api.revokeSession({
-      ...buildAuthContext(req),
+      ...(await buildAuthContext(req)),
       body: {
         token: req.body?.token,
       },
@@ -219,6 +226,7 @@ router.post('/server/revoke-session', async (req: Request, res: Response) => {
 router.get('/me', async (req: Request, res: Response) => {
   try {
     const auth = getAuth();
+    const fromNodeHeaders = await getFromNodeHeaders();
     const session = await auth.api.getSession({
       headers: fromNodeHeaders(req.headers as any),
     });
