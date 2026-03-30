@@ -79,11 +79,10 @@ app.use(morgan('dev'));         // Logs HTTP requests for better monitoring
 app.use(compression());         // Compresses response bodies for faster delivery
 
 // to prevent client API from hanging.
-import BetterAuthRoutes from './routes/betterAuth.routes';
+import BetterAuthRoutes, { betterAuthCatchAll } from './routes/betterAuth.routes';
 
-// Enable body parsing BEFORE auth routes so Better Auth can read request body
-app.use(express.urlencoded({ extended: true })); // FOR FORM DATA
-app.use(express.json()); // FOR JSON
+// IMPORTANT: Keep Better Auth mounted before body parsers.
+// Applying express.json() before Better Auth can cause auth requests to hang.
 
 // Stricter Rate Limiter for Auth Routes (prevents brute force attacks)
 // IMPORTANT: Apply BEFORE mounting auth routes
@@ -122,12 +121,16 @@ app.use('/api/v1/auth/change-password', strictAuthLimiter);
 // This is fine as the strict limit will trigger first/fail first if exceeded.
 app.use('/api/v1/auth', generalAuthLimiter);
 
-// Mount Better Auth routes (inherits auth rate limiter above)
+// Custom auth utility routes (e.g. GET /api/v1/auth/me)
 app.use('/api/v1/auth', BetterAuthRoutes);
 
-// Now safe to apply express.json() for other routes
-// app.use(express.urlencoded({ extended: true })); // FOR FORM DATA
-// app.use(express.json()); // FOR JSON
+// Better Auth catch-all routes (Express v4 pattern)
+app.all('/api/v1/auth/*', betterAuthCatchAll);
+app.all('/api/v1/auth', betterAuthCatchAll);
+
+// Mount body parsers after Better Auth routes
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 // API Rate Limiter (for non-auth routes)
 const apiRateLimiter = rateLimit({

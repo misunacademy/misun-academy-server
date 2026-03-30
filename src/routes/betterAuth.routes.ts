@@ -6,6 +6,8 @@ import { EnrollmentStatus } from '../types/common';
 
 const router = Router();
 
+let cachedBetterAuthHandler: ((req: Request, res: Response) => unknown) | null = null;
+
 router.get('/me', async (req: Request, res: Response) => {
   try {
     const auth = getAuth();
@@ -64,22 +66,30 @@ router.get('/me', async (req: Request, res: Response) => {
   }
 });
 
-// Mount Better Auth handler for all auth-related routes
-// This handles: /sign-up, /sign-in, /sign-out, /session, /callback/*, etc.
-router.all('*', async (req: Request, res: Response) => {
+// App-level catch-all handler for Better Auth endpoints.
+// Keep this outside router mounting to preserve full request path.
+export const betterAuthCatchAll = async (req: Request, res: Response) => {
   try {
-    const auth = getAuth();
-    // Dynamically import ESM-only package to avoid ERR_REQUIRE_ESM in CJS build
-    const { toNodeHandler } = await dynamicImport('better-auth/node');
-    const handler = toNodeHandler(auth);
+    if (!cachedBetterAuthHandler) {
+      const auth = getAuth();
+      // Dynamically import ESM-only package to avoid ERR_REQUIRE_ESM in CJS build
+      const { toNodeHandler } = await dynamicImport('better-auth/node');
+      cachedBetterAuthHandler = toNodeHandler(auth);
+    }
+
+    const handler = cachedBetterAuthHandler;
+    if (!handler) {
+      throw new Error('Better Auth handler is unavailable');
+    }
+
     return handler(req, res);
   } catch (error) {
     console.error('Better Auth route error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Authentication service not initialized',
     });
   }
-});
+};
 
 export default router;
