@@ -9,6 +9,26 @@ import { Status, EnrollmentStatus } from "../../types/common";
 import env from "../../config/env";
 import { EnrollmentModel } from '../Enrollment/enrollment.model';
 
+const mapSslGatewayStatus = (rawStatus?: string): Status | null => {
+  if (!rawStatus) return null;
+
+  const normalized = rawStatus.toString().trim().toUpperCase();
+
+  if (["FAILED", "FAIL", "FAILED_CARD", "INVALID_TRANSACTION"].includes(normalized)) {
+    return Status.Failed;
+  }
+
+  if (["CANCELLED", "CANCELED", "CANCEL"].includes(normalized)) {
+    return Status.Cancel;
+  }
+
+  if (["PENDING", "PROCESSING", "INITIATED"].includes(normalized)) {
+    return Status.Pending;
+  }
+
+  return null;
+};
+
 const getPaymentHistory = catchAsync(async (req: Request, res: Response) => {
   const result = await PaymentService.getPaymentHistory(req.query);
 
@@ -54,8 +74,9 @@ const getMyPayments = catchAsync(async (req: Request, res: Response) => {
 });
 
 const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
-  const transactionId = req.query.t as string;
+  const transactionId = (req.query.t || req.body?.tran_id) as string;
   const valId = (req.body?.val_id || req.query?.val_id) as string | undefined;
+  const callbackStatus = mapSslGatewayStatus((req.body?.status || req.query?.status) as string | undefined);
 
   if (!transactionId) {
     throw new ApiError(StatusCodes.BAD_REQUEST, "Transaction ID is required");
@@ -68,6 +89,13 @@ const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
       await PaymentService.finalizeSSLCommerzPayment(transactionId, valId);
     } catch (error) {
       console.error('Failed to finalize payment on status callback:', error);
+    }
+  } else if (callbackStatus && callbackStatus !== Status.Pending) {
+    try {
+      const callbackPayload = Object.keys(req.body || {}).length > 0 ? req.body : req.query;
+      await PaymentService.updatePaymentWithEnrollStatus(transactionId, callbackStatus, callbackPayload);
+    } catch (error) {
+      console.error('Failed to update payment from status callback:', error);
     }
   }
 

@@ -3,6 +3,7 @@ import { getAuth } from '../config/betterAuth';
 import { StatusCodes } from 'http-status-codes';
 import { Role } from '../types/role';
 import { UserStatus } from '../types/common';
+import { fromNodeHeaders } from 'better-auth/node';
 
 // Extend Express Request to include user data
 declare global {
@@ -33,7 +34,7 @@ export const requireAuth = async (
     const auth = getAuth();
     // Get session from Better Auth
     const session = await auth.api.getSession({
-      headers: req.headers as any,
+      headers: fromNodeHeaders(req.headers as any),
     });
 
     if (!session || !session.user) {
@@ -152,7 +153,7 @@ export const optionalAuth = async (
   try {
     const auth = getAuth();
     const session = await auth.api.getSession({
-      headers: req.headers as any,
+      headers: fromNodeHeaders(req.headers as any),
     });
 
     if (session && session.user) {

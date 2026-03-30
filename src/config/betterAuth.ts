@@ -20,6 +20,10 @@ export const initializeAuth = async () => {
   const { betterAuth } = await dynamicImport('better-auth');
   const { mongodbAdapter } = await dynamicImport('better-auth/adapters/mongodb');
 
+  const authCookieDomain = process.env.AUTH_COOKIE_DOMAIN?.trim();
+  const enableCrossSubDomainCookies =
+    process.env.NODE_ENV === 'production' && Boolean(authCookieDomain);
+
   authInstance = betterAuth({
     database: mongodbAdapter(mongoose.connection.getClient().db(), {
       // Better Auth defaults to singular collection names; enable plural to use "users"
@@ -149,10 +153,14 @@ export const initializeAuth = async () => {
 
     advanced: {
       cookiePrefix: 'better-auth',
-      crossSubDomainCookies: {
-        enabled: process.env.NODE_ENV === 'production',
-        domain: process.env.AUTH_COOKIE_DOMAIN || '.maindomain.com',
-      },
+      crossSubDomainCookies: enableCrossSubDomainCookies
+        ? {
+            enabled: true,
+            domain: authCookieDomain!,
+          }
+        : {
+            enabled: false,
+          },
       useSecureCookies: process.env.NODE_ENV === 'production',
       // Let MongoDB adapter handle ObjectId generation natively
     },

@@ -9,7 +9,6 @@ import { sendPaymentSuccessEmail, sendEnrollmentConfirmationEmail, sendPaymentFa
 import crypto from 'crypto';
 import { BatchModel } from "../Batch/batch.model";
 import { ProfileService } from "../Profile/profile.service";
-import { ProfileModel } from "../Profile/profile.model";
 import axios from 'axios';
 import env from '../../config/env';
 import { sslcommerzConfig } from '../../config/sslcommerz';
@@ -33,6 +32,23 @@ const generateTransactionId = (): string => {
     const timestamp = Date.now();
     const random = crypto.randomBytes(4).toString('hex').toUpperCase();
     return `TXN-${timestamp}-${random}`;
+};
+
+const syncProfileEnrollmentReference = async (
+    userId: string,
+    enrollmentId: string,
+    session: mongoose.ClientSession,
+    context: string
+) => {
+    try {
+        await ProfileService.createOrUpdateProfileAfterEnrollment(
+            userId,
+            enrollmentId,
+            session
+        );
+    } catch (profileError) {
+        console.error(`Failed to update student profile after ${context}:`, profileError);
+    }
 };
 
 const getPaymentHistory = async (query: PaymentHistoryQuery) => {
@@ -232,16 +248,12 @@ const updatePaymentWithEnrollStatus = async (
                     { session }
                 );
 
-                // AUTOMATIC PROFILE CREATION/UPDATE - Single source of truth
-                try {
-                    await ProfileService.createOrUpdateProfileAfterEnrollment(
-                        enrollment.userId.toString(),
-                        updatedPayment.enrollmentId!,
-                        session
-                    );
-                } catch (profileError) {
-                    console.error('Failed to update student profile after SSLCommerz payment:', profileError);
-                }
+                await syncProfileEnrollmentReference(
+                    enrollment.userId.toString(),
+                    updatedPayment.enrollmentId!,
+                    session,
+                    'SSLCommerz payment'
+                );
 
                 // Send payment success email
                 const batch = updatedPayment.batchId as any;
@@ -476,10 +488,11 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
                     );
                 }
 
-                await ProfileService.createOrUpdateProfileAfterEnrollment(
+                await syncProfileEnrollmentReference(
                     enrollment.userId.toString(),
                     enrollment.enrollmentId!,
-                    session
+                    session,
+                    'SSLCommerz payment finalize'
                 );
 
                 const user = await UserModel.findById(payment.userId).session(session);
@@ -565,7 +578,10 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
     }
 
-    if (enrollment.status !== EnrollmentStatus.Pending) {
+    if (
+        enrollment.status !== EnrollmentStatus.Pending &&
+        enrollment.status !== EnrollmentStatus.PaymentFailed
+    ) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment is not pending payment');
     }
 
@@ -592,8 +608,8 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         currency: "BDT",
         tran_id: transactionId,
         success_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}`,
-        fail_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}`,
-        cancel_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}`,
+        fail_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=failed`,
+        cancel_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=cancel`,
         ipn_url: `${config.SERVER_URL}/api/v1/payments/webhook`,
         product_name: `Graphics Design Course - ${batch.title}`,
         cus_name: user.name,
@@ -646,17 +662,30 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
     //     value_c: batch._id.toString(),
     // };
 
-    // Create pending payment record with proper transaction ID
-    await PaymentModel.create({
-        userId,
-        batchId: batch._id,
-        enrollmentId, // Link to enrollment
-        transactionId, // Unique transaction ID
-        amount: batch.price,
-        currency: batch.currency || 'BDT',
-        status: Status.Pending,
-        method: 'SSLCommerz',
-    });
+    // Reuse a single payment record per enrollment and rotate transaction ID per retry.
+    await PaymentModel.findOneAndUpdate(
+        { enrollmentId },
+        {
+            $set: {
+                userId,
+                batchId: batch._id,
+                enrollmentId,
+                transactionId,
+                amount: batch.price,
+                currency: batch.currency || 'BDT',
+                status: Status.Pending,
+                method: 'SSLCommerz',
+                gatewayResponse: {
+                    retriedAt: new Date(),
+                },
+            },
+            $unset: {
+                verifiedAt: '',
+                verifiedBy: '',
+            },
+        },
+        { upsert: true, setDefaultsOnInsert: true }
+    );
 
 
 
@@ -781,17 +810,12 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
                 );
             }
 
-            // AUTOMATIC PROFILE CREATION/UPDATE - Single source of truth for payments
-            try {
-                await ProfileService.createOrUpdateProfileAfterEnrollment(
-                    enrollment.userId.toString(),
-                    enrollmentId,
-                    session
-                );
-            } catch (profileError) {
-                console.error('Failed to update student profile after payment approval:', profileError);
-                // Don't fail the payment approval, but log the error
-            }
+            await syncProfileEnrollmentReference(
+                enrollment.userId.toString(),
+                enrollmentId,
+                session,
+                'manual payment approval'
+            );
         } else {
             // Reject payment
             payment.status = Status.Failed;

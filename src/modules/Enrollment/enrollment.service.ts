@@ -166,7 +166,13 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
         const existingPendingEnrollment = await EnrollmentModel.findOne({
             userId,
             batchId,
-            status: { $in: [EnrollmentStatus.Pending, EnrollmentStatus.PaymentPending] }
+            status: {
+                $in: [
+                    EnrollmentStatus.Pending,
+                    EnrollmentStatus.PaymentPending,
+                    EnrollmentStatus.PaymentFailed,
+                ]
+            }
         })
         .populate('batchId')
         .session(session);

@@ -124,8 +124,8 @@ app.use('/api/v1/auth', generalAuthLimiter);
 // Custom auth utility routes (e.g. GET /api/v1/auth/me)
 app.use('/api/v1/auth', BetterAuthRoutes);
 
-// Better Auth catch-all routes (Express v4 pattern)
-app.all('/api/v1/auth/*', betterAuthCatchAll);
+// Better Auth catch-all routes (Express v5 pattern)
+app.all('/api/v1/auth/*splat', betterAuthCatchAll);
 app.all('/api/v1/auth', betterAuthCatchAll);
 
 // Mount body parsers after Better Auth routes
