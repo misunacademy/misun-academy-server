@@ -1,15 +1,7 @@
 import { Types, Model } from 'mongoose';
-import { EnrollmentStatus } from '../../types/common';
 
 export interface IEnrollmentMapping {
   enrollmentId: string;
-  courseId: Types.ObjectId;
-  batchId: Types.ObjectId;
-  status: EnrollmentStatus;
-  enrolledAt: Date;
-  completedAt?: Date;
-  certificateIssued: boolean;
-  certificateId?: string;
 }
 
 export interface IEducation {

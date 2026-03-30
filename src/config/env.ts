@@ -17,6 +17,7 @@ const EnvSchema = z.object({
     // Better Auth (NEW)
     BETTER_AUTH_SECRET: z.string(),
     BETTER_AUTH_URL: z.string(),
+    AUTH_COOKIE_DOMAIN: z.string().optional(),
     GOOGLE_CLIENT_ID: z.string(),
     GOOGLE_CLIENT_SECRET: z.string(),
     CLIENT_URL: z.string().optional(),

@@ -7,30 +7,99 @@ import { IProfile } from './profile.interface';
 import mongoose from 'mongoose';
 import { UserModel } from '../User/user.model';
 
+const toEnrollmentRefs = (enrollments: any): Array<{ enrollmentId: string }> => {
+  if (!Array.isArray(enrollments)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+
+  return enrollments
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        return entry.trim();
+      }
+
+      if (entry && typeof entry.enrollmentId === 'string') {
+        return entry.enrollmentId.trim();
+      }
+
+      return '';
+    })
+    .filter((id) => id.length > 0)
+    .filter((id) => {
+      if (seen.has(id)) {
+        return false;
+      }
+      seen.add(id);
+      return true;
+    })
+    .map((enrollmentId) => ({ enrollmentId }));
+};
+
+const hydrateProfileWithEnrollmentDetails = async (profileDoc: any) => {
+  if (!profileDoc) {
+    return profileDoc;
+  }
+
+  const profile = profileDoc.toObject ? profileDoc.toObject() : profileDoc;
+  const enrollmentRefs = toEnrollmentRefs(profile.enrollments || []);
+  const enrollmentIds = enrollmentRefs.map((entry) => entry.enrollmentId);
+
+  if (!enrollmentIds.length) {
+    profile.enrollments = [];
+    return profile;
+  }
+
+  const enrollments = await EnrollmentModel.find({
+    enrollmentId: { $in: enrollmentIds },
+  })
+    .populate({
+      path: 'batchId',
+      select: 'title batchNumber price startDate endDate status manualPaymentPrice',
+      populate: {
+        path: 'courseId',
+        select: 'title slug shortDescription category level thumbnailImage',
+      },
+    })
+    .populate({
+      path: 'paymentId',
+      select: 'transactionId status method amount currency',
+    })
+    .lean();
+
+  const enrollmentMap = new Map(
+    enrollments.map((enrollment: any) => [enrollment.enrollmentId, enrollment])
+  );
+
+  profile.enrollments = enrollmentIds
+    .map((id: string) => enrollmentMap.get(id))
+    .filter(Boolean);
+
+  return profile;
+};
+
 const createProfile = async (userId: string, profileData: Partial<IProfile>) => {
+  const enrollmentRefs = toEnrollmentRefs((profileData as any).enrollments);
+
   const profile = await ProfileModel.create({
     user: userId,
     ...profileData,
+    ...(enrollmentRefs.length > 0 && { enrollments: enrollmentRefs }),
   });
   return profile;
 };
 
 const getProfile = async (userId: string) => {
   const profile = await ProfileModel.findOne({ user: userId })
-    .populate({path: 'user'})
-    .populate({
-      path: 'enrollments.courseId',
-      select: 'title thumbnailImage',
-    })
-    .populate({
-      path: 'enrollments.batchId',
-      select: 'batchName batchNumber price',
-    });
-  return profile;
+    .populate({ path: 'user' });
+
+  return hydrateProfileWithEnrollmentDetails(profile);
 };
 
 const updateProfile = async (userId: string, updateData: any) => {
-  const { avatar, name, ...profileData } = updateData;
+  const { avatar, name, enrollments, ...profileData } = updateData;
+  const enrollmentRefs = toEnrollmentRefs(enrollments);
 
   // Update user model if avatar or name is provided
   if (avatar || name) {
@@ -44,7 +113,12 @@ const updateProfile = async (userId: string, updateData: any) => {
   // Update or create profile with remaining data
   const profile = await ProfileModel.findOneAndUpdate(
     { user: userId },
-    { $set: profileData },
+    {
+      $set: {
+        ...profileData,
+        ...(enrollments !== undefined && { enrollments: enrollmentRefs }),
+      },
+    },
     { new: true, upsert: true, runValidators: true }
   );
 
@@ -105,23 +179,11 @@ const createOrUpdateProfileAfterEnrollment = async (
       session.startTransaction();
     }
 
-    // Get enrollment details with batch and course info
-    const enrollment = await EnrollmentModel.findOne({ enrollmentId })
-      .populate({
-        path: 'batchId',
-        populate: {
-          path: 'courseId',
-          select: '_id title'
-        }
-      })
-      .session(session);
+    // Validate enrollment existence
+    const enrollment = await EnrollmentModel.findOne({ enrollmentId }).session(session);
 
     if (!enrollment) {
       throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
-    }
-
-    if (!enrollment.batchId || !(enrollment.batchId as any).courseId) {
-      throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Enrollment missing batch or course data');
     }
 
     // Find existing profile or create new one
@@ -134,43 +196,21 @@ const createOrUpdateProfileAfterEnrollment = async (
         areasOfInterest: [],
         enrollments: [{
           enrollmentId: enrollment.enrollmentId!,
-          courseId: (enrollment.batchId as any).courseId._id,
-          batchId: enrollment.batchId._id,
-          status: enrollment.status,
-          enrolledAt: enrollment.enrolledAt,
-          completedAt: enrollment.completedAt,
-          certificateIssued: enrollment.certificateIssued,
-          certificateId: enrollment.certificateId,
         }],
       }], { session });
 
       profile = profiles[0];
     } else {
-      // Update existing profile - add or update enrollment
-      const existingEnrollmentIndex = profile.enrollments.findIndex(
+      // Update existing profile - keep only enrollment references
+      const hasEnrollmentRef = profile.enrollments.some(
         (e) => e.enrollmentId === enrollment.enrollmentId
       );
 
-      const enrollmentData = {
-        enrollmentId: enrollment.enrollmentId!,
-        courseId: (enrollment.batchId as any).courseId._id,
-        batchId: enrollment.batchId._id,
-        status: enrollment.status,
-        enrolledAt: enrollment.enrolledAt,
-        completedAt: enrollment.completedAt,
-        certificateIssued: enrollment.certificateIssued,
-        certificateId: enrollment.certificateId,
-      };
-
-      if (existingEnrollmentIndex >= 0) {
-        // Update existing enrollment
-        profile.enrollments[existingEnrollmentIndex] = enrollmentData;
-      } else {
+      if (!hasEnrollmentRef) {
         // Add new enrollment
-        profile.enrollments.push(enrollmentData);
+        profile.enrollments.push({ enrollmentId: enrollment.enrollmentId! });
+        await profile.save({ session });
       }
-
-      await profile.save({ session });
     }
 
     if (!providedSession) {
@@ -204,6 +244,10 @@ const updateProfileEnrollmentStatus = async (
   const session = await mongoose.startSession();
 
   try {
+    // Status now lives in Enrollment collection. Keep profile in sync as a reference list only.
+    void newStatus;
+    void additionalData;
+
     await session.startTransaction();
 
     // Find enrollment to get user ID
@@ -212,34 +256,19 @@ const updateProfileEnrollmentStatus = async (
       throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
     }
 
-    // Update profile enrollment status
+    // Ensure reference exists in profile
     const profile = await ProfileModel.findOne({ user: enrollment.userId }).session(session);
     if (!profile) {
-      // If no profile exists, create one (fallback)
-      await createOrUpdateProfileAfterEnrollment(enrollment.userId.toString(), enrollmentId);
-      return;
-    }
+      await createOrUpdateProfileAfterEnrollment(enrollment.userId.toString(), enrollmentId, session);
+    } else {
+      const hasEnrollmentRef = profile.enrollments.some(
+        (entry) => entry.enrollmentId === enrollmentId
+      );
 
-    const enrollmentIndex = profile.enrollments.findIndex(
-      (e) => e.enrollmentId === enrollmentId
-    );
-
-    if (enrollmentIndex >= 0) {
-      profile.enrollments[enrollmentIndex].status = newStatus;
-
-      if (additionalData?.completedAt) {
-        profile.enrollments[enrollmentIndex].completedAt = additionalData.completedAt;
+      if (!hasEnrollmentRef) {
+        profile.enrollments.push({ enrollmentId });
+        await profile.save({ session });
       }
-
-      if (additionalData?.certificateIssued !== undefined) {
-        profile.enrollments[enrollmentIndex].certificateIssued = additionalData.certificateIssued;
-      }
-
-      if (additionalData?.certificateId) {
-        profile.enrollments[enrollmentIndex].certificateId = additionalData.certificateId;
-      }
-
-      await profile.save({ session });
     }
 
     await session.commitTransaction();
@@ -256,20 +285,10 @@ const updateProfileEnrollmentStatus = async (
  * Single source of truth for student information
  */
 const getCompleteStudentProfile = async (userId: string) => {
-  const profile = await ProfileModel.findOne({ user: userId })
-    .populate({
-      path: 'enrollments.courseId',
-      select: 'title shortDescription category level thumbnailImage',
-    })
-    .populate({
-      path: 'enrollments.batchId',
-      select: 'title batchNumber startDate endDate status',
-      populate: {
-        path: 'courseId',
-        select: 'title',
-      },
-    })
-    .lean();
+  const profileDoc = await ProfileModel.findOne({ user: userId })
+    .populate({ path: 'user' });
+
+  const profile = await hydrateProfileWithEnrollmentDetails(profileDoc);
 
   if (!profile) {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Student profile not found');
@@ -278,9 +297,9 @@ const getCompleteStudentProfile = async (userId: string) => {
   // Calculate enrollment statistics
   const enrollmentStats = {
     totalEnrollments: profile.enrollments.length,
-    activeEnrollments: profile.enrollments.filter(e => e.status === EnrollmentStatus.Active).length,
-    completedEnrollments: profile.enrollments.filter(e => e.status === EnrollmentStatus.Completed).length,
-    certificatesEarned: profile.enrollments.filter(e => e.certificateIssued).length,
+    activeEnrollments: profile.enrollments.filter((e: any) => e.status === EnrollmentStatus.Active).length,
+    completedEnrollments: profile.enrollments.filter((e: any) => e.status === EnrollmentStatus.Completed).length,
+    certificatesEarned: profile.enrollments.filter((e: any) => e.certificateIssued).length,
   };
 
   return {
@@ -301,13 +320,7 @@ const syncAllUserEnrollmentsToProfile = async (userId: string): Promise<void> =>
 
     // Get all user enrollments
     const enrollments = await EnrollmentModel.find({ userId })
-      .populate({
-        path: 'batchId',
-        populate: {
-          path: 'courseId',
-          select: '_id'
-        }
-      })
+      .select('enrollmentId')
       .session(session);
 
     // Find or create profile
@@ -323,17 +336,11 @@ const syncAllUserEnrollmentsToProfile = async (userId: string): Promise<void> =>
       profile = profiles[0];
     }
 
-    // Update enrollments in profile
-    const updatedEnrollments = enrollments.map(enrollment => ({
-      enrollmentId: enrollment.enrollmentId!,
-      courseId: (enrollment.batchId as any).courseId._id,
-      batchId: enrollment.batchId._id,
-      status: enrollment.status,
-      enrolledAt: enrollment.enrolledAt,
-      completedAt: enrollment.completedAt,
-      certificateIssued: enrollment.certificateIssued,
-      certificateId: enrollment.certificateId,
-    }));
+    // Sync reference list only (no duplicated enrollment fields)
+    const updatedEnrollments = enrollments
+      .map((enrollment) => enrollment.enrollmentId)
+      .filter((id): id is string => Boolean(id))
+      .map((id) => ({ enrollmentId: id }));
 
     if (profile) {
       profile.enrollments = updatedEnrollments;

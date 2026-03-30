@@ -4,13 +4,6 @@ import { IProfile, IProfileModel, IEnrollmentMapping } from './profile.interface
 const EnrollmentMappingSchema = new Schema<IEnrollmentMapping>(
   {
     enrollmentId: { type: String, required: true },
-    courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
-    batchId: { type: Schema.Types.ObjectId, ref: 'Batch', required: true },
-    status: { type: String, required: true },
-    enrolledAt: { type: Date, required: true },
-    completedAt: { type: Date },
-    certificateIssued: { type: Boolean, default: false },
-    certificateId: { type: String },
   },
   { _id: false },
 );
@@ -95,8 +88,5 @@ const profileSchema = new Schema<IProfile>(
 
 // Indexes for better query performance
 profileSchema.index({ 'enrollments.enrollmentId': 1 });
-profileSchema.index({ 'enrollments.courseId': 1 });
-profileSchema.index({ 'enrollments.batchId': 1 });
-profileSchema.index({ 'enrollments.status': 1 });
 
 export const ProfileModel = model<IProfile, IProfileModel>('Profile', profileSchema);
