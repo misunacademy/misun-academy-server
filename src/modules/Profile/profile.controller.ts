@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
-import { ProfileService } from './profile.service';
-import  ApiError  from '../../errors/ApiError';
-import  catchAsync  from '../../utils/catchAsync';
-import sendResponse from '../../utils/sendResponse';
+import { ProfileService } from './profile.service.js';
+import  ApiError  from '../../errors/ApiError.js';
+import  catchAsync  from '../../utils/catchAsync.js';
+import sendResponse from '../../utils/sendResponse.js';
 
 const createProfile = catchAsync(async (req: Request, res: Response) => {
   if (!req.user?.id) {

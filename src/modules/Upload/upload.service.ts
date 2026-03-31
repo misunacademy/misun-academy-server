@@ -1,7 +1,7 @@
 import { StatusCodes } from 'http-status-codes';
-import ApiError from '../../errors/ApiError';
-import cloudinary, { isCloudinaryConfigured } from '../../config/cloudinary';
-import { IUploadResult, IMultipleUploadResult } from './upload.interface';
+import ApiError from '../../errors/ApiError.js';
+import cloudinary, { isCloudinaryConfigured } from '../../config/cloudinary.js';
+import { IUploadResult, IMultipleUploadResult } from './upload.interface.js';
 
 /**
  * Process single uploaded file from Multer buffer to Cloudinary

@@ -1,7 +1,7 @@
 import express from 'express';
-import { ContentController } from './content.controller';
-import { requireAuth } from '../../middlewares/betterAuth';
-import { checkBatchEnrollment } from '../../middlewares/batchAccess';
+import { ContentController } from './content.controller.js';
+import { requireAuth } from '../../middlewares/betterAuth.js';
+import { checkBatchEnrollment } from '../../middlewares/batchAccess.js';
 
 const router = express.Router();
 

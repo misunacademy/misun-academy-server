@@ -1,12 +1,12 @@
 import { StatusCodes } from 'http-status-codes';
-import ApiError from '../../errors/ApiError';
-import { EnrollmentModel } from './enrollment.model';
-import { BatchModel } from '../Batch/batch.model';
-import { ModuleProgressModel } from '../Progress/moduleProgress.model';
-import { LessonProgressModel } from '../Progress/lessonProgress.model';
-import { ProgressStatus, LessonProgressStatus, EnrollmentStatus } from '../../types/common';
-import { LessonModel } from '../Lesson/lesson.model';
-import { ModuleModel } from '../Module/module.model';
+import ApiError from '../../errors/ApiError.js';
+import { EnrollmentModel } from './enrollment.model.js';
+import { BatchModel } from '../Batch/batch.model.js';
+import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
+import { LessonProgressModel } from '../Progress/lessonProgress.model.js';
+import { ProgressStatus, LessonProgressStatus, EnrollmentStatus } from '../../types/common.js';
+import { LessonModel } from '../Lesson/lesson.model.js';
+import { ModuleModel } from '../Module/module.model.js';
 
 const findEnrollmentForCourse = async (
     userId: string,
@@ -50,20 +50,17 @@ const getCourseProgress = async (userId: string, courseId: string) => {
         enrollmentId: enrollment._id,
     });
 
-    // Calculate overall progress
-    const totalModules = moduleProgress.length;
-    // const completedModules = moduleProgress.filter(
-    //     (p) => p.status === ProgressStatus.Completed
-    // ).length;
+    // Calculate overall progress from lesson completion (to match course-detail percentage approach)
+    const allCourseModules = await ModuleModel.find({ courseId }).sort({ orderIndex: 1 });
+    const allModuleIds = allCourseModules.map((m) => m._id);
+    const allLessons = await LessonModel.find({ moduleId: { $in: allModuleIds } });
 
-    // const totalLessons = lessonProgress.length;
-    // const completedLessonsCount = lessonProgress.filter(
-    //     (p) => p.status === LessonProgressStatus.Completed
-    // ).length;
+    const totalLessons = allLessons.length;
+    const completedLessonsCount = lessonProgress.filter(
+        (lp) => lp.status === LessonProgressStatus.Completed
+    ).length;
 
-    const overallProgress = totalModules > 0
-        ? Math.round((moduleProgress.reduce((sum, m) => sum + m.completionPercentage, 0) / totalModules))
-        : 0;
+    const overallProgress = totalLessons > 0 ? Math.round((completedLessonsCount / totalLessons) * 100) : 0;
 
     // Find current lesson (first incomplete lesson in first incomplete module)
     let currentLesson = null;

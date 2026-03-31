@@ -1,13 +1,13 @@
-import { CertificateModel } from './certificate.model';
-import { EnrollmentModel } from '../Enrollment/enrollment.model';
-import { BatchModel } from '../Batch/batch.model';
-import { ModuleProgressModel } from '../Progress/moduleProgress.model';
-import { ProgressService } from '../Progress/progress.service';
-import { CertificateStatus, EnrollmentStatus } from '../../types/common';
-import ApiError from '../../errors/ApiError';
+import { CertificateModel } from './certificate.model.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { BatchModel } from '../Batch/batch.model.js';
+import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
+import { ProgressService } from '../Progress/progress.service.js';
+import { CertificateStatus, EnrollmentStatus } from '../../types/common.js';
+import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
-import { sendCertificateApprovedEmail, sendCertificateIssuedEmail } from '../../services/emailService';
-import { UserModel } from '../User/user.model';
+import { sendCertificateApprovedEmail, sendCertificateIssuedEmail } from '../../services/emailService.js';
+import { UserModel } from '../User/user.model.js';
 import mongoose from 'mongoose';
 
 const findCertificateByIdentifier = async (identifier: string) => {

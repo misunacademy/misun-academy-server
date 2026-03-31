@@ -1,6 +1,6 @@
 import { Schema, model } from 'mongoose';
-import { EnrollmentStatus } from '../../types/common';
-import { IEnrollment } from './enrollment.interface';
+import { EnrollmentStatus } from '../../types/common.js';
+import { IEnrollment } from './enrollment.interface.js';
 
 const enrollmentSchema = new Schema<IEnrollment>(
     {

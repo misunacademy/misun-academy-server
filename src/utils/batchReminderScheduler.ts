@@ -3,12 +3,12 @@
  * Sends email reminders 1 day before batch starts
  */
 
-import { BatchModel } from '../modules/Batch/batch.model';
-import { EnrollmentModel } from '../modules/Enrollment/enrollment.model';
-import { UserModel } from '../modules/User/user.model';
-import { BatchStatus, EnrollmentStatus } from '../types/common';
-import { sendBatchStartReminderEmail } from '../services/emailService';
-import { logger } from '../config/logger';
+import { BatchModel } from '../modules/Batch/batch.model.js';
+import { EnrollmentModel } from '../modules/Enrollment/enrollment.model.js';
+import { UserModel } from '../modules/User/user.model.js';
+import { BatchStatus, EnrollmentStatus } from '../types/common.js';
+import { sendBatchStartReminderEmail } from '../services/emailService.js';
+import { logger } from '../config/logger.js';
 
 /**
  * Send batch start reminders to enrolled students

@@ -1,8 +1,8 @@
 import express from 'express';
-import validateRequest from '../../middlewares/validateRequest';
-import { loginValidationSchema, sendNewsUpdateSchema } from './admin.validation';
-import { AdminAuthController } from './admin.controller';
-import { requireAuth, requireAdmin, requireSuperAdmin } from '../../middlewares/betterAuth';
+import validateRequest from '../../middlewares/validateRequest.js';
+import { loginValidationSchema, sendNewsUpdateSchema } from './admin.validation.js';
+import { AdminAuthController } from './admin.controller.js';
+import { requireAuth, requireAdmin, requireSuperAdmin } from '../../middlewares/betterAuth.js';
 
 
 const router = express.Router();

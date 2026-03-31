@@ -1,9 +1,9 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import env from '../config/env';
-import { CourseModel } from '../modules/Course/course.model';
-import { BatchModel } from '../modules/Batch/batch.model';
-import { EnrollmentModel } from '../modules/Enrollment/enrollment.model';
+import env from '../config/env.js';
+import { CourseModel } from '../modules/Course/course.model.js';
+import { BatchModel } from '../modules/Batch/batch.model.js';
+import { EnrollmentModel } from '../modules/Enrollment/enrollment.model.js';
 
 dotenv.config();
 

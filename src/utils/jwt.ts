@@ -1,6 +1,6 @@
 import jwt, { SignOptions } from 'jsonwebtoken';
-import env from '../config/env';
-import { Role } from '../types/role';
+import env from '../config/env.js';
+import { Role } from '../types/role.js';
 import { ObjectId, Types } from 'mongoose';
 
 const JWT_SECRET = env.JWT_SECRET || 'yourSecretKey';

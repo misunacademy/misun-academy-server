@@ -4,9 +4,9 @@
  * Can be run as a cron job or triggered manually by admins
  */
 
-import { BatchModel } from '../modules/Batch/batch.model';
-import { BatchStatus } from '../types/common';
-import {logger} from '../config/logger';
+import { BatchModel } from '../modules/Batch/batch.model.js';
+import { BatchStatus } from '../types/common.js';
+import {logger} from '../config/logger.js';
 
 /**
  * Transition batches based on current date

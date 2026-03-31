@@ -1,22 +1,22 @@
 import express from 'express';
-import { AdminAuthRoutes } from '../modules/Admin/admin.routes';
-import { BatchRoutes } from '../modules/Batch/batch.routes';
-import { PaymentRoutes } from '../modules/Payment/payment.routes';
-import { DashboardRoutes } from '../modules/Dashboard/dashboard.routes';
-import { CourseRoutes } from '../modules/Course/course.routes';
-import { ContentRoutes } from '../modules/Content/content.routes';
+import { AdminAuthRoutes } from '../modules/Admin/admin.routes.js';
+import { BatchRoutes } from '../modules/Batch/batch.routes.js';
+import { PaymentRoutes } from '../modules/Payment/payment.routes.js';
+import { DashboardRoutes } from '../modules/Dashboard/dashboard.routes.js';
+import { CourseRoutes } from '../modules/Course/course.routes.js';
+import { ContentRoutes } from '../modules/Content/content.routes.js';
 // BetterAuthRoutes moved to app.ts (must be before express.json())
-import { EnrollmentRoutes } from '../modules/Enrollment/enrollment.routes';
-import { CourseEnrollmentRoutes } from '../modules/Enrollment/courseEnrollment.routes';
-import { InstructorRoutes } from '../modules/Instructor/instructor.routes';
-import { CertificateRoutes } from '../modules/Certificate/certificate.routes';
-import { UploadRoutes } from '../modules/Upload/upload.routes';
-import { UserRoutes } from '../modules/User/user.routes';
-import { ModuleRoutes } from '../modules/Module/module.routes';
-import { LessonRoutes } from '../modules/Lesson/lesson.routes';
-import { RecordingRoutes } from '../modules/Recording/recording.routes';
-import { ProfileRoutes } from '../modules/Profile/profile.routes';
-import { SettingsRoutes } from '../modules/Settings/settings.routes';
+import { EnrollmentRoutes } from '../modules/Enrollment/enrollment.routes.js';
+import { CourseEnrollmentRoutes } from '../modules/Enrollment/courseEnrollment.routes.js';
+import { InstructorRoutes } from '../modules/Instructor/instructor.routes.js';
+import { CertificateRoutes } from '../modules/Certificate/certificate.routes.js';
+import { UploadRoutes } from '../modules/Upload/upload.routes.js';
+import { UserRoutes } from '../modules/User/user.routes.js';
+import { ModuleRoutes } from '../modules/Module/module.routes.js';
+import { LessonRoutes } from '../modules/Lesson/lesson.routes.js';
+import { RecordingRoutes } from '../modules/Recording/recording.routes.js';
+import { ProfileRoutes } from '../modules/Profile/profile.routes.js';
+import { SettingsRoutes } from '../modules/Settings/settings.routes.js';
 
 
 const router = express.Router();

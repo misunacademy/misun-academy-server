@@ -1,6 +1,6 @@
 import { Schema, model } from 'mongoose';
-import { ResourceType } from '../../types/common';
-import { IResource } from './resource.interface';
+import { ResourceType } from '../../types/common.js';
+import { IResource } from './resource.interface.js';
 
 const resourceSchema = new Schema<IResource>(
     {

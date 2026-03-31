@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import env from '../config/env';
-import { CourseModel } from '../modules/Course/course.model';
+import env from '../config/env.js';
+import { CourseModel } from '../modules/Course/course.model.js';
 
 dotenv.config();
 
@@ -16,7 +16,7 @@ export const seedCourses = async () => {
         let courses: any[] = [];
         try {
             // eslint-disable-next-line @typescript-eslint/no-var-requires
-            courses = require('D:/projects/misun academy/misun-academy-client/src/data/mockCourse.ts').default || require('D:/projects/misun academy/misun-academy-client/src/data/mockCourse.ts');
+            // courses = require('D:/projects/misun academy/misun-academy-client/src/data/mockCourse.ts').default || require('D:/projects/misun academy/misun-academy-client/src/data/mockCourse.ts');
         } catch (err) {
             console.warn('Could not load mockCourse from client; please provide data or copy it to server:', err);
         }

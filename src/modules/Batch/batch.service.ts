@@ -1,8 +1,8 @@
 import { StatusCodes } from "http-status-codes";
-import ApiError from "../../errors/ApiError";
-import { BatchModel, IBatch } from "./batch.model";
-import { BatchStatus } from "../../types/common";
-import { autoTransitionBatches } from "../../utils/batchScheduler";
+import ApiError from "../../errors/ApiError.js";
+import { BatchModel, IBatch } from "./batch.model.js";
+import { BatchStatus } from "../../types/common.js";
+import { autoTransitionBatches } from "../../utils/batchScheduler.js";
 
 /**
  * Generate next batch number for a course

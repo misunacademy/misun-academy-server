@@ -1,5 +1,5 @@
 import { Schema, model, Types } from "mongoose";
-import { Status } from "../../types/common";
+import { Status } from "../../types/common.js";
 
 export interface IPayment {
     userId: Types.ObjectId;

@@ -1,5 +1,5 @@
 import { Request } from 'express';
-import { Role } from './role';
+import { Role } from './role.js';
 
 declare global {
     namespace Express {

@@ -1,6 +1,6 @@
 import { Schema, model } from 'mongoose';
-import { CertificateStatus } from '../../types/common';
-import { ICertificate } from './certificate.interface';
+import { CertificateStatus } from '../../types/common.js';
+import { ICertificate } from './certificate.interface.js';
 
 const certificateSchema = new Schema<ICertificate>(
     {

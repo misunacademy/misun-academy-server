@@ -1,9 +1,9 @@
 import { NextFunction, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
-import ApiError from '../errors/ApiError';
-import { EnrollmentModel } from '../modules/Enrollment/enrollment.model';
-import { EnrollmentStatus, ProgressStatus } from '../types/common';
-import { ModuleProgressModel } from '../modules/Progress/moduleProgress.model';
+import ApiError from '../errors/ApiError.js';
+import { EnrollmentModel } from '../modules/Enrollment/enrollment.model.js';
+import { EnrollmentStatus, ProgressStatus } from '../types/common.js';
+import { ModuleProgressModel } from '../modules/Progress/moduleProgress.model.js';
 
 /**
  * Middleware to verify that the user is enrolled in a specific batch

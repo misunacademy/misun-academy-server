@@ -1,11 +1,11 @@
 import { StatusCodes } from 'http-status-codes';
-import ApiError from '../../errors/ApiError';
-import { ProfileModel } from './profile.model';
-import { EnrollmentModel } from '../Enrollment/enrollment.model';
-import { EnrollmentStatus } from '../../types/common';
-import { IProfile } from './profile.interface';
+import ApiError from '../../errors/ApiError.js';
+import { ProfileModel } from './profile.model.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { EnrollmentStatus } from '../../types/common.js';
+import { IProfile } from './profile.interface.js';
 import mongoose from 'mongoose';
-import { UserModel } from '../User/user.model';
+import { UserModel } from '../User/user.model.js';
 
 const toEnrollmentRefs = (enrollments: any): Array<{ enrollmentId: string }> => {
   if (!Array.isArray(enrollments)) {

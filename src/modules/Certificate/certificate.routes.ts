@@ -1,6 +1,6 @@
 import express from 'express';
-import { CertificateController } from './certificate.controller';
-import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
+import { CertificateController } from './certificate.controller.js';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 
 const router = express.Router();
 

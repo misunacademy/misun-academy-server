@@ -1,9 +1,9 @@
 import http, { Server } from 'http';
-import app from './app';
-import env from './config/env';
-import { logger } from './config/logger';
-import { connectDB } from './config/database';
-import { initializeEmailWorker } from './services/emailService';
+import app from './app.js';
+import env from './config/env.js';
+import { logger } from './config/logger.js';
+import { connectDB } from './config/database.js';
+import { initializeEmailWorker } from './services/emailService.js';
 // import { seedSuperAdmin } from './scripts/seedSuperAdmin';
 
 let server: Server | null = null;

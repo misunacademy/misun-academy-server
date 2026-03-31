@@ -1,14 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
-import { getAuth } from '../config/betterAuth';
+import { getAuth } from '../config/betterAuth.js';
 import { StatusCodes } from 'http-status-codes';
-import { Role } from '../types/role';
-import { UserStatus } from '../types/common';
-import { dynamicImport } from '../utils/dynamicImport';
+import { Role } from '../types/role.js';
+import { UserStatus } from '../types/common.js';
+import { fromNodeHeaders } from 'better-auth/node';
 
-const getFromNodeHeaders = async () => {
-  const { fromNodeHeaders } = await dynamicImport('better-auth/node');
-  return fromNodeHeaders as (headers: any) => Headers;
-};
 
 // Extend Express Request to include user data
 declare global {
@@ -37,8 +33,6 @@ export const requireAuth = async (
 ) => {
   try {
     const auth = getAuth();
-    const fromNodeHeaders = await getFromNodeHeaders();
-    // Get session from Better Auth
     const session = await auth.api.getSession({
       headers: fromNodeHeaders(req.headers as any),
     });
@@ -158,7 +152,6 @@ export const optionalAuth = async (
 ) => {
   try {
     const auth = getAuth();
-    const fromNodeHeaders = await getFromNodeHeaders();
     const session = await auth.api.getSession({
       headers: fromNodeHeaders(req.headers as any),
     });

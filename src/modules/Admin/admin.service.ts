@@ -1,7 +1,7 @@
 import { StatusCodes } from "http-status-codes";
-import ApiError from "../../errors/ApiError";
-import { AdminModel } from "./admin.model";
-import { generateToken } from "../../utils/jwt";
+import ApiError from "../../errors/ApiError.js";
+import { AdminModel } from "./admin.model.js";
+import { generateToken } from "../../utils/jwt.js";
 import { Types } from "mongoose";
 
 

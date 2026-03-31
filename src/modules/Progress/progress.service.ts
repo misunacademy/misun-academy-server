@@ -1,10 +1,10 @@
 import { StatusCodes } from 'http-status-codes';
-import ApiError from '../../errors/ApiError';
-import { LessonProgressModel } from './lessonProgress.model';
-import { ModuleProgressModel } from './moduleProgress.model';
-import { LessonModel } from '../Lesson/lesson.model';
-import { ModuleModel } from '../Module/module.model';
-import { ProgressStatus, LessonProgressStatus } from '../../types/common';
+import ApiError from '../../errors/ApiError.js';
+import { LessonProgressModel } from './lessonProgress.model.js';
+import { ModuleProgressModel } from './moduleProgress.model.js';
+import { LessonModel } from '../Lesson/lesson.model.js';
+import { ModuleModel } from '../Module/module.model.js';
+import { ProgressStatus, LessonProgressStatus } from '../../types/common.js';
 
 /**
  * Update lesson progress (watch time tracking)
@@ -148,7 +148,8 @@ const getBatchProgress = async (enrollmentId: string) => {
 
     const lessonProgress = await LessonProgressModel.find({ enrollmentId });
 
-    const totalModules = moduleProgress.length;
+    const allCourseModuleIds = moduleProgress.map((m) => m.moduleId.toString());
+    const totalModules = allCourseModuleIds.length;
     const completedModules = moduleProgress.filter(
         (p) => p.status === ProgressStatus.Completed
     ).length;
@@ -158,6 +159,7 @@ const getBatchProgress = async (enrollmentId: string) => {
         (p) => p.status === LessonProgressStatus.Completed
     ).length;
 
+    // When the module progress collection is missing entries for some modules, they are treated as 0%.
     const overallProgress =
         totalModules > 0
             ? Math.round(

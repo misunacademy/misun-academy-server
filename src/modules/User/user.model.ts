@@ -1,8 +1,8 @@
 import { Schema, model, Document } from 'mongoose';
 import bcrypt from 'bcrypt';
-import { UserStatus } from '../../types/common';
-import { Role } from '../../types/role';
-import { IUser, IUserDocument } from './user.interface';
+import { UserStatus } from '../../types/common.js';
+import { Role } from '../../types/role.js';
+import { IUser, IUserDocument } from './user.interface.js';
 
 const userSchema = new Schema<IUserDocument>(
     {

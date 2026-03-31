@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { LessonProgressStatus } from '../../types/common';
+import { LessonProgressStatus } from '../../types/common.js';
 
 export interface ILessonProgress {
     _id?: Types.ObjectId;

@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { EnrollmentStatus } from '../../types/common';
+import { EnrollmentStatus } from '../../types/common.js';
 
 export interface IEnrollment {
     _id?: Types.ObjectId;

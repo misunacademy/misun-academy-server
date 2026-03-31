@@ -13,11 +13,11 @@ import {
     sendCertificateIssuedEmail,
     sendCertificateApprovedEmail,
     sendEnrollmentConfirmationEmail,
-} from '../services/emailService';
-import { connectDB } from '../config/database';
+} from '../services/emailService.js';
+import { connectDB } from '../config/database.js';
 
 // Test email address - CHANGE THIS TO YOUR ACTUAL TEST EMAIL
-const TEST_EMAIL = 'mh19711976@gmail.com';
+const TEST_EMAIL = '<YOUR_TEST_EMAIL>';
 
 async function testAllEmails() {
     console.log('🚀 Starting email tests...');

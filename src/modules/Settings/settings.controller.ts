@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
-import catchAsync from '../../utils/catchAsync';
-import sendResponse from '../../utils/sendResponse';
-import { SettingsService } from './settings.service';
+import catchAsync from '../../utils/catchAsync.js';
+import sendResponse from '../../utils/sendResponse.js';
+import { SettingsService } from './settings.service.js';
 
 const getSettings = catchAsync(async (req: Request, res: Response) => {
   const result = await SettingsService.getSettings();

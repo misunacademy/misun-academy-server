@@ -1,14 +1,14 @@
 import { Request, Response } from "express";
-import catchAsync from "../../utils/catchAsync";
-import { AdminAuthService } from "./admin.service";
-import sendResponse from "../../utils/sendResponse";
-import { UserModel } from "../User/user.model";
-import { EnrollmentModel } from "../Enrollment/enrollment.model";
-import { BatchModel } from "../Batch/batch.model";
-import { EnrollmentStatus, UserStatus } from "../../types/common";
-import ApiError from "../../errors/ApiError";
+import catchAsync from "../../utils/catchAsync.js";
+import { AdminAuthService } from "./admin.service.js";
+import sendResponse from "../../utils/sendResponse.js";
+import { UserModel } from "../User/user.model.js";
+import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
+import { BatchModel } from "../Batch/batch.model.js";
+import { EnrollmentStatus, UserStatus } from "../../types/common.js";
+import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
-import { sendEnrollmentReminderEmail, sendNewsUpdateEmail } from "../../services/emailService";
+import { sendEnrollmentReminderEmail, sendNewsUpdateEmail } from "../../services/emailService.js";
 
 const loginUser = catchAsync(async (req: Request, res: Response) => {
     const email = req.body.email;

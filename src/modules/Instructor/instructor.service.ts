@@ -1,9 +1,10 @@
 import { StatusCodes } from 'http-status-codes';
-import { InstructorModel } from './instructor.model';
-import { BatchModel } from '../Batch/batch.model';
-import { EnrollmentModel } from '../Enrollment/enrollment.model';
-import { BatchStatus } from '../../types/common';
-import ApiError from '../../errors/ApiError';
+import { InstructorModel } from './instructor.model.js';
+import { BatchModel } from '../Batch/batch.model.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { BatchStatus } from '../../types/common.js';
+import ApiError from '../../errors/ApiError.js';
+import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
 
 /**
  * Get instructor profile
@@ -123,7 +124,7 @@ const getBatchStudents = async (userId: string, batchId: string) => {
     // Get progress for each enrollment
     const enrollmentsWithProgress = await Promise.all(
         enrollments.map(async (enrollment) => {
-            const moduleProgress = await require('../Progress/moduleProgress.model').ModuleProgressModel.find(
+            const moduleProgress = await ModuleProgressModel.find(
                 {
                     enrollmentId: enrollment._id,
                 }

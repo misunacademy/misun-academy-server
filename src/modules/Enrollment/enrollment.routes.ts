@@ -1,6 +1,6 @@
 import express from 'express';
-import { EnrollmentController } from './enrollment.controller';
-import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
+import { EnrollmentController } from './enrollment.controller.js';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 
 const router = express.Router();
 

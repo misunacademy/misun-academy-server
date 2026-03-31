@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { ResourceType } from '../../types/common';
+import { ResourceType } from '../../types/common.js';
 
 export interface IResource {
     _id?: Types.ObjectId;

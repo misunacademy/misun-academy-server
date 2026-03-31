@@ -1,5 +1,5 @@
 import multer from 'multer';
-import ApiError from '../errors/ApiError';
+import ApiError from '../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
 import { Request } from 'express';
 

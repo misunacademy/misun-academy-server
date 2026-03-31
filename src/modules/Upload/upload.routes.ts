@@ -1,7 +1,7 @@
 import express from 'express';
-import { UploadController } from './upload.controller';
-import { upload, handleMulterError } from '../../middlewares/upload';
-import { requireAuth } from '../../middlewares/betterAuth';
+import { UploadController } from './upload.controller.js';
+import { upload, handleMulterError } from '../../middlewares/upload.js';
+import { requireAuth } from '../../middlewares/betterAuth.js';
 
 const router = express.Router();
 

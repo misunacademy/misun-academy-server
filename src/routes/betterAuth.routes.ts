@@ -1,8 +1,8 @@
 import express, { Router, Request, Response } from 'express';
-import { getAuth } from '../config/betterAuth';
-import { dynamicImport } from '../utils/dynamicImport';
-import { EnrollmentModel } from '../modules/Enrollment/enrollment.model';
-import { EnrollmentStatus } from '../types/common';
+import { getAuth } from '../config/betterAuth.js';
+import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
+import { EnrollmentModel } from '../modules/Enrollment/enrollment.model.js';
+import { EnrollmentStatus } from '../types/common.js';
 
 const router = Router();
 
@@ -12,13 +12,7 @@ router.use('/server', express.json(), express.urlencoded({ extended: true }));
 
 let cachedBetterAuthHandler: ((req: Request, res: Response) => unknown) | null = null;
 
-const getFromNodeHeaders = async () => {
-  const { fromNodeHeaders } = await dynamicImport('better-auth/node');
-  return fromNodeHeaders as (headers: any) => Headers;
-};
-
 const buildAuthContext = async (req: Request) => {
-  const fromNodeHeaders = await getFromNodeHeaders();
   return {
     headers: fromNodeHeaders(req.headers as any),
     asResponse: true as const,
@@ -226,7 +220,6 @@ router.post('/server/revoke-session', async (req: Request, res: Response) => {
 router.get('/me', async (req: Request, res: Response) => {
   try {
     const auth = getAuth();
-    const fromNodeHeaders = await getFromNodeHeaders();
     const session = await auth.api.getSession({
       headers: fromNodeHeaders(req.headers as any),
     });
@@ -288,8 +281,6 @@ export const betterAuthCatchAll = async (req: Request, res: Response) => {
   try {
     if (!cachedBetterAuthHandler) {
       const auth = getAuth();
-      // Dynamically import ESM-only package to avoid ERR_REQUIRE_ESM in CJS build
-      const { toNodeHandler } = await dynamicImport('better-auth/node');
       cachedBetterAuthHandler = toNodeHandler(auth);
     }
 

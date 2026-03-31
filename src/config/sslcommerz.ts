@@ -1,4 +1,4 @@
-import env from './env';
+import env from './env.js';
 
 export const sslcommerzConfig = {
     store_id: env.SSL_STORE_ID!,

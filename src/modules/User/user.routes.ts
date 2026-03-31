@@ -1,6 +1,6 @@
 import express from 'express';
-import { ProfileController } from '../Profile/profile.controller';
-import { requireAuth } from '../../middlewares/betterAuth';
+import { ProfileController } from '../Profile/profile.controller.js';
+import { requireAuth } from '../../middlewares/betterAuth.js';
 
 const router = express.Router();
 

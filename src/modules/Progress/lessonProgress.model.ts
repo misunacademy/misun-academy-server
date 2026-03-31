@@ -1,6 +1,6 @@
 import { Schema, model } from 'mongoose';
-import { LessonProgressStatus } from '../../types/common';
-import { ILessonProgress } from './lessonProgress.interface';
+import { LessonProgressStatus } from '../../types/common.js';
+import { ILessonProgress } from './lessonProgress.interface.js';
 
 const lessonProgressSchema = new Schema<ILessonProgress>(
     {

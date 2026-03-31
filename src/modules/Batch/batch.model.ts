@@ -1,5 +1,5 @@
 import { Schema, model, Document, Types } from 'mongoose';
-import { BatchStatus } from '../../types/common';
+import { BatchStatus } from '../../types/common.js';
 
 export interface IBatch extends Document {
     courseId: Types.ObjectId;

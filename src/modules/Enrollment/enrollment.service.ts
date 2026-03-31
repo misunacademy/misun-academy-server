@@ -1,20 +1,72 @@
 import { StatusCodes } from 'http-status-codes';
-import ApiError from '../../errors/ApiError';
-import { EnrollmentModel } from './enrollment.model';
-import { EnrollmentCounterModel } from './enrollmentCounter.model';
-import { BatchModel } from '../Batch/batch.model';
-import { BatchStatus, EnrollmentStatus } from '../../types/common';
-import { ModuleModel } from '../Module/module.model';
-import { ModuleProgressModel } from '../Progress/moduleProgress.model';
-import { ProgressStatus } from '../../types/common';
-import { sendEnrollmentConfirmationEmail } from '../../services/emailService';
-import { UserModel } from '../User/user.model';
-import { Status } from '../../types/common';
-import { PaymentModel } from '../Payment/payment.model';
+import ApiError from '../../errors/ApiError.js';
+import { EnrollmentModel } from './enrollment.model.js';
+import { EnrollmentCounterModel } from './enrollmentCounter.model.js';
+import { BatchModel } from '../Batch/batch.model.js';
+import { BatchStatus, EnrollmentStatus } from '../../types/common.js';
+import { ModuleModel } from '../Module/module.model.js';
+import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
+import { ProgressStatus } from '../../types/common.js';
+import { sendEnrollmentConfirmationEmail } from '../../services/emailService.js';
+import { UserModel } from '../User/user.model.js';
+import { Status } from '../../types/common.js';
+import { PaymentModel } from '../Payment/payment.model.js';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
-import { ProfileService } from '../Profile/profile.service';
-import { StudentIdCounterModel } from '../User/studentIdCounter.model';
+import { ProfileService } from '../Profile/profile.service.js';
+import { StudentIdCounterModel } from '../User/studentIdCounter.model.js';
+
+type MongoDuplicateKeyError = {
+    code?: number;
+    keyPattern?: Record<string, number>;
+};
+
+const isStudentIdDuplicateError = (error: unknown): error is MongoDuplicateKeyError => {
+    if (!error || typeof error !== 'object') {
+        return false;
+    }
+
+    const mongoError = error as MongoDuplicateKeyError;
+    return mongoError.code === 11000 && Boolean(mongoError.keyPattern?.studentId);
+};
+
+const syncStudentCounterToCurrentMax = async (
+    year: string,
+    session: mongoose.ClientSession
+): Promise<void> => {
+    const maxCountResult = await UserModel.aggregate<{ _id: null; maxCount: number }>([
+        {
+            $match: {
+                studentId: {
+                    $regex: `^SI-${year}-\\d+$`,
+                },
+            },
+        },
+        {
+            $project: {
+                countValue: {
+                    $toInt: {
+                        $arrayElemAt: [{ $split: ['$studentId', '-'] }, 2],
+                    },
+                },
+            },
+        },
+        {
+            $group: {
+                _id: null,
+                maxCount: { $max: '$countValue' },
+            },
+        },
+    ]).session(session);
+
+    const maxExistingCount = maxCountResult[0]?.maxCount ?? 0;
+
+    await StudentIdCounterModel.updateOne(
+        { _id: year },
+        { $max: { count: maxExistingCount } },
+        { upsert: true, session }
+    );
+};
 
 /**
  * Generate unique enrollment ID
@@ -155,11 +207,9 @@ const generateTransactionId = (): string => {
 // };
 
 const initiateEnrollment = async (userId: string, batchId: string) => {
-
     const session = await mongoose.startSession();
 
     try {
-
         session.startTransaction();
 
         // Check pending enrollment (idempotency)
@@ -178,9 +228,17 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
         .session(session);
 
         if (existingPendingEnrollment) {
+            // Ensure existing enrollment has an enrollmentId (required for SSLCommerz flow)
+            if (!existingPendingEnrollment.enrollmentId) {
+                const batchObj = existingPendingEnrollment.batchId as any;
+                const batchNumber = batchObj?.batchNumber?.toString() || '6';
+                const courseSlug = (batchObj?.courseId as any)?.slug || '';
+                const generatedEnrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+                existingPendingEnrollment.enrollmentId = generatedEnrollmentId;
+                await existingPendingEnrollment.save({ session });
+            }
 
             await session.commitTransaction();
-            session.endSession();
 
             return {
                 enrollment: existingPendingEnrollment,
@@ -273,8 +331,9 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
         const user = await UserModel.findById(userId).session(session);
 
         if (user && !user.studentId) {
-
             const year = new Date().getFullYear().toString();
+            // Keep counter aligned before assigning a new ID.
+            await syncStudentCounterToCurrentMax(year, session);
 
             const counter = await StudentIdCounterModel.findByIdAndUpdate(
                 { _id: year },
@@ -282,32 +341,50 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
                 {
                     new: true,
                     upsert: true,
-                    session
+                    session,
                 }
             );
 
-            const paddedCount = String(counter.count).padStart(4, '0');
+            if (!counter) {
+                throw new ApiError(
+                    StatusCodes.INTERNAL_SERVER_ERROR,
+                    'Failed to generate student ID'
+                );
+            }
 
+            const paddedCount = String(counter.count).padStart(4, '0');
             user.studentId = `SI-${year}-${paddedCount}`;
 
-            await user.save({ session });
+            try {
+                await user.save({ session });
+            } catch (error) {
+                if (isStudentIdDuplicateError(error)) {
+                    throw new ApiError(
+                        StatusCodes.CONFLICT,
+                        'Could not assign a unique student ID. Please try again.'
+                    );
+                }
+
+                throw error;
+            }
         }
 
         await session.commitTransaction();
-        session.endSession();
 
         return {
             enrollment,
             batch,
             isExisting: false,
         };
-
     } catch (error) {
 
-        await session.abortTransaction();
-        session.endSession();
+        if (session.inTransaction()) {
+            await session.abortTransaction();
+        }
 
         throw error;
+    } finally {
+        session.endSession();
     }
 };
 /**
@@ -466,13 +543,14 @@ const getUserEnrollments = async (userId: string, status?: EnrollmentStatus) => 
     const enrollmentsWithProgress = await Promise.all(
         enrollments.map(async (enrollment) => {
             const moduleProgress = await ModuleProgressModel.find({ enrollmentId: enrollment._id });
+            const modules = await ModuleModel.find({ courseId: (enrollment.batchId as any)?.courseId?._id ?? (enrollment.batchId as any)?.courseId });
 
-            const totalModules = moduleProgress.length;
+            const totalModules = modules.length;
             const completedModules = moduleProgress.filter(
                 (p) => p.status === ProgressStatus.Completed
             ).length;
             const overallProgress =
-                totalModules > 0 ? Math.round((completedModules / totalModules) * 100) : 0;
+                totalModules > 0 ? Math.round((moduleProgress.reduce((sum, m) => sum + m.completionPercentage, 0) / totalModules)) : 0;
 
             return {
                 ...enrollment,
@@ -520,13 +598,15 @@ const getEnrollmentDetails = async (enrollmentId: string, userId: string) => {
 
     // Get progress statistics
     const moduleProgress = await ModuleProgressModel.find({ enrollmentId });
+    const courseId = (enrollment.batchId as any)?.courseId?._id ?? (enrollment.batchId as any)?.courseId;
+    const modules = courseId ? await ModuleModel.find({ courseId }).sort({ orderIndex: 1 }) : [];
 
-    const totalModules = moduleProgress.length;
+    const totalModules = modules.length;
     const completedModules = moduleProgress.filter(
         (p) => p.status === ProgressStatus.Completed
     ).length;
     const overallProgress =
-        totalModules > 0 ? Math.round((completedModules / totalModules) * 100) : 0;
+        totalModules > 0 ? Math.round((moduleProgress.reduce((sum, m) => sum + m.completionPercentage, 0) / totalModules)) : 0;
 
     return {
         ...enrollment,
@@ -547,24 +627,23 @@ const enrollWithManualPayment = async (
     batchId: string,
     paymentData: { senderNumber: string; transactionId: string }
 ) => {
-    // Check if user has any pending enrollment for this batch
-    const existingEnrollment = await EnrollmentModel.findOne({
+    // Check if user has any enrollment for this batch
+    let existingEnrollment = await EnrollmentModel.findOne({
         userId,
         batchId,
-        status: { $in: [EnrollmentStatus.Pending, EnrollmentStatus.PaymentPending, EnrollmentStatus.Active] }
+        status: { $in: [EnrollmentStatus.Pending, EnrollmentStatus.PaymentPending, EnrollmentStatus.PaymentFailed, EnrollmentStatus.Active] }
     });
 
     if (existingEnrollment) {
         if (existingEnrollment.status === EnrollmentStatus.Active) {
             throw new ApiError(StatusCodes.CONFLICT, 'You are already enrolled in this batch');
         }
-        throw new ApiError(
-            StatusCodes.CONFLICT,
-            'You already have a pending enrollment for this batch. Please wait for payment verification.'
-        );
+
+        // Allow reusing an existing pending/failed enrollment for manual payment
+        existingEnrollment.status = EnrollmentStatus.PaymentPending;
+        await existingEnrollment.save();
     }
 
-    // Validate batch
     const batch = await BatchModel.findById(batchId).populate('courseId');
     if (!batch) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
@@ -575,7 +654,6 @@ const enrollWithManualPayment = async (
     }
 
     const now = new Date();
-    // now < batch.enrollmentStartDate ||
     if (now > batch.enrollmentEndDate) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment period is not active');
     }
@@ -586,46 +664,111 @@ const enrollWithManualPayment = async (
         typeof (batch as any).manualPaymentPrice === 'number'
             ? (batch as any).manualPaymentPrice
             : isEnglishCourse
-                ? 2000
-                : 3000;
+                ? 2289
+                : 3661;
 
-    // Use MongoDB transaction for atomicity
     const session = await mongoose.startSession();
 
     try {
         await session.startTransaction();
 
-        // Create enrollment with PaymentPending status (no enrollmentId yet)
-        const enrollment = await EnrollmentModel.create([{
-            userId,
-            batchId,
-            status: EnrollmentStatus.PaymentPending,
-        }], { session });
+        let enrollment = existingEnrollment;
 
-        // Generate unique transaction ID for the payment
+        const batchNumber = batch.batchNumber?.toString() || '6';
+        const courseSlug = (batch.courseId as any)?.slug || '';
+
+        // Create or reuse enrollment with a robust enrollmentId assignment.
+        if (!enrollment) {
+            let attempt = 0;
+            while (!enrollment) {
+                const candidateEnrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+                try {
+                    const created = await EnrollmentModel.create([
+                        {
+                            userId,
+                            batchId,
+                            status: EnrollmentStatus.PaymentPending,
+                            enrollmentId: candidateEnrollmentId,
+                        },
+                    ], { session });
+                    enrollment = created[0];
+                } catch (err: any) {
+                    if (err.code === 11000 && err.keyPattern?.enrollmentId) {
+                        attempt += 1;
+                        if (attempt >= 5) {
+                            throw new ApiError(
+                                StatusCodes.INTERNAL_SERVER_ERROR,
+                                'Failed to generate a unique enrollment ID. Please try again.'
+                            );
+                        }
+                        continue;
+                    }
+                    throw err;
+                }
+            }
+        } else {
+            // Keep using existing enrollment, ensure ID exists.
+            await EnrollmentModel.findByIdAndUpdate(
+                enrollment._id,
+                { status: EnrollmentStatus.PaymentPending },
+                { session }
+            );
+
+            if (!enrollment.enrollmentId) {
+                let attempt = 0;
+                while (!enrollment.enrollmentId) {
+                    const candidateEnrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+                    try {
+                        enrollment.enrollmentId = candidateEnrollmentId;
+                        await enrollment.save({ session });
+                    } catch (err: any) {
+                        if (err.code === 11000 && err.keyPattern?.enrollmentId) {
+                            attempt += 1;
+                            if (attempt >= 5) {
+                                throw new ApiError(
+                                    StatusCodes.INTERNAL_SERVER_ERROR,
+                                    'Failed to assign a unique enrollment ID. Please try again.'
+                                );
+                            }
+                            continue;
+                        }
+                        throw err;
+                    }
+                }
+            }
+        }
+
         const paymentTransactionId = generateTransactionId();
 
-        // Create payment record in Review status (no enrollmentId linked yet)
-        await PaymentModel.create([{
-            userId,
-            batchId,
-            transactionId: paymentTransactionId,
-            // idempotencyKey: paymentTransactionId,
-            amount: manualPaymentAmount,
-            currency: 'BDT',
-            status: Status.Review,
-            method: 'PhonePay',
-            gatewayResponse: {
-                senderNumber: paymentData.senderNumber,
-                phonePeTransactionId: paymentData.transactionId, // Store the PhonePe transaction ID
-                submittedAt: new Date(),
+        await PaymentModel.findOneAndUpdate(
+            { enrollmentId: enrollment.enrollmentId },
+            {
+                userId,
+                batchId,
+                transactionId: paymentTransactionId,
+                amount: manualPaymentAmount,
+                currency: 'BDT',
+                status: Status.Review,
+                method: 'PhonePay',
+                gatewayResponse: {
+                    senderNumber: paymentData.senderNumber,
+                    phonePeTransactionId: paymentData.transactionId,
+                    submittedAt: new Date(),
+                },
+                enrollmentId: enrollment.enrollmentId,
             },
-        }], { session });
+            {
+                session,
+                upsert: true,
+                new: true,
+                setDefaultsOnInsert: true,
+            }
+        );
 
         await session.commitTransaction();
 
         return {
-            enrollment: enrollment[0],
+            enrollment,
             batch,
             transactionId: paymentTransactionId,
             message: 'Payment submitted for verification. You will receive confirmation within 12-24 hours.',

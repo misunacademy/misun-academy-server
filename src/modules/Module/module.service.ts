@@ -1,7 +1,7 @@
 import { StatusCodes } from 'http-status-codes';
-import { ModuleModel } from './module.model';
-import { LessonModel } from '../Lesson/lesson.model';
-import ApiError from '../../errors/ApiError';
+import { ModuleModel } from './module.model.js';
+import { LessonModel } from '../Lesson/lesson.model.js';
+import ApiError from '../../errors/ApiError.js';
 
 /**
  * Create a new module for a course

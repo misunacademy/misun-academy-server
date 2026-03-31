@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Role } from '../../types/role';
+import { Role } from '../../types/role.js';
 
 export const adminRegisterSchema = z.object({
     name: z.string().min(1),

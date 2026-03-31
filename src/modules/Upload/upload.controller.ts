@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
-import catchAsync from '../../utils/catchAsync';
-import sendResponse from '../../utils/sendResponse';
-import { UploadService } from './upload.service';
-import ApiError from '../../errors/ApiError';
+import catchAsync from '../../utils/catchAsync.js';
+import sendResponse from '../../utils/sendResponse.js';
+import { UploadService } from './upload.service.js';
+import ApiError from '../../errors/ApiError.js';
 
 /**
  * Upload single image

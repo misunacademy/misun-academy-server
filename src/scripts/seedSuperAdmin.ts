@@ -1,10 +1,10 @@
-import 'dotenv/config';
+import 'dotenv/config.js';
 import mongoose from 'mongoose';
-import { AdminModel } from '../modules/Admin/admin.model';
-import { UserModel } from '../modules/User/user.model';
-import { Role } from '../types/role';
-import env from '../config/env';
-import { connectDB } from '../config/database';
+import { AdminModel } from '../modules/Admin/admin.model.js';
+import { UserModel } from '../modules/User/user.model.js';
+import { Role } from '../types/role.js';
+import env from '../config/env.js';
+import { connectDB } from '../config/database.js';
 
 export const seedSuperAdmin = async () => {
     try {

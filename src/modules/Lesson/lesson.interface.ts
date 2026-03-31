@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
-import { LessonType, VideoSource, LessonProgressStatus } from '../../types/common';
-import { ILessonResource } from './lesson.model';
+import { LessonType, VideoSource, LessonProgressStatus } from '../../types/common.js';
+import { ILessonResource } from './lesson.model.js';
 
 export interface ILesson {
     _id?: Types.ObjectId;

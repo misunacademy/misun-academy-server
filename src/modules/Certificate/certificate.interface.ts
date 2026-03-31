@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { CertificateStatus } from '../../types/common';
+import { CertificateStatus } from '../../types/common.js';
 
 export interface ICertificate {
     _id?: Types.ObjectId;
