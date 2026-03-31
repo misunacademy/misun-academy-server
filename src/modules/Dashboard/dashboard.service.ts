@@ -1,9 +1,9 @@
-import { PaymentModel } from "../Payment/payment.model";
-import { EnrollmentModel } from "../Enrollment/enrollment.model";
-import { UserModel } from "../User/user.model";
-import { BatchModel } from "../Batch/batch.model";
-import { CourseModel } from "../Course/course.model";
-import { EnrollmentStatus } from "../../types/common";
+import { PaymentModel } from "../Payment/payment.model.js";
+import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
+import { UserModel } from "../User/user.model.js";
+import { BatchModel } from "../Batch/batch.model.js";
+import { CourseModel } from "../Course/course.model.js";
+import { EnrollmentStatus } from "../../types/common.js";
 
 const getDashboardMetaData = async () => {
     const now = new Date();

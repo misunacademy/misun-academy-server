@@ -1,5 +1,5 @@
 import { Schema, model } from 'mongoose';
-import { IProfile, IProfileModel, IEnrollmentMapping } from './profile.interface';
+import { IProfile, IProfileModel, IEnrollmentMapping } from './profile.interface.js';
 
 const EnrollmentMappingSchema = new Schema<IEnrollmentMapping>(
   {

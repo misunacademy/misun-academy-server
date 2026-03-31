@@ -1,6 +1,6 @@
 import { Schema, model, Document } from 'mongoose';
 import bcrypt from 'bcrypt';
-import { Role } from '../../types/role';
+import { Role } from '../../types/role.js';
 
 export interface IAdminDocument extends Document {
     name: string;

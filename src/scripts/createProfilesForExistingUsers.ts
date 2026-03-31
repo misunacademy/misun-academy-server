@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import env from '../config/env';
-import { UserModel } from '../modules/User/user.model';
-import { ProfileService } from '../modules/Profile/profile.service';
+import env from '../config/env.js';
+import { UserModel } from '../modules/User/user.model.js';
+import { ProfileService } from '../modules/Profile/profile.service.js';
 
 dotenv.config();
 

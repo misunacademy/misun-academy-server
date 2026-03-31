@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { ProgressStatus } from '../../types/common';
+import { ProgressStatus } from '../../types/common.js';
 
 export interface IModuleProgress {
     _id?: Types.ObjectId;

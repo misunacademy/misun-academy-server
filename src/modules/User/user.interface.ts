@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
-import { UserStatus } from '../../types/common';
-import { Role } from '../../types/role';
+import { UserStatus } from '../../types/common.js';
+import { Role } from '../../types/role.js';
 import { Document } from 'mongoose';
 
 export interface IUser {

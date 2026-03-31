@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
-import { UserModel } from '../modules/User/user.model';
-import config from '../config/env';
+import { UserModel } from '../modules/User/user.model.js';
+import config from '../config/env.js';
 
 const migrateEmailVerification = async () => {
     try {

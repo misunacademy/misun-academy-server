@@ -1,13 +1,13 @@
 import { Request, Response } from "express";
-import catchAsync from "../../utils/catchAsync";
-import sendResponse from "../../utils/sendResponse";
-import { PaymentService } from "./payment.service";
-import { PaymentModel } from "./payment.model";
-import ApiError from "../../errors/ApiError";
+import catchAsync from "../../utils/catchAsync.js";
+import sendResponse from "../../utils/sendResponse.js";
+import { PaymentService } from "./payment.service.js";
+import { PaymentModel } from "./payment.model.js";
+import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
-import { Status, EnrollmentStatus } from "../../types/common";
-import env from "../../config/env";
-import { EnrollmentModel } from '../Enrollment/enrollment.model';
+import { Status, EnrollmentStatus } from "../../types/common.js";
+import env from "../../config/env.js";
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 
 const mapSslGatewayStatus = (rawStatus?: string): Status | null => {
   if (!rawStatus) return null;
@@ -90,12 +90,28 @@ const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
     } catch (error) {
       console.error('Failed to finalize payment on status callback:', error);
     }
-  } else if (callbackStatus && callbackStatus !== Status.Pending) {
+  } else if (callbackStatus) {
     try {
       const callbackPayload = Object.keys(req.body || {}).length > 0 ? req.body : req.query;
-      await PaymentService.updatePaymentWithEnrollStatus(transactionId, callbackStatus, callbackPayload);
+
+      if (callbackStatus === Status.Pending) {
+        // If user returns from gateway as pending, convert to failed so user can retry with manual payment.
+        await PaymentService.updatePaymentWithEnrollStatus(transactionId, Status.Failed, callbackPayload);
+      } else {
+        await PaymentService.updatePaymentWithEnrollStatus(transactionId, callbackStatus, callbackPayload);
+      }
     } catch (error) {
       console.error('Failed to update payment from status callback:', error);
+    }
+  } else {
+    // User may be redirected with no callback status (back from gateway). If stored value is still pending, mark as failed to avoid stuck state.
+    try {
+      const statusCheck = await PaymentService.checkPaymentStatus(transactionId);
+      if (statusCheck.payment?.status === Status.Pending) {
+        await PaymentService.updatePaymentWithEnrollStatus(transactionId, Status.Failed);
+      }
+    } catch (error) {
+      console.error('Failed to cleanup pending payment without explicit callback status:', error);
     }
   }
 
@@ -173,7 +189,7 @@ const verifyPaymentSuccessForCurrentUser = catchAsync(async (req: Request, res: 
  */
 
 // const sslCommerzWebhook = catchAsync(async (req: Request, res: Response) => {
-//     const config = require('../../config/env').default;
+//     const config = require('../../config/env.js').default;
 
 //     const {
 //         val_id,

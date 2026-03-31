@@ -1,7 +1,7 @@
 import express from 'express';
-import { DashboardController } from './dashboard.controller';
-import { requireAuth, requireAdmin, requireEmployee } from '../../middlewares/betterAuth';
-// import { Role } from '../../types/role';
+import { DashboardController } from './dashboard.controller.js';
+import { requireAuth, requireAdmin, requireEmployee } from '../../middlewares/betterAuth.js';
+// import { Role } from '../../types/role.js';
 
 const router = express.Router();
 

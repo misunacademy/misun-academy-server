@@ -1,6 +1,6 @@
 import express from 'express';
-import { ModuleController } from './module.controller';
-import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
+import { ModuleController } from './module.controller.js';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 
 const router = express.Router();
 

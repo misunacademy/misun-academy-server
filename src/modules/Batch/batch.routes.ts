@@ -1,9 +1,9 @@
 import express from 'express';
-import validateRequest from '../../middlewares/validateRequest';
-import { BatchController } from './batch.controller';
-import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
-import { Role } from '../../types/role';
-import { createBatchSchema, updateBatchSchema } from './batch.validation';
+import validateRequest from '../../middlewares/validateRequest.js';
+import { BatchController } from './batch.controller.js';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
+import { Role } from '../../types/role.js';
+import { createBatchSchema, updateBatchSchema } from './batch.validation.js';
 const router = express.Router();
 
 // Public access for listing batches (used by student-facing views)

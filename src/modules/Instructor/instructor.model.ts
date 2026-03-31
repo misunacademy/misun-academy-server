@@ -1,5 +1,5 @@
 import { Schema, model } from 'mongoose';
-import { IInstructor } from './instructor.interface';
+import { IInstructor } from './instructor.interface.js';
 
 const instructorSchema = new Schema<IInstructor>(
     {

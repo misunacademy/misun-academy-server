@@ -1,4 +1,4 @@
-import { Role } from "../../types/role";
+import { Role } from "../../types/role.js";
 
 export interface IAdmin {
     name: string;

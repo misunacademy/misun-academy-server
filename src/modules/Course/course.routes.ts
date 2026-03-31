@@ -1,9 +1,9 @@
 import express from 'express';
-import { CourseController } from './course.controller';
-import { requireAuth, requireAdmin, requireSuperAdmin, requireInstructor, requireRole } from '../../middlewares/betterAuth';
-import { Role } from '../../types/role';
-import validateRequest from '../../middlewares/validateRequest';
-import { createCourseSchema, updateCourseSchema } from '../../validations/course.validation';
+import { CourseController } from './course.controller.js';
+import { requireAuth, requireAdmin, requireSuperAdmin, requireInstructor, requireRole } from '../../middlewares/betterAuth.js';
+import { Role } from '../../types/role.js';
+import validateRequest from '../../middlewares/validateRequest.js';
+import { createCourseSchema, updateCourseSchema } from '../../validations/course.validation.js';
 
 const router = express.Router();
 

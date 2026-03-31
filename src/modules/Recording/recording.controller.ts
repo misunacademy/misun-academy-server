@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
-import catchAsync from '../../utils/catchAsync';
-import sendResponse from '../../utils/sendResponse';
-import { RecordingService } from './recording.service';
+import catchAsync from '../../utils/catchAsync.js';
+import sendResponse from '../../utils/sendResponse.js';
+import { RecordingService } from './recording.service.js';
 
 // Admin: Create recording
 const createRecording = catchAsync(async (req: Request, res: Response) => {

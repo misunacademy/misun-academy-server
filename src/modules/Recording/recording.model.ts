@@ -1,6 +1,6 @@
 import { Schema, model } from 'mongoose';
-import { VideoSource } from '../../types/common';
-import { IRecording } from './recording.interface';
+import { VideoSource } from '../../types/common.js';
+import { IRecording } from './recording.interface.js';
 
 const recordingSchema = new Schema<IRecording>(
     {

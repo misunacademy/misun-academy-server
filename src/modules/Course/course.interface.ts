@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { CourseStatus, CourseLevel } from '../../types/common';
+import { CourseStatus, CourseLevel } from '../../types/common.js';
 
 export interface ICourse {
     _id?: Types.ObjectId;

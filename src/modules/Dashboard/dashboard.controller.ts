@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
-import catchAsync from "../../utils/catchAsync";
-import sendResponse from "../../utils/sendResponse";
-import { DashboardService } from "./dashboard.service";
+import catchAsync from "../../utils/catchAsync.js";
+import sendResponse from "../../utils/sendResponse.js";
+import { DashboardService } from "./dashboard.service.js";
 
 const getDashboardMetaData = catchAsync(async (req: Request, res: Response) => {
     const result = await DashboardService.getDashboardMetaData();

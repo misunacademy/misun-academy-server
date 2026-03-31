@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { IGenericResponse } from '../types/response.interfaces';
+import { IGenericResponse } from '../types/response.interfaces.js';
 
 const sendResponse = <T>(
     res: Response,

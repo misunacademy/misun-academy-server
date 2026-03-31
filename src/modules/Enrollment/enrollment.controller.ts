@@ -1,14 +1,15 @@
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
-import catchAsync from '../../utils/catchAsync';
-import sendResponse from '../../utils/sendResponse';
-import { EnrollmentService } from './enrollment.service';
-import ApiError from '../../errors/ApiError';
+import catchAsync from '../../utils/catchAsync.js';
+import sendResponse from '../../utils/sendResponse.js';
+import { EnrollmentService } from './enrollment.service.js';
+import ApiError from '../../errors/ApiError.js';
 import mongoose from 'mongoose';
-import { EnrollmentStatus } from '../../types/common';
-import { sendWaitingPaymentVerificationEmail } from '../../services/emailService';
-import { UserModel } from '../User/user.model';
-
+import { EnrollmentStatus } from '../../types/common.js';
+import { sendWaitingPaymentVerificationEmail } from '../../services/emailService.js';
+import { UserModel } from '../User/user.model.js';
+import { PaymentService } from '../Payment/payment.service.js';
+import { EnrollmentModel } from './enrollment.model.js';
 /**
  * Initiate enrollment for a batch
  * Creates pending enrollment and returns payment URL
@@ -22,10 +23,10 @@ const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
     // If existing pending enrollment found, return it
     if (result.isExisting) {
         // Try to get existing payment URL
-        const PaymentService = require('../Payment/payment.service').PaymentService;
-        
+        // const PaymentService = require('../Payment/payment.service').PaymentService;
+
         const paymentResult = await PaymentService.initiateSSLCommerzPayment(
-            result.enrollment.enrollmentId,
+            result?.enrollment?.enrollmentId as string,
             id
         );
 
@@ -50,13 +51,13 @@ const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
     const batchNumber = (result.batch as any).batchNumber?.toString() || '6';
     const courseSlug = (result.batch as any).courseId?.slug || '';
     const enrollmentId = await EnrollmentService.generateEnrollmentId(batchNumber, courseSlug);
-    
+
     // Update enrollment with ID
     result.enrollment.enrollmentId = enrollmentId;
     await result.enrollment.save();
 
     // Initiate SSLCommerz payment
-    const PaymentService = require('../Payment/payment.service').PaymentService;
+    // const PaymentService = require('../Payment/payment.service').PaymentService;
     const paymentResult = await PaymentService.initiateSSLCommerzPayment(
         enrollmentId,
         id
@@ -124,8 +125,8 @@ const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
 
     console.log('Search params:', { batchId, status, page, limit, search });
 
-    const EnrollmentModel = require('./enrollment.model').EnrollmentModel;
-    
+    // const EnrollmentModel = require('./enrollment.model').EnrollmentModel;
+
     // Build aggregation pipeline
     const pipeline: any[] = [];
 
@@ -134,12 +135,12 @@ const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
 
     // Only include enrollments that have a generated enrollmentId and are Active
     matchStage.enrollmentId = { $exists: true, $ne: null };
-const requestedStatus =
-  typeof status === 'string' && Object.values(EnrollmentStatus).includes(status as EnrollmentStatus)
-    ? (status as EnrollmentStatus)
-    : EnrollmentStatus.Active;
+    const requestedStatus =
+        typeof status === 'string' && Object.values(EnrollmentStatus).includes(status as EnrollmentStatus)
+            ? (status as EnrollmentStatus)
+            : EnrollmentStatus.Active;
 
-matchStage.status = requestedStatus;
+    matchStage.status = requestedStatus;
     if (batchId) matchStage.batchId = new mongoose.Types.ObjectId(batchId as string);
     // Intentionally ignore incoming `status` query param since this endpoint should return only active enrollments
 
@@ -225,7 +226,7 @@ matchStage.status = requestedStatus;
     // Execute aggregation
     const enrollments = await EnrollmentModel.aggregate(pipeline);
 
- 
+
     // Transform data to match frontend expectations
     const transformedData = enrollments.map((enrollment: any) => ({
         _id: enrollment._id,
@@ -271,7 +272,7 @@ const updateEnrollmentStatus = catchAsync(async (req: Request, res: Response) =>
     const { enrollmentId } = req.params;
     const { status, reason } = req.body;
 
-    const enrollment = await require('./enrollment.model').EnrollmentModel.findByIdAndUpdate(
+    const enrollment = await EnrollmentModel.findByIdAndUpdate(
         enrollmentId,
         { status, $set: { statusChangeReason: reason } },
         { new: true }

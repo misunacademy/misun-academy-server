@@ -1,6 +1,6 @@
 import { Schema, model } from 'mongoose';
-import { LessonType, VideoSource } from '../../types/common';
-import { ILesson } from './lesson.interface';
+import { LessonType, VideoSource } from '../../types/common.js';
+import { ILesson } from './lesson.interface.js';
 
 
 enum IResourceType {

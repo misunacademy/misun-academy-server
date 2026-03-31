@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
-import catchAsync from "../../utils/catchAsync";
-import sendResponse from "../../utils/sendResponse";
-import { BatchService } from "./batch.service";
+import catchAsync from "../../utils/catchAsync.js";
+import sendResponse from "../../utils/sendResponse.js";
+import { BatchService } from "./batch.service.js";
 
 const createBatch = catchAsync(async (req: Request, res: Response) => {
     const result = await BatchService.createBatch(req.body);

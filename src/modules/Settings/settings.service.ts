@@ -1,5 +1,5 @@
-import { Settings } from './settings.model';
-import { ISettings } from './settings.interface';
+import { Settings } from './settings.model.js';
+import { ISettings } from './settings.interface.js';
 
 const getSettings = async (): Promise<ISettings | null> => {
   return await Settings.findOne()

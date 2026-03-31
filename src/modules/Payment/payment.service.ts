@@ -1,17 +1,20 @@
 import mongoose, { PipelineStage } from "mongoose";
-import { PaymentModel } from "./payment.model";
-import { Status, EnrollmentStatus } from "../../types/common";
-import { EnrollmentModel } from "../Enrollment/enrollment.model";
-import ApiError from "../../errors/ApiError";
+import SSLCommerzPayment from 'sslcommerz-lts';
+import config from '../../config/env.js';
+import { PaymentModel } from "./payment.model.js";
+import { Status, EnrollmentStatus } from "../../types/common.js";
+import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
+import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
-import { UserModel } from "../User/user.model";
-import { sendPaymentSuccessEmail, sendEnrollmentConfirmationEmail, sendPaymentFailedEmail } from "../../services/emailService";
+import { UserModel } from "../User/user.model.js";
+import { sendPaymentSuccessEmail, sendEnrollmentConfirmationEmail, sendPaymentFailedEmail } from "../../services/emailService.js";
 import crypto from 'crypto';
-import { BatchModel } from "../Batch/batch.model";
-import { ProfileService } from "../Profile/profile.service";
+import { BatchModel } from "../Batch/batch.model.js";
+import { ProfileService } from "../Profile/profile.service.js";
 import axios from 'axios';
-import env from '../../config/env';
-import { sslcommerzConfig } from '../../config/sslcommerz';
+import env from '../../config/env.js';
+import { sslcommerzConfig } from '../../config/sslcommerz.js';
+import { EnrollmentService } from "../Enrollment/enrollment.service.js";
 
 interface PaymentHistoryQuery {
     page?: number;
@@ -277,8 +280,11 @@ const updatePaymentWithEnrollStatus = async (
                     );
                 }
             }
-        } else if (paymentStatus === Status.Failed && updatedPayment.enrollmentId) {
-            // Update enrollment to failed if payment failed
+        } else if (
+            (paymentStatus === Status.Failed || paymentStatus === Status.Cancel) &&
+            updatedPayment.enrollmentId
+        ) {
+            // Update enrollment to failed if payment failed or cancelled
             const enrollment = await EnrollmentModel.findOne({
                 enrollmentId: updatedPayment.enrollmentId
             });
@@ -567,8 +573,8 @@ const getMyPayments = async (userId: string) => {
  * Initiate SSLCommerz payment
  */
 const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) => {
-    const SSLCommerzPayment = require('sslcommerz-lts');
-    const config = require('../../config/env').default;
+    // const SSLCommerzPayment = require('sslcommerz-lts');
+    // const config = require('../../config/env.js').default;
 
     const enrollment = await EnrollmentModel.findOne({ enrollmentId, userId })
         .populate('batchId')
@@ -580,6 +586,7 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
 
     if (
         enrollment.status !== EnrollmentStatus.Pending &&
+        enrollment.status !== EnrollmentStatus.PaymentPending &&
         enrollment.status !== EnrollmentStatus.PaymentFailed
     ) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment is not pending payment');
@@ -742,10 +749,12 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
                 throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
             }
 
-            // Generate enrollment ID for approved payment
-            const EnrollmentService = require('../Enrollment/enrollment.service').EnrollmentService;
+            // Generate enrollment ID for approved payment if not already assigned to this enrollment.
             const courseSlug = (batch.courseId as any)?.slug || '';
-            const enrollmentId = await EnrollmentService.generateEnrollmentId(batch.batchNumber.toString(), courseSlug);
+            let enrollmentId = payment.enrollmentId;
+            if (!enrollmentId) {
+                enrollmentId = await EnrollmentService.generateEnrollmentId(batch.batchNumber.toString(), courseSlug);
+            }
 
             // Update payment to success and link enrollment
             payment.status = Status.Success;
@@ -770,8 +779,10 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
                 throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
             }
 
-            // Assign enrollment ID and activate
-            enrollment.enrollmentId = enrollmentId;
+            // Assign enrollment ID if missing (existing may already have it), then activate
+            if (!enrollment.enrollmentId) {
+                enrollment.enrollmentId = enrollmentId;
+            }
             enrollment.status = EnrollmentStatus.Active;
             enrollment.paymentId = payment._id;
             enrollment.enrolledAt = new Date();

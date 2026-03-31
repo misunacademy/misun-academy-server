@@ -1,6 +1,9 @@
 import { FilterQuery } from 'mongoose';
-import { CourseModel } from './course.model';
-import { EnrollmentModel } from '../Enrollment/enrollment.model';
+import { CourseModel } from './course.model.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { ModuleModel } from '../Module/module.model.js';
+import { LessonModel } from '../Lesson/lesson.model.js';
+import { ICourse } from './course.interface.js';
 
 export const CourseService = {
     async createCourse(data: any) {
@@ -28,7 +31,7 @@ export const CourseService = {
 
         // Add students count for each course
         const coursesWithCount = await Promise.all(
-            data.map(async (course) => {
+            data.map(async (course:ICourse) => {
                 const count = await EnrollmentModel.countDocuments({ 
                     course: course._id, 
                     status: { $ne: 'cancelled' } 
@@ -46,8 +49,8 @@ export const CourseService = {
         if (!course) return null;
 
         // Fetch modules and lessons for this course
-        const ModuleModel = require('../Module/module.model').ModuleModel;
-        const LessonModel = require('../Lesson/lesson.model').LessonModel;
+        // const ModuleModel = require('../Module/module.model').ModuleModel;
+        // const LessonModel = require('../Lesson/lesson.model').LessonModel;
         
         const modules = await ModuleModel.find({ courseId: id }).sort({ order: 1 }).lean();
         

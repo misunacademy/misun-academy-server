@@ -1,24 +1,20 @@
 // Static imports for CJS-compatible packages only
 import mongoose from 'mongoose';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../services/emailService';
-import { Role } from '../types/role';
-import { UserStatus } from '../types/common';
-import { ProfileModel } from '../modules/Profile/profile.model';
-import { dynamicImport } from '../utils/dynamicImport';
+import { sendVerificationEmail, sendPasswordResetEmail } from '../services/emailService.js';
+import { Role } from '../types/role.js';
+import { UserStatus } from '../types/common.js';
+import { ProfileModel } from '../modules/Profile/profile.model.js';
+import { betterAuth } from 'better-auth';
+import { mongodbAdapter } from 'better-auth/adapters/mongodb';
 
 // Use the shared email service for auth emails (reuse SMTP config & retry logic)
 let authInstance: any = null;
 
-// initializeAuth is async because better-auth is ESM-only (.mjs) and cannot be
-// statically require()'d from CommonJS. We use dynamic import() to load it at runtime.
 export const initializeAuth = async () => {
   if (authInstance) {
     return authInstance;
   }
 
-  // Dynamically import ESM-only packages at runtime (prevents ERR_REQUIRE_ESM)
-  const { betterAuth } = await dynamicImport('better-auth');
-  const { mongodbAdapter } = await dynamicImport('better-auth/adapters/mongodb');
 
   const authCookieDomain = process.env.AUTH_COOKIE_DOMAIN?.trim();
   const enableCrossSubDomainCookies =
@@ -155,14 +151,20 @@ export const initializeAuth = async () => {
       cookiePrefix: 'better-auth',
       crossSubDomainCookies: enableCrossSubDomainCookies
         ? {
-            enabled: true,
-            domain: authCookieDomain!,
-          }
+          enabled: true,
+          domain: authCookieDomain!,
+        }
         : {
-            enabled: false,
-          },
+          enabled: false,
+        },
       useSecureCookies: process.env.NODE_ENV === 'production',
       // Let MongoDB adapter handle ObjectId generation natively
+
+      defaultCookieAttributes: {
+        sameSite: 'none',
+        secure: true,
+        httpOnly: true,
+      },
     },
 
     trustedOrigins: [

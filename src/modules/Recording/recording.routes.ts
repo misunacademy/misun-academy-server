@@ -1,7 +1,7 @@
 import express from 'express';
-import { RecordingController } from './recording.controller';
-import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
-import { checkBatchEnrollment } from '../../middlewares/batchAccess';
+import { RecordingController } from './recording.controller.js';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
+import { checkBatchEnrollment } from '../../middlewares/batchAccess.js';
 
 const router = express.Router();
 

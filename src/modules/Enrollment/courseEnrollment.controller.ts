@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
-import catchAsync from '../../utils/catchAsync';
-import sendResponse from '../../utils/sendResponse';
-import { CourseEnrollmentService } from './courseEnrollment.service';
+import catchAsync from '../../utils/catchAsync.js';
+import sendResponse from '../../utils/sendResponse.js';
+import { CourseEnrollmentService } from './courseEnrollment.service.js';
 
 /**
  * Get course progress for the authenticated user

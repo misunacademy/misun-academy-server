@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { initializeAuth } from "./betterAuth";
+import { initializeAuth } from "./betterAuth.js";
 
 let isConnected = false;
 

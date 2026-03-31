@@ -1,6 +1,6 @@
 import express from 'express';
-import { SettingsController } from './settings.controller';
-import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
+import { SettingsController } from './settings.controller.js';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 
 const router = express.Router();
 

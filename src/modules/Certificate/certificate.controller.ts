@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
-import catchAsync from '../../utils/catchAsync';
-import sendResponse from '../../utils/sendResponse';
-import { CertificateService } from './certificate.service';
+import catchAsync from '../../utils/catchAsync.js';
+import sendResponse from '../../utils/sendResponse.js';
+import { CertificateService } from './certificate.service.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 
 /**
  * Get certificate for enrollment
@@ -187,7 +188,7 @@ const checkEligibility = catchAsync(async (req: Request, res: Response) => {
     const { enrollmentId } = req.params as { enrollmentId: string };
 
     // Verify user owns this enrollment
-    const enrollment = await require('../Enrollment/enrollment.model').EnrollmentModel.findOne({
+    const enrollment = await EnrollmentModel.findOne({
         _id: enrollmentId,
         userId: id,
     });

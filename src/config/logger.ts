@@ -1,5 +1,5 @@
 import pino from 'pino';
-import env from './env';
+import env from './env.js';
 
 const isDevelopment = env.NODE_ENV === 'development';
 

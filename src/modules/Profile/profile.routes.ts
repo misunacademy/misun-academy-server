@@ -1,14 +1,14 @@
 import express from 'express';
-import { ProfileController } from './profile.controller';
-import { requireAuth } from '../../middlewares/betterAuth';
-import validateRequest from '../../middlewares/validateRequest';
+import { ProfileController } from './profile.controller.js';
+import { requireAuth } from '../../middlewares/betterAuth.js';
+import validateRequest from '../../middlewares/validateRequest.js';
 import {
   createProfileSchema,
   updateProfileSchema,
   updateInterestsSchema,
   addInterestSchema,
   removeInterestSchema,
-} from '../../validations/profile.validation';
+} from '../../validations/profile.validation.js';
 
 const router = express.Router();
 

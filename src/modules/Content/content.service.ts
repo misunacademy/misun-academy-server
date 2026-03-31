@@ -1,12 +1,12 @@
 import { StatusCodes } from 'http-status-codes';
-import { ModuleModel } from '../Module/module.model';
-import { LessonModel } from '../Lesson/lesson.model';
-import { ResourceModel } from '../Resource/resource.model';
-import { ModuleProgressModel } from '../Progress/moduleProgress.model';
-import { ProgressService } from '../Progress/progress.service';
-import { ProgressStatus } from '../../types/common';
-import ApiError from '../../errors/ApiError';
-import { BatchModel } from '../Batch/batch.model';
+import { ModuleModel } from '../Module/module.model.js';
+import { LessonModel } from '../Lesson/lesson.model.js';
+import { ResourceModel } from '../Resource/resource.model.js';
+import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
+import { ProgressService } from '../Progress/progress.service.js';
+import { ProgressStatus } from '../../types/common.js';
+import ApiError from '../../errors/ApiError.js';
+import { BatchModel } from '../Batch/batch.model.js';
 
 /**
  * Get all modules for a batch with progress

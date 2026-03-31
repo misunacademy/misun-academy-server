@@ -1,7 +1,8 @@
 import { StatusCodes } from 'http-status-codes';
-import ApiError from '../../errors/ApiError';
-import { RecordingModel } from './recording.model';
-import { IRecording } from './recording.interface';
+import ApiError from '../../errors/ApiError.js';
+import { RecordingModel } from './recording.model.js';
+import { IRecording } from './recording.interface.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 
 const createRecording = async (
     recordingData: Partial<IRecording>,
@@ -90,7 +91,7 @@ const getBatchRecordings = async (batchId: string) => {
 
 const getStudentRecordings = async (userId: string) => {
     // Get student's enrollments
-    const { EnrollmentModel } = require('../Enrollment/enrollment.model');
+    // const { EnrollmentModel } = require('../Enrollment/enrollment.model');
     const enrollments = await EnrollmentModel.find({
         userId: userId,
         status: 'active',

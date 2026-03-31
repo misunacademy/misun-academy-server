@@ -1,6 +1,6 @@
 import { Schema, model } from 'mongoose';
-import { CourseStatus, CourseLevel } from '../../types/common';
-import { ICourse } from './course.interface';
+import { CourseStatus, CourseLevel } from '../../types/common.js';
+import { ICourse } from './course.interface.js';
 
 const courseSchema = new Schema<ICourse>(
     {

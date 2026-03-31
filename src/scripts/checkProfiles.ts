@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import env from '../config/env';
-import { ProfileModel } from '../modules/Profile/profile.model';
+import env from '../config/env.js';
+import { ProfileModel } from '../modules/Profile/profile.model.js';
 
 dotenv.config();
 

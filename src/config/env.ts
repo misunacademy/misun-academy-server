@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { z } from "zod";
-import ApiError from "../errors/ApiError";
+import ApiError from "../errors/ApiError.js";
 
 // Define the environment schema with validation
 const EnvSchema = z.object({

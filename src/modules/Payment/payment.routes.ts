@@ -1,6 +1,6 @@
 import express from 'express';
-import { PaymentController } from './payment.controller';
-import { requireAuth, requireAdmin } from '../../middlewares/betterAuth';
+import { PaymentController } from './payment.controller.js';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 
 const router = express.Router();
 

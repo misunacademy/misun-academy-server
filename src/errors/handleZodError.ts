@@ -1,5 +1,5 @@
 import { ZodError, ZodIssue } from 'zod';
-import { IGenericErrorResponse } from '../types/response.interfaces';
+import { IGenericErrorResponse } from '../types/response.interfaces.js';
 
 export default function handleZodError(error: ZodError): IGenericErrorResponse {
     const statusCode = 400;
