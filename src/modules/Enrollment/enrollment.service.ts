@@ -77,7 +77,7 @@ const syncStudentCounterToCurrentMax = async (
 //     const paddedCount = String(count + 1).padStart(5, '0');
 //     return `MA-${batch}${year}${paddedCount}`;
 // };
-const generateEnrollmentId = async (batch: string = '6', courseSlug: string = ''): Promise<string> => {
+const generateEnrollmentId = async (batch: string, courseSlug: string ): Promise<string> => {
     const year = new Date().getFullYear();
 
     const isEnglishCourse = courseSlug.toLowerCase().includes('english');
@@ -231,7 +231,8 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
             // Ensure existing enrollment has an enrollmentId (required for SSLCommerz flow)
             if (!existingPendingEnrollment.enrollmentId) {
                 const batchObj = existingPendingEnrollment.batchId as any;
-                const batchNumber = batchObj?.batchNumber?.toString() || '6';
+                // const batchNumber = batchObj?.batchNumber?.toString() || '6';
+                const batchNumber = batchObj?.title?.split(' ')[1];
                 const courseSlug = (batchObj?.courseId as any)?.slug || '';
                 const generatedEnrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
                 existingPendingEnrollment.enrollmentId = generatedEnrollmentId;
@@ -674,7 +675,8 @@ const enrollWithManualPayment = async (
 
         let enrollment = existingEnrollment;
 
-        const batchNumber = batch.batchNumber?.toString() || '6';
+        // const batchNumber = batch.batchNumber?.toString() || '6';
+        const batchNumber = batch.title?.split(' ')[1];
         const courseSlug = (batch.courseId as any)?.slug || '';
 
         // Create or reuse enrollment with a robust enrollmentId assignment.
