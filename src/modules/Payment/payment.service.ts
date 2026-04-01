@@ -753,7 +753,7 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
             const courseSlug = (batch.courseId as any)?.slug || '';
             let enrollmentId = payment.enrollmentId;
             if (!enrollmentId) {
-                enrollmentId = await EnrollmentService.generateEnrollmentId(batch.batchNumber.toString(), courseSlug);
+                enrollmentId = await EnrollmentService.generateEnrollmentId(batch?.title?.split(' ')[1], courseSlug);
             }
 
             // Update payment to success and link enrollment
