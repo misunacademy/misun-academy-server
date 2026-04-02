@@ -29,6 +29,26 @@ const mapSslGatewayStatus = (rawStatus?: string): Status | null => {
   return null;
 };
 
+const resolveFrontendBaseForRedirect = (redirectCandidate?: string): string => {
+  if (!redirectCandidate) return env.MA_FRONTEND_URL;
+
+  try {
+    const target = new URL(redirectCandidate).origin;
+    const allowedOrigins = new Set([
+      new URL(env.MA_FRONTEND_URL).origin,
+      new URL(env.EP_FRONTEND_URL).origin,
+    ]);
+
+    if (allowedOrigins.has(target)) {
+      return target;
+    }
+  } catch {
+    // Fall back to default MA frontend URL.
+  }
+
+  return env.MA_FRONTEND_URL;
+};
+
 const getPaymentHistory = catchAsync(async (req: Request, res: Response) => {
   const result = await PaymentService.getPaymentHistory(req.query);
 
@@ -77,6 +97,7 @@ const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
   const transactionId = (req.query.t || req.body?.tran_id) as string;
   const valId = (req.body?.val_id || req.query?.val_id) as string | undefined;
   const callbackStatus = mapSslGatewayStatus((req.body?.status || req.query?.status) as string | undefined);
+  const redirectCandidate = (req.query.redirect as string | undefined) || undefined;
 
   if (!transactionId) {
     throw new ApiError(StatusCodes.BAD_REQUEST, "Transaction ID is required");
@@ -117,9 +138,10 @@ const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
 
   // Get current payment status
   const result = await PaymentService.checkPaymentStatus(transactionId);
+  const frontendBaseUrl = resolveFrontendBaseForRedirect(redirectCandidate);
 
   // Redirect based on status
-  return res.redirect(`${env.MA_FRONTEND_URL}${result.redirectUrl}`);
+  return res.redirect(`${frontendBaseUrl}${result.redirectUrl}`);
 });
 
 const verifyPaymentSuccessForCurrentUser = catchAsync(async (req: Request, res: Response) => {

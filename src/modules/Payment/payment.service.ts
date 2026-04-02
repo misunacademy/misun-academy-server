@@ -54,6 +54,31 @@ const syncProfileEnrollmentReference = async (
     }
 };
 
+const getFrontendOrigin = (urlLike?: string): string | null => {
+    if (!urlLike) return null;
+    try {
+        return new URL(urlLike).origin;
+    } catch {
+        return null;
+    }
+};
+
+const resolveRedirectFrontendBase = (initiatedFrom?: string): string => {
+    const maOrigin = getFrontendOrigin(env.MA_FRONTEND_URL) || env.MA_FRONTEND_URL;
+    const epOrigin = getFrontendOrigin(env.EP_FRONTEND_URL);
+    const sourceOrigin = getFrontendOrigin(initiatedFrom);
+
+    if (!sourceOrigin) {
+        return maOrigin;
+    }
+
+    if (epOrigin && sourceOrigin === epOrigin) {
+        return epOrigin;
+    }
+
+    return maOrigin;
+};
+
 const getPaymentHistory = async (query: PaymentHistoryQuery) => {
     const {
         page = 1,
@@ -572,7 +597,7 @@ const getMyPayments = async (userId: string) => {
 /**
  * Initiate SSLCommerz payment
  */
-const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) => {
+const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string, initiatedFrom?: string) => {
     // const SSLCommerzPayment = require('sslcommerz-lts');
     // const config = require('../../config/env.js').default;
 
@@ -607,6 +632,7 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
 
     // Generate unique transaction ID
     const transactionId = generateTransactionId();
+    const redirectFrontend = resolveRedirectFrontendBase(initiatedFrom);
 
     const paymentData = {
         store_id: config.SSL_STORE_ID,
@@ -614,9 +640,9 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         total_amount: batch.price,
         currency: "BDT",
         tran_id: transactionId,
-        success_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}`,
-        fail_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=failed`,
-        cancel_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=cancel`,
+        success_url: `${redirectFrontend}/payment?status=success&t=${encodeURIComponent(transactionId)}`,
+        fail_url: `${redirectFrontend}/payment?status=failed&t=${encodeURIComponent(transactionId)}`,
+        cancel_url: `${redirectFrontend}/payment?status=cancelled&t=${encodeURIComponent(transactionId)}`,
         ipn_url: `${config.SERVER_URL}/api/v1/payments/webhook`,
         product_name: `Graphics Design Course - ${batch.title}`,
         cus_name: user.name,
