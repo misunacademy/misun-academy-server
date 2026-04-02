@@ -633,6 +633,9 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string, i
     // Generate unique transaction ID
     const transactionId = generateTransactionId();
     const redirectFrontend = resolveRedirectFrontendBase(initiatedFrom);
+    const paymentStatusEndpoint = `${config.SERVER_URL}/api/v1/payments/status`;
+    const encodedTransactionId = encodeURIComponent(transactionId);
+    const encodedRedirect = encodeURIComponent(redirectFrontend);
 
     const paymentData = {
         store_id: config.SSL_STORE_ID,
@@ -640,9 +643,9 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string, i
         total_amount: batch.price,
         currency: "BDT",
         tran_id: transactionId,
-        success_url: `${redirectFrontend}/payment?status=success&t=${encodeURIComponent(transactionId)}`,
-        fail_url: `${redirectFrontend}/payment?status=failed&t=${encodeURIComponent(transactionId)}`,
-        cancel_url: `${redirectFrontend}/payment?status=cancelled&t=${encodeURIComponent(transactionId)}`,
+        success_url: `${paymentStatusEndpoint}?t=${encodedTransactionId}&status=success&redirect=${encodedRedirect}`,
+        fail_url: `${paymentStatusEndpoint}?t=${encodedTransactionId}&status=failed&redirect=${encodedRedirect}`,
+        cancel_url: `${paymentStatusEndpoint}?t=${encodedTransactionId}&status=cancelled&redirect=${encodedRedirect}`,
         ipn_url: `${config.SERVER_URL}/api/v1/payments/webhook`,
         product_name: `Graphics Design Course - ${batch.title}`,
         cus_name: user.name,

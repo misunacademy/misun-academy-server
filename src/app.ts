@@ -45,8 +45,13 @@ for (const rawOrigin of [
     env.MA_FRONTEND_URL,
     env.EP_FRONTEND_URL,
     env.CLIENT_URL,
+    env.SSL_PAYMENT_API,
+    env.SSL_VALIDATION_API,
     'http://localhost:3000',
     'http://localhost:3001',
+    'https://securepay.sslcommerz.com',
+    'https://sandbox.sslcommerz.com',
+    'https://seamless-epay.sslcommerz.com',
 ]) {
     const origin = toOrigin(rawOrigin);
     if (!origin) continue;
