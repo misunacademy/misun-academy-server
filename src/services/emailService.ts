@@ -473,7 +473,7 @@ export const sendEnrollmentConfirmationEmail = async (user: any, courseName: str
                                 Congratulations! Your payment has been successfully processed, and you are officially enrolled in <strong>${courseName}</strong>.
                             </p>
                             <p style="font-size: 16px; margin-bottom: 20px;">
-                                We are thrilled to welcome you to the Misun Academy learning community. This comprehensive course is designed to equip you with industry-standard design skills.
+                                We are thrilled to welcome you to the Esun Point learning community. This comprehensive course is designed to equip you with professional english.
                             </p>
                             
                             <div style="background-color: #eef7ff; padding: 20px; border-radius: 5px; border-left: 5px solid #0084ff; margin: 30px 0;">
@@ -483,8 +483,7 @@ export const sendEnrollmentConfirmationEmail = async (user: any, courseName: str
                                 <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
                                     <tr>
                                         <td>
-                                            <a href="https://www.facebook.com/groups/1250032227189811" style="display: inline-block; padding: 12px 24px; background-color: #3b5998; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold; margin-right: 10px; margin-bottom: 10px;">Join Facebook Group</a>
-                                            <a href="https://chat.whatsapp.com/DXLT5euVL1D6pjxcqDTd2Q" style="display: inline-block; padding: 12px 24px; background-color: #25D366; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold;">Join WhatsApp Group</a>
+                                            <a href="https://chat.whatsapp.com/KB6OuviakWX8rG8PK4Y5YG" style="display: inline-block; padding: 12px 24px; background-color: #25D366; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold;">Join WhatsApp Group</a>
                                         </td>
                                     </tr>
                                 </table>
