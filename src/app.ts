@@ -11,6 +11,50 @@ import { connectDB } from './config/database.js';
 
 const app = express();
 
+const toOrigin = (value?: string | null): string | null => {
+    if (!value) return null;
+    try {
+        return new URL(value).origin;
+    } catch {
+        return null;
+    }
+};
+
+const withHostVariants = (origin: string): string[] => {
+    const variants = new Set<string>([origin]);
+
+    try {
+        const url = new URL(origin);
+        const host = url.hostname;
+        if (host.startsWith('www.')) {
+            url.hostname = host.replace(/^www\./, '');
+            variants.add(url.origin);
+        } else {
+            url.hostname = `www.${host}`;
+            variants.add(url.origin);
+        }
+    } catch {
+        // Ignore malformed values.
+    }
+
+    return Array.from(variants);
+};
+
+const allowedOrigins = new Set<string>();
+for (const rawOrigin of [
+    env.MA_FRONTEND_URL,
+    env.EP_FRONTEND_URL,
+    env.CLIENT_URL,
+    'http://localhost:3000',
+    'http://localhost:3001',
+]) {
+    const origin = toOrigin(rawOrigin);
+    if (!origin) continue;
+    for (const variant of withHostVariants(origin)) {
+        allowedOrigins.add(variant);
+    }
+}
+
 app.set("trust proxy", 1);
 
 let dbConnected = false;
@@ -38,12 +82,19 @@ if (process.env.VERCEL) {
 
 // Middleware
 app.use(cors({
-    origin: [
-        env.MA_FRONTEND_URL!,
-        env.EP_FRONTEND_URL!,
-        'http://localhost:3000', // Fallback for development
-        'http://localhost:3001'
-    ].filter(Boolean),
+    origin: (origin, callback) => {
+        if (!origin) {
+            callback(null, true);
+            return;
+        }
+
+        if (allowedOrigins.has(origin)) {
+            callback(null, true);
+            return;
+        }
+
+        callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],

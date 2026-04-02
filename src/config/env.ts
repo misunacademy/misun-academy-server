@@ -20,6 +20,7 @@ const EnvSchema = z.object({
     AUTH_COOKIE_DOMAIN: z.string().optional(),
     GOOGLE_CLIENT_ID: z.string(),
     GOOGLE_CLIENT_SECRET: z.string(),
+    GOOGLE_REDIRECT_URI: z.string().optional(),
     CLIENT_URL: z.string().optional(),
 
     // JWT (DEPRECATED - will be removed after migration)
