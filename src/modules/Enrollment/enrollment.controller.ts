@@ -17,6 +17,11 @@ import { EnrollmentModel } from './enrollment.model.js';
 const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.user as any;
     const { batchId } = req.body;
+    const originHeader = req.headers.origin;
+    const refererHeader = req.headers.referer;
+    const requestOrigin = Array.isArray(originHeader) ? originHeader[0] : originHeader;
+    const requestReferer = Array.isArray(refererHeader) ? refererHeader[0] : refererHeader;
+    const initiatedFrom = requestOrigin || requestReferer;
 
     const result = await EnrollmentService.initiateEnrollment(id, batchId);
 
@@ -27,7 +32,8 @@ const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
 
         const paymentResult = await PaymentService.initiateSSLCommerzPayment(
             result?.enrollment?.enrollmentId as string,
-            id
+            id,
+            initiatedFrom
         );
 
         return sendResponse(res, {
@@ -61,7 +67,8 @@ const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
     // const PaymentService = require('../Payment/payment.service').PaymentService;
     const paymentResult = await PaymentService.initiateSSLCommerzPayment(
         enrollmentId,
-        id
+        id,
+        initiatedFrom
     );
 
     sendResponse(res, {
