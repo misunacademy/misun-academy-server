@@ -1,9 +1,12 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+import { apiReference } from '@scalar/express-api-reference';
 import router from './routes/index.js';
 import globalErrorHandler from './middlewares/globalErrorHandler.js';
 import env from './config/env.js';
@@ -144,6 +147,35 @@ const apiRateLimiter = rateLimit({
 // Routes (Better Auth already mounted above)
 // Apply rate limiter specifically to API routes
 app.use('/api/v1', apiRateLimiter, router);
+
+const openApiSpecPath = path.resolve(process.cwd(), 'openapi.json');
+
+app.get('/openapi.json', (_req, res) => {
+    if (!fs.existsSync(openApiSpecPath)) {
+        return res.status(500).json({
+            success: false,
+            message: 'OpenAPI spec not found. Run: npm run docs:generate',
+        });
+    }
+
+    return res.sendFile(openApiSpecPath);
+});
+
+// Scalar serves a CDN script and inline bootstrap script; relax CSP only for docs UI.
+app.use('/docs', (_req, res, next) => {
+    res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https:; font-src 'self' data: https:"
+    );
+    next();
+});
+
+app.use(
+    '/docs',
+    apiReference({
+        url: '/openapi.json',
+    })
+);
 
 // Default route for testing
 app.get('/', (req, res) => {

@@ -107,6 +107,7 @@ npm run build            # Compile TypeScript to JavaScript
 npm start                # Start production server
 npm run seed:courses     # Seed sample courses
 npm run seed:superAdmin  # Create super admin user
+npm run docs:generate    # Generate openapi.json + analysis artifacts
 npm test                 # Run tests (coming soon)
 ```
 
@@ -214,7 +215,21 @@ POST   /api/v1/enrollments          # Auth required
 GET    /api/v1/enrollments/:id      # Auth required
 ```
 
-*Full API documentation coming soon with Swagger/OpenAPI*
+### Interactive API Documentation
+```
+GET /openapi.json         # Raw OpenAPI specification
+GET /docs                 # Scalar interactive API reference
+```
+
+Generate the spec after route/controller changes:
+
+```bash
+npm run docs:generate
+```
+
+This command generates:
+
+- `openapi.json`
 
 ## 🧪 Testing
 
