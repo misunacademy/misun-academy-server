@@ -6,7 +6,7 @@ import { ProgressService } from '../Progress/progress.service.js';
 import { CertificateStatus, EnrollmentStatus } from '../../types/common.js';
 import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
-import { sendCertificateApprovedEmail, sendCertificateIssuedEmail } from '../../services/emailService.js';
+import { sendCertificateApprovedEmail, sendCertificateIssuedEmail } from '../../services/misunAcademyEmails.js';
 import { UserModel } from '../User/user.model.js';
 import mongoose from 'mongoose';
 

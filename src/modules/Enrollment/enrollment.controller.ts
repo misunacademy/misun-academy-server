@@ -6,10 +6,13 @@ import { EnrollmentService } from './enrollment.service.js';
 import ApiError from '../../errors/ApiError.js';
 import mongoose from 'mongoose';
 import { EnrollmentStatus } from '../../types/common.js';
-import { sendWaitingPaymentVerificationEmail } from '../../services/emailService.js';
+import { sendCourseWaitingPaymentVerificationEmail } from '../../services/courseEmailRouter.js';
 import { UserModel } from '../User/user.model.js';
 import { PaymentService } from '../Payment/payment.service.js';
 import { EnrollmentModel } from './enrollment.model.js';
+import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
+import { ModuleModel } from '../Module/module.model.js';
+import { ProgressStatus } from '../../types/common.js';
 /**
  * Initiate enrollment for a batch
  * Creates pending enrollment and returns payment URL
@@ -121,9 +124,9 @@ const getEnrollmentDetails = catchAsync(async (req: Request, res: Response) => {
  * Admin: Get all enrollments with filters
  */
 const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
-    const { batchId, status, page = 1, limit = 10, search } = req.query;
+    const { batchId, courseId, status, page = 1, limit = 10, search } = req.query;
 
-    console.log('Search params:', { batchId, status, page, limit, search });
+    console.log('Search params:', { batchId, courseId, status, page, limit, search });
 
     // const EnrollmentModel = require('./enrollment.model').EnrollmentModel;
 
@@ -189,6 +192,14 @@ const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
         { $unwind: { path: '$course', preserveNullAndEmptyArrays: true } }
     );
 
+    if (courseId && typeof courseId === 'string' && mongoose.Types.ObjectId.isValid(courseId)) {
+        pipeline.push({
+            $match: {
+                'course._id': new mongoose.Types.ObjectId(courseId),
+            },
+        });
+    }
+
     // Search filter across multiple fields
     if (search && typeof search === 'string' && search.trim() !== '') {
         // Escape special regex characters
@@ -226,30 +237,125 @@ const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
     // Execute aggregation
     const enrollments = await EnrollmentModel.aggregate(pipeline);
 
+    const enrollmentIds = enrollments
+        .map((enrollment: any) => enrollment._id)
+        .filter(Boolean);
+
+    const uniqueCourseIds = Array.from(
+        new Set(
+            enrollments
+                .map((enrollment: any) => enrollment.course?._id?.toString())
+                .filter(Boolean)
+        )
+    ).map((id) => new mongoose.Types.ObjectId(id));
+
+    const [moduleProgressRecords, modulesPerCourse] = await Promise.all([
+        enrollmentIds.length
+            ? ModuleProgressModel.find(
+                  { enrollmentId: { $in: enrollmentIds } },
+                  { enrollmentId: 1, status: 1, completionPercentage: 1 }
+              ).lean()
+            : Promise.resolve([]),
+        uniqueCourseIds.length
+            ? ModuleModel.aggregate([
+                  {
+                      $match: {
+                          courseId: { $in: uniqueCourseIds },
+                      },
+                  },
+                  {
+                      $group: {
+                          _id: '$courseId',
+                          totalModules: { $sum: 1 },
+                      },
+                  },
+              ])
+            : Promise.resolve([]),
+    ]);
+
+    const progressByEnrollment: Record<
+        string,
+        { completedModules: number; trackedModules: number; completionSum: number }
+    > = {};
+
+    for (const progress of moduleProgressRecords as any[]) {
+        const enrollmentKey = progress.enrollmentId?.toString();
+        if (!enrollmentKey) continue;
+
+        if (!progressByEnrollment[enrollmentKey]) {
+            progressByEnrollment[enrollmentKey] = {
+                completedModules: 0,
+                trackedModules: 0,
+                completionSum: 0,
+            };
+        }
+
+        progressByEnrollment[enrollmentKey].trackedModules += 1;
+        progressByEnrollment[enrollmentKey].completionSum += progress.completionPercentage || 0;
+
+        if (progress.status === ProgressStatus.Completed) {
+            progressByEnrollment[enrollmentKey].completedModules += 1;
+        }
+    }
+
+    const modulesPerCourseMap = new Map<string, number>(
+        (modulesPerCourse as any[]).map((item) => [item._id?.toString(), item.totalModules || 0])
+    );
+
 
     // Transform data to match frontend expectations
-    const transformedData = enrollments.map((enrollment: any) => ({
-        _id: enrollment._id,
-        studentId: enrollment.enrollmentId,
-        student: enrollment.id ? {
-            _id: enrollment.id._id,
-            name: enrollment.id.name,
-            email: enrollment.id.email,
-            phone: enrollment.id.phone,
-            address: enrollment.userProfile?.address || null,
-        } : null,
-        batch: enrollment.batchId ? {
-            _id: enrollment.batchId._id,
-            title: enrollment.batchId.title,
-        } : null,
-        course: enrollment.course ? {
-            _id: enrollment.course._id,
-            title: enrollment.course.title,
-            slug: enrollment.course.slug,
-        } : null,
-        status: enrollment.status,
-        createdAt: enrollment.createdAt,
-    }));
+    const transformedData = enrollments.map((enrollment: any) => {
+        const enrollmentKey = enrollment._id?.toString();
+        const progressData = enrollmentKey
+            ? progressByEnrollment[enrollmentKey]
+            : undefined;
+        const courseKey = enrollment.course?._id?.toString();
+        const totalModules = courseKey
+            ? modulesPerCourseMap.get(courseKey) ?? progressData?.trackedModules ?? 0
+            : progressData?.trackedModules ?? 0;
+        const completedModules = Math.min(progressData?.completedModules || 0, totalModules);
+        let overallProgress = totalModules
+            ? Math.round((progressData?.completionSum || 0) / totalModules)
+            : 0;
+
+        if (enrollment.status === EnrollmentStatus.Completed) {
+            overallProgress = Math.max(overallProgress, 100);
+        }
+
+        return {
+            _id: enrollment._id,
+            studentId: enrollment.enrollmentId,
+            student: enrollment.id
+                ? {
+                      _id: enrollment.id._id,
+                      name: enrollment.id.name,
+                      email: enrollment.id.email,
+                      phone: enrollment.id.phone,
+                      address: enrollment.userProfile?.address || null,
+                  }
+                : null,
+            batch: enrollment.batchId
+                ? {
+                      _id: enrollment.batchId._id,
+                      title: enrollment.batchId.title,
+                  }
+                : null,
+            course: enrollment.course
+                ? {
+                      _id: enrollment.course._id,
+                      title: enrollment.course.title,
+                      slug: enrollment.course.slug,
+                  }
+                : null,
+            status: enrollment.status,
+            progress: {
+                totalModules,
+                completedModules,
+                overallProgress,
+            },
+            createdAt: enrollment.createdAt,
+        };
+    });
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -310,9 +416,21 @@ const enrollWithManualPayment = catchAsync(async (req: Request, res: Response) =
     // Send payment verification pending email
     const user = await UserModel.findById(id);
     if (user) {
-        sendWaitingPaymentVerificationEmail(
+        const courseData = (result.batch as any)?.courseId;
+        const rawCourseName = typeof courseData === 'object'
+            ? courseData?.title || ''
+            : '';
+        const courseSlug = typeof courseData === 'object'
+            ? courseData?.slug || ''
+            : '';
+        const courseLabel = rawCourseName
+            ? `${rawCourseName} - ${result.batch.title}`
+            : result.batch.title;
+
+        sendCourseWaitingPaymentVerificationEmail(
+            { courseName: rawCourseName || result.batch.title, courseSlug },
             user,
-            result.batch.title,
+            courseLabel,
             result.transactionId
         );
     }

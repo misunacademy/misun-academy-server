@@ -4,7 +4,6 @@ import env from './config/env.js';
 import { logger } from './config/logger.js';
 import { connectDB } from './config/database.js';
 import { initializeEmailWorker } from './services/emailService.js';
-// import { seedSuperAdmin } from './scripts/seedSuperAdmin';
 
 let server: Server | null = null;
 let dbConnected = false;

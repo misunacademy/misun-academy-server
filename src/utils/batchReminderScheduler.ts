@@ -7,7 +7,7 @@ import { BatchModel } from '../modules/Batch/batch.model.js';
 import { EnrollmentModel } from '../modules/Enrollment/enrollment.model.js';
 import { UserModel } from '../modules/User/user.model.js';
 import { BatchStatus, EnrollmentStatus } from '../types/common.js';
-import { sendBatchStartReminderEmail } from '../services/emailService.js';
+import { sendCourseBatchStartReminderEmail } from '../services/courseEmailRouter.js';
 import { logger } from '../config/logger.js';
 
 /**
@@ -34,7 +34,7 @@ export const sendBatchStartReminders = async () => {
                 $gte: tomorrowStart,
                 $lte: tomorrowEnd
             }
-        }).populate('courseId', 'title');
+        }).populate('courseId', 'title slug');
 
         logger.info(`Found ${upcomingBatches.length} batches starting tomorrow`);
 
@@ -53,7 +53,16 @@ export const sendBatchStartReminders = async () => {
                 const user = enrollment.userId as any;
                 if (user && user.email) {
                     try {
-                        sendBatchStartReminderEmail(
+                        const courseData = (batch as any).courseId;
+                        const courseName = typeof courseData === 'object'
+                            ? courseData?.title || batch.title
+                            : batch.title;
+                        const courseSlug = typeof courseData === 'object'
+                            ? courseData?.slug || ''
+                            : '';
+
+                        sendCourseBatchStartReminderEmail(
+                            { courseName, courseSlug },
                             user.email,
                             user.name,
                             batch.title,

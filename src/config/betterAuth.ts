@@ -1,6 +1,6 @@
 // Static imports for CJS-compatible packages only
 import mongoose from 'mongoose';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../services/emailService.js';
+import { sendVerificationEmail, sendPasswordResetEmail } from '../services/misunAcademyEmails.js';
 import { Role } from '../types/role.js';
 import { UserStatus } from '../types/common.js';
 import { ProfileModel } from '../modules/Profile/profile.model.js';

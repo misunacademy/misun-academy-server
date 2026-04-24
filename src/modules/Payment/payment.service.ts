@@ -7,7 +7,11 @@ import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
 import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
 import { UserModel } from "../User/user.model.js";
-import { sendPaymentSuccessEmail, sendEnrollmentConfirmationEmail, sendPaymentFailedEmail } from "../../services/emailService.js";
+import {
+    sendCourseEnrollmentConfirmationEmail,
+    sendCoursePaymentFailedEmail,
+    sendCoursePaymentSuccessEmail,
+} from "../../services/courseEmailRouter.js";
 import crypto from 'crypto';
 import { BatchModel } from "../Batch/batch.model.js";
 import { ProfileService } from "../Profile/profile.service.js";
@@ -22,6 +26,8 @@ interface PaymentHistoryQuery {
     search?: string;
     status?: string;
     method?: string;
+    courseId?: string;
+    batchId?: string;
     studentId?: string;
     sortBy?: string;
     sortOrder?: "asc" | "desc";
@@ -54,6 +60,27 @@ const syncProfileEnrollmentReference = async (
     }
 };
 
+const getCourseBatchLabel = (batch: any): string => {
+    const batchTitle = (batch?.title || '').toString().trim();
+    const courseTitle = typeof batch?.courseId === 'object'
+        ? (batch.courseId?.title || '').toString().trim()
+        : '';
+
+    if (courseTitle && batchTitle) {
+        return `${courseTitle} - ${batchTitle}`;
+    }
+
+    return courseTitle || batchTitle || 'Course';
+};
+
+const getCourseEmailContext = (batch: any): { courseName: string; courseSlug: string } => {
+    const rawCourse = typeof batch?.courseId === 'object' ? batch.courseId : null;
+    return {
+        courseName: (rawCourse?.title || getCourseBatchLabel(batch)).toString(),
+        courseSlug: (rawCourse?.slug || '').toString(),
+    };
+};
+
 const getPaymentHistory = async (query: PaymentHistoryQuery) => {
     const {
         page = 1,
@@ -61,6 +88,8 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
         search,
         status,
         method,
+        courseId,
+        batchId,
         studentId,
         sortBy = "createdAt",
         sortOrder = "desc",
@@ -78,6 +107,37 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
 
     if (studentId) {
         filters.userId = studentId;
+    }
+
+    let filteredBatchIds: mongoose.Types.ObjectId[] | null = null;
+
+    if (courseId) {
+        if (!mongoose.Types.ObjectId.isValid(courseId)) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, "Invalid courseId");
+        }
+
+        const batchIds = await BatchModel.find({
+            courseId: new mongoose.Types.ObjectId(courseId),
+        }).distinct("_id");
+
+        filteredBatchIds = batchIds.map((id: any) => new mongoose.Types.ObjectId(id));
+    }
+
+    if (batchId) {
+        if (!mongoose.Types.ObjectId.isValid(batchId)) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, "Invalid batchId");
+        }
+
+        const selectedBatchId = new mongoose.Types.ObjectId(batchId);
+        if (filteredBatchIds) {
+            filteredBatchIds = filteredBatchIds.filter((id) => id.toString() === selectedBatchId.toString());
+        } else {
+            filters.batchId = selectedBatchId;
+        }
+    }
+
+    if (filteredBatchIds) {
+        filters.batchId = { $in: filteredBatchIds };
     }
 
     const pipeline: PipelineStage[] = [
@@ -220,7 +280,10 @@ const updatePaymentWithEnrollStatus = async (
                 updatedAt: new Date()
             },
             { new: true, session }
-        ).populate('batchId').populate('userId');
+        ).populate({
+            path: 'batchId',
+            populate: { path: 'courseId', select: 'title slug' }
+        }).populate('userId');
 
         if (!updatedPayment) {
             throw new ApiError(StatusCodes.NOT_FOUND, "Payment not found");
@@ -244,6 +307,8 @@ const updatePaymentWithEnrollStatus = async (
                     { session }
                 );
 
+                await EnrollmentService.ensureStudentIdForUser(enrollment.userId.toString(), session);
+
                 // Increment batch enrollment count
                 await BatchModel.findByIdAndUpdate(
                     updatedPayment.batchId,
@@ -262,21 +327,28 @@ const updatePaymentWithEnrollStatus = async (
                 const batch = updatedPayment.batchId as any;
                 const user = updatedPayment.userId as any;
                 if (user && batch) {
-                    sendPaymentSuccessEmail(
+                    const courseWithBatch = getCourseBatchLabel(batch);
+                    const courseEmailContext = getCourseEmailContext(batch);
+
+                    sendCoursePaymentSuccessEmail(
+                        courseEmailContext,
                         user.email,
                         user.name,
                         updatedPayment.amount,
                         updatedPayment.currency || 'BDT',
-                        batch?.title || 'Course',
-                        updatedPayment.transactionId
+                        courseWithBatch,
+                        updatedPayment.transactionId,
+                        updatedPayment.method
                     );
 
                     // Send enrollment confirmation email
-                    sendEnrollmentConfirmationEmail(
+                    sendCourseEnrollmentConfirmationEmail(
+                        courseEmailContext,
                         user,
-                        batch?.title || 'Course',
+                        courseWithBatch,
                         updatedPayment.enrollmentId!,
-                        updatedPayment.amount
+                        updatedPayment.amount,
+                        updatedPayment.method
                     );
                 }
             }
@@ -486,6 +558,8 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
                 enrollment.enrolledAt = enrollment.enrolledAt || new Date();
                 await enrollment.save({ session });
 
+                await EnrollmentService.ensureStudentIdForUser(enrollment.userId.toString(), session);
+
                 if (!wasAlreadyActive) {
                     await BatchModel.findByIdAndUpdate(
                         payment.batchId,
@@ -502,23 +576,32 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
                 );
 
                 const user = await UserModel.findById(payment.userId).session(session);
-                const batch = await BatchModel.findById(payment.batchId).session(session);
+                const batch = await BatchModel.findById(payment.batchId)
+                    .populate('courseId', 'title slug')
+                    .session(session);
 
                 if (user && batch) {
-                    sendPaymentSuccessEmail(
+                    const courseWithBatch = getCourseBatchLabel(batch);
+                    const courseEmailContext = getCourseEmailContext(batch);
+
+                    sendCoursePaymentSuccessEmail(
+                        courseEmailContext,
                         user.email,
                         user.name,
                         payment.amount,
                         payment.currency || 'BDT',
-                        batch.title,
-                        payment.transactionId
+                        courseWithBatch,
+                        payment.transactionId,
+                        payment.method
                     );
 
-                    sendEnrollmentConfirmationEmail(
+                    sendCourseEnrollmentConfirmationEmail(
+                        courseEmailContext,
                         user,
-                        batch.title,
+                        courseWithBatch,
                         enrollment.enrollmentId!,
-                        payment.amount
+                        payment.amount,
+                        payment.method
                     );
                 }
             }
@@ -788,6 +871,9 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
             enrollment.enrolledAt = new Date();
             await enrollment.save({ session });
 
+            // Backfill student ID for manual-payment users created before the enrollment-flow fix.
+            await EnrollmentService.ensureStudentIdForUser(enrollment.userId.toString(), session);
+
             // Increment batch enrollment count
             await BatchModel.findByIdAndUpdate(
                 payment.batchId,
@@ -800,24 +886,33 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
 
             // Send confirmation email
             const user = await UserModel.findById(payment.userId).session(session);
-            const batchForEmail = await BatchModel.findById(payment.batchId).session(session);
+            const batchForEmail = await BatchModel.findById(payment.batchId)
+                .populate('courseId', 'title slug')
+                .session(session);
 
             if (user && batchForEmail) {
-                sendPaymentSuccessEmail(
+                const courseWithBatch = getCourseBatchLabel(batchForEmail);
+                const courseEmailContext = getCourseEmailContext(batchForEmail);
+
+                sendCoursePaymentSuccessEmail(
+                    courseEmailContext,
                     user.email,
                     user.name,
                     payment.amount,
                     payment.currency || 'BDT',
-                    batchForEmail.title,
-                    payment.transactionId
+                    courseWithBatch,
+                    payment.transactionId,
+                    payment.method
                 );
 
                 // Send enrollment confirmation email
-                sendEnrollmentConfirmationEmail(
+                sendCourseEnrollmentConfirmationEmail(
+                    courseEmailContext,
                     user,
-                    batchForEmail.title,
+                    courseWithBatch,
                     enrollmentId,
-                    payment.amount
+                    payment.amount,
+                    payment.method
                 );
             }
 
@@ -850,12 +945,18 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
 
             // Send payment failed email
             const user = await UserModel.findById(payment.userId).session(session);
-            const batch = await BatchModel.findById(payment.batchId).session(session);
+            const batch = await BatchModel.findById(payment.batchId)
+                .populate('courseId', 'title slug')
+                .session(session);
 
             if (user && batch) {
-                sendPaymentFailedEmail(
+                const courseWithBatch = getCourseBatchLabel(batch);
+                const courseEmailContext = getCourseEmailContext(batch);
+
+                sendCoursePaymentFailedEmail(
+                    courseEmailContext,
                     user,
-                    batch.title,
+                    courseWithBatch,
                     'Payment verification failed by admin'
                 );
             }

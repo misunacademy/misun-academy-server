@@ -4,20 +4,45 @@ import { UserModel } from "../User/user.model.js";
 import { BatchModel } from "../Batch/batch.model.js";
 import { CourseModel } from "../Course/course.model.js";
 import { EnrollmentStatus } from "../../types/common.js";
+import mongoose from "mongoose";
+import ApiError from "../../errors/ApiError.js";
+import { StatusCodes } from "http-status-codes";
 
-const getDashboardMetaData = async () => {
+const getDashboardMetaData = async (courseId?: string) => {
     const now = new Date();
     const sixtyDaysAgo = new Date();
     sixtyDaysAgo.setDate(now.getDate() - 60);
 
-    // 1. Total enrolled students (active enrollments)
-    const totalEnrolledPromise = EnrollmentModel.countDocuments({
+    let filteredBatchIds: any[] | null = null;
+    if (courseId) {
+        if (!mongoose.Types.ObjectId.isValid(courseId)) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, "Invalid courseId");
+        }
+
+        filteredBatchIds = await BatchModel.find({
+            courseId: new mongoose.Types.ObjectId(courseId),
+        }).distinct("_id");
+    }
+
+    const enrollmentMatch: any = {
         status: EnrollmentStatus.Active,
-    });
+    };
+
+    const paymentMatch: any = {
+        status: "success",
+    };
+
+    if (filteredBatchIds) {
+        enrollmentMatch.batchId = { $in: filteredBatchIds };
+        paymentMatch.batchId = { $in: filteredBatchIds };
+    }
+
+    // 1. Total enrolled students (active enrollments)
+    const totalEnrolledPromise = EnrollmentModel.countDocuments(enrollmentMatch);
 
     // 2. Batch-wise total enrolled students
     const batchWiseEnrolledPromise = EnrollmentModel.aggregate([
-        { $match: { status: EnrollmentStatus.Active } },
+        { $match: enrollmentMatch },
         {
             $group: {
                 _id: "$batchId",
@@ -28,13 +53,13 @@ const getDashboardMetaData = async () => {
 
     // 3. Total income (all time, successful payments)
     const totalIncomePromise = PaymentModel.aggregate([
-        { $match: { status: "success" } },
+        { $match: paymentMatch },
         { $group: { _id: null, totalIncome: { $sum: "$amount" } } },
     ]);
 
     // 4. Day-wise income & enrollment stats (last 60 days)
     const dayWiseStatsPromise = PaymentModel.aggregate([
-        { $match: { status: "success", createdAt: { $gte: sixtyDaysAgo } } },
+        { $match: { ...paymentMatch, createdAt: { $gte: sixtyDaysAgo } } },
         {
             $group: {
                 _id: {
@@ -49,7 +74,7 @@ const getDashboardMetaData = async () => {
 
     // 5. Course-wise stats
     const courseWiseStatsPromise = PaymentModel.aggregate([
-        { $match: { status: "success" } },
+        { $match: paymentMatch },
         {
             $lookup: {
                 from: "batches",
@@ -82,7 +107,7 @@ const getDashboardMetaData = async () => {
 
     // 6. Batch-wise income
     const batchWiseIncomePromise = PaymentModel.aggregate([
-        { $match: { status: "success" } },
+        { $match: paymentMatch },
         {
             $lookup: {
                 from: "batches",

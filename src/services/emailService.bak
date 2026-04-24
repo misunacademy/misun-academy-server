@@ -1,0 +1,620 @@
+import nodemailer from 'nodemailer';
+import { FilterQuery } from 'mongoose';
+import mongoose from 'mongoose';
+import env from '../config/env.js';
+import { logger } from '../config/logger.js';
+import { EmailLogModel, IEmailLog, EmailPriority } from '../models/email.model.js';
+
+// ============================================================================
+// 1. CONFIGURATION & TRANSPORTER
+// ============================================================================
+
+const createTransporter = () => {
+    // Priority: Explicit Host/Port > Gmail Service
+    if (env.EMAIL_HOST) {
+        return nodemailer.createTransport({
+            host: env.EMAIL_HOST,
+            port: Number(env.EMAIL_PORT) || 587,
+            secure: env.EMAIL_SECURE === 'true', // true for 465, false for other ports
+            auth: { user: env.EMAIL_USER, pass: env.EMAIL_PASS },
+        });
+    }
+    return nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user: env.EMAIL_USER, pass: env.EMAIL_PASS },
+    });
+};
+
+// ============================================================================
+// 2. ROBUST QUEUE PROCESSOR (Polling)
+// ============================================================================
+
+class EmailWorker {
+    private isProcessing = false;
+    private BATCH_SIZE = 5;
+    private POLL_INTERVAL = 5000; // 5 seconds
+
+    constructor() {
+        this.startWorker();
+    }
+
+    private startWorker() {
+        setInterval(() => this.processQueue(), this.POLL_INTERVAL);
+        logger.info('📧 Email Worker Started');
+    }
+
+    /**
+     * Fetch pending emails from DB and send them.
+     * This ensures emails aren't lost if server restarts.
+     */
+    private async processQueue() {
+        if (this.isProcessing) return;
+
+        // Check if DB is connected
+        if (mongoose.connection.readyState !== 1) {
+            logger.warn('Email Worker: Database not connected, skipping queue processing');
+            return;
+        }
+
+        this.isProcessing = true;
+
+        try {
+            // Find jobs: Pending OR (Failed but can retry AND time has passed)
+            // Prioritize HIGH priority first
+            const jobs = await EmailLogModel.find({
+                status: 'pending',
+                nextAttemptAt: { $lte: new Date() }
+            })
+                .sort({ priority: -1, createdAt: 1 }) // High priority first, then oldest
+                .limit(this.BATCH_SIZE);
+
+            if (jobs.length > 0) {
+                await Promise.all(jobs.map(job => this.sendJob(job)));
+            }
+
+        } catch (error) {
+            logger.error(`Email Worker Error: ${error}`);
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+
+    private async sendJob(job: IEmailLog) {
+        const transporter = createTransporter();
+
+        try {
+            // Mark as processing so other workers don't pick it up
+            job.status = 'processing';
+            await job.save();
+
+            await transporter.sendMail({
+                from: env.EMAIL_FROM || `"Misun Academy" <${env.EMAIL_USER}>`,
+                to: job.to,
+                subject: job.subject,
+                html: job.html,
+                attachments: job.attachments
+            });
+
+            // Success
+            job.status = 'sent';
+            job.attempts += 1;
+            await job.save();
+            logger.info(`✅ Email sent: ${job.to} [${job.subject}]`);
+
+        } catch (error: any) {
+            job.attempts += 1;
+            job.lastError = error.message;
+
+            if (job.attempts >= job.maxRetries) {
+                job.status = 'failed';
+                logger.error(`❌ Email permanently failed: ${job.to} - ${error.message}`);
+            } else {
+                job.status = 'pending';
+                // Exponential backoff: 1min, 4min, 9min...
+                const delayMinutes = Math.pow(job.attempts, 2);
+                job.nextAttemptAt = new Date(Date.now() + delayMinutes * 60 * 1000);
+                logger.warn(`⚠️ Email retry scheduled: ${job.to} in ${delayMinutes}m`);
+            }
+            await job.save();
+        }
+    }
+}
+
+// Check if running in serverless environment (Vercel)
+const isServerless = process.env.VERCEL || process.env.VERCEL_ENV === 'production';
+
+// Initialize Worker only in non-serverless environments
+let worker: EmailWorker | null = null;
+
+export const initializeEmailWorker = () => {
+    logger.info(`Email Worker: isServerless=${isServerless}, VERCEL=${process.env.VERCEL}, VERCEL_ENV=${process.env.VERCEL_ENV}`);
+    if (!isServerless && !worker) {
+        worker = new EmailWorker();
+    }
+};
+
+// ============================================================================
+// 3. PUBLIC API
+// ============================================================================
+
+interface EmailOptions {
+    priority?: EmailPriority;
+    attachments?: any[];
+    eventId?: string; // For idempotency
+    eventType?: string;
+}
+
+/**
+ * Main function to queue an email.
+ * In serverless environments, sends immediately. Otherwise, queues to DB.
+ */
+export const queueEmail = async (
+    to: string,
+    subject: string,
+    html: string,
+    options: EmailOptions = {}
+) => {
+    // In serverless environments, send immediately to avoid DB issues
+    if (isServerless) {
+        try {
+            await sendEmailImmediate(to, subject, html);
+            logger.info(`✅ Email sent immediately (serverless): ${to} [${subject}]`);
+            return;
+        } catch (error) {
+            logger.error(`Failed to send email immediately: ${error}`);
+            throw error;
+        }
+    }
+
+    try {
+        // Idempotency Check
+        if (options.eventId && options.eventType) {
+            const exists = await EmailLogModel.exists({
+                eventType: options.eventType,
+                eventId: options.eventId,
+                to
+            });
+            if (exists) {
+                logger.info(`ℹ️ Duplicate email skipped: ${options.eventType} ID: ${options.eventId}`);
+                return;
+            }
+        }
+
+        await EmailLogModel.create({
+            to,
+            subject,
+            html,
+            priority: options.priority || 'normal',
+            eventType: options.eventType,
+            eventId: options.eventId,
+            attachments: options.attachments,
+            status: 'pending'
+        });
+    } catch (error) {
+        logger.error(`Failed to queue email: ${error}`);
+        // Fallback: Try to send immediately if DB fails
+        try {
+            await sendEmailImmediate(to, subject, html);
+            logger.warn(`📧 Email sent as fallback (DB failed): ${to} [${subject}]`);
+        } catch (fallbackError) {
+            logger.error(`Fallback email send also failed: ${fallbackError}`);
+            throw fallbackError;
+        }
+    }
+};
+
+/**
+ * Send Immediately (Awaitable) - Use sparingly (e.g., OTPs where latency matters)
+ */
+export const sendEmailImmediate = async (to: string, subject: string, html: string) => {
+    const transporter = createTransporter();
+    return await transporter.sendMail({
+        from: env.EMAIL_FROM || `"Misun Academy" <${env.EMAIL_USER}>`,
+        to,
+        subject,
+        html
+    });
+};
+
+// ============================================================================
+// 4. TEMPLATE ENGINE
+// ============================================================================
+
+const getEmailTemplate = (content: string, headerColor: string = "#10b981") => `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Misun Academy</title>
+    <style>
+        body { margin: 0; padding: 0; background-color: #f3f4f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .wrapper { max-width: 600px; margin: 0 auto; background: #ffffff; overflow: hidden; }
+        .header { background: ${headerColor}; padding: 40px 20px; text-align: center; color: white; }
+        .content { padding: 40px 30px; color: #374151; line-height: 1.6; }
+        .highlight-box { background: #f9fafb; border-left: 4px solid ${headerColor}; padding: 16px; margin: 20px 0; border-radius: 4px; }
+        .button { display: inline-block; padding: 12px 28px; background: ${headerColor}; color: white !important; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; }
+        .footer { background: #1f2937; color: #9ca3af; padding: 24px; text-align: center; font-size: 13px; }
+        .footer a { color: #d1d5db; text-decoration: none; }
+        .footer a:hover { color: #ffffff; }
+        .footer-social { margin: 14px 0; }
+        .footer-social a { display: inline-block; width: 36px; height: 36px; line-height: 36px; margin: 0 5px 5px 5px; font-size: 14px; font-family: Arial, Helvetica, sans-serif; font-weight: 700; text-align: center; border: none; border-radius: 50%; color: #ffffff !important; text-decoration: none; transition: opacity 0.2s ease; }
+        .footer-social a:hover { opacity: 0.85; }
+        .footer-social .icon-facebook { background: #1877F2; }
+        .footer-social .icon-twitter { background: #000000; }
+        .footer-social .icon-youtube { background: #CD201F; font-size: 15px; line-height: 36px; }
+        .footer-social .icon-linkedin { background: #0A66C2; font-size: 13px; letter-spacing: -0.3px; }
+        .footer-social .icon-instagram { background: linear-gradient(135deg, #fd1d1d 0%, #833ab4 25%, #c13584 50%, #e1306c 75%, #fd1d1d 100%); font-size: 13px; }
+        .badge { background: #e5e7eb; padding: 2px 8px; border-radius: 12px; font-size: 12px; color: #374151; }
+        a { color: ${headerColor}; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        ${content}
+        <div class="footer">
+            <p>Misun Academy | Learn. Grow. Succeed.</p>
+            <p><a href="mailto:misunacademybd@gmail.com">misunacademybd@gmail.com</a></p>
+            <div class="footer-social">
+                <a class="icon-facebook" href="${env.EMAIL_SOCIAL_FACEBOOK || 'https://www.facebook.com/misunacademybd'}" target="_blank" rel="noopener noreferrer" title="Facebook" aria-label="Facebook">f</a>
+                <a class="icon-twitter" href="${env.EMAIL_SOCIAL_TWITTER || 'https://x.com'}" target="_blank" rel="noopener noreferrer" title="X" aria-label="X">𝕏</a>
+                <a class="icon-youtube" href="${env.EMAIL_SOCIAL_YOUTUBE || 'https://www.youtube.com/@misunacademybd'}" target="_blank" rel="noopener noreferrer" title="YouTube" aria-label="YouTube">▶️</a>
+                <a class="icon-linkedin" href="${env.EMAIL_SOCIAL_LINKEDIN || 'https://www.linkedin.com/company/misun-academy'}" target="_blank" rel="noopener noreferrer" title="LinkedIn" aria-label="LinkedIn">in</a>
+            </div>
+            <p>© ${new Date().getFullYear()} Misun Academy. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
+`;
+
+// ============================================================================
+// 5. DOMAIN SPECIFIC EMAILS
+// ============================================================================
+
+// --- AUTHENTICATION ---
+
+export const sendVerificationEmail = async (email: string, name: string, token: string) => {
+    const link = `${env.MA_FRONTEND_URL}/verify-email?token=${token}`;
+    const html = getEmailTemplate(`
+        <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+            <h1>Verify Your Email</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${name}</strong>,</p>
+            <p>Welcome to Misun Academy! Please verify your email to activate your account.</p>
+            <div style="text-align: center;">
+                <a href="${link}" class="button" style="background: #10b981;">Verify Now</a>
+            </div>
+            <p style="font-size: 12px;">Link expires in 24 hours.</p>
+        </div>
+    `, "#10b981");
+
+    await queueEmail(email, 'Verify Your Email', html, {
+        priority: 'high',
+        eventType: 'verify_email',
+        eventId: token
+    });
+};
+
+export const sendPasswordResetEmail = async (email: string, name: string, token: string) => {
+    console.log('[EmailService] 📧 Preparing password reset email');
+    console.log('[EmailService] Recipient:', email);
+    console.log('[EmailService] Name:', name);
+    console.log('[EmailService] Token (first 15):', token.substring(0, 15) + '...');
+
+    const link = `${env.MA_FRONTEND_URL}/reset-password?token=${token}`;
+    console.log('[EmailService] Reset link:', link);
+
+    const html = getEmailTemplate(`
+        <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);">
+            <h1>Reset Password</h1>
+        </div>
+        <div class="content">
+            <p>Hi ${name},</p>
+            <p>We received a request to reset your password. Click below to proceed:</p>
+            <div style="text-align: center;">
+                <a href="${link}" class="button" style="background: #ef4444;">Reset Password</a>
+            </div>
+            <div class="highlight-box" style="border-color: #ef4444;">
+                <p>If you did not request this, please ignore this email.</p>
+            </div>
+        </div>
+    `, "#ef4444");
+
+    console.log('[EmailService] Queueing email...');
+    await queueEmail(email, 'Reset Password Request', html, {
+        priority: 'high',
+        eventType: 'reset_pass',
+        eventId: token
+    });
+    console.log('[EmailService] ✅ Email queued successfully');
+};
+
+// --- PAYMENTS & ENROLLMENT ---
+
+export const sendPaymentSuccessEmail = async (email: string, name: string, amount: number, currency: string, courseName: string, transactionId: string) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: #10b981;">
+            <h1>Payment Successful!</h1>
+        </div>
+        <div class="content">
+            <p>Dear <strong>${name}</strong>,</p>
+            <p>We have received your payment for <strong>${courseName}</strong>.</p>
+            
+            <div class="highlight-box">
+                <p><strong>Amount:</strong> ${amount} ${currency}</p>
+                <p><strong>Transaction ID:</strong> ${transactionId}</p>
+                <p><strong>Status:</strong> <span style="color:#10b981; font-weight:bold;">PAID</span></p>
+            </div>
+            
+            <p>You can now access your dashboard and start learning!</p>
+            <div style="text-align: center;">
+                <a href="${env.MA_FRONTEND_URL}/my-classes" class="button">Go to Dashboard</a>
+            </div>
+        </div>
+    `, "#10b981");
+
+    await queueEmail(email, 'Payment Receipt', html, { eventType: 'payment_success', eventId: transactionId });
+};
+
+export const sendPaymentReviewEmail = async (student: any, courseName: string, transactionId: string) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: #f59e0b;">
+            <h1>Payment Under Review</h1>
+        </div>
+        <div class="content">
+            <p>Dear ${student.name},</p>
+            <p>Your payment for <strong>${courseName}</strong> is being verified.</p>
+            <div class="highlight-box" style="border-color: #f59e0b;">
+                <p><strong>Transaction ID:</strong> ${transactionId}</p>
+                <p>Please allow 24 hours for manual verification.</p>
+            </div>
+        </div>
+    `, "#f59e0b");
+
+    await queueEmail(student.email, 'Payment Under Review', html, { eventType: 'payment_review', eventId: transactionId });
+};
+
+export const sendPaymentFailedEmail = async (student: any, courseName: string, reason: string) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: #ef4444;">
+            <h1>Payment Failed</h1>
+        </div>
+        <div class="content">
+            <p>Dear ${student.name},</p>
+            <p>Your payment for <strong>${courseName}</strong> could not be completed.</p>
+            <p><strong>Reason:</strong> ${reason}</p>
+            <p>Please try again or contact support.</p>
+        </div>
+    `, "#ef4444");
+
+    await queueEmail(student.email, 'Payment Failed', html, { priority: 'high' });
+};
+
+
+// --- ACADEMIC ---
+
+export const sendBatchStartReminderEmail = async (studentEmail: string, studentName: string, batchName: string, startDate: string) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: #3b82f6;">
+            <h1>Class Starting Soon!</h1>
+        </div>
+        <div class="content">
+            <p>Hi ${studentName},</p>
+            <p>Get ready! Your batch <strong>${batchName}</strong> is starting on <strong>${startDate}</strong>.</p>
+            <p>Make sure you have joined the WhatsApp/Facebook groups.</p>
+            <div style="text-align: center;">
+                <a href="${env.MA_FRONTEND_URL}/classroom" class="button" style="background: #3b82f6;">Enter Classroom</a>
+            </div>
+        </div>
+    `, "#3b82f6");
+
+    await queueEmail(studentEmail, `Reminder: ${batchName} Starts Soon`, html);
+};
+
+export const sendCertificateApprovedEmail = async (studentEmail: string, studentName: string, courseName: string, certificateId: string) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: linear-gradient(to right, #D4AF37, #C5A028);">
+            <h1>🎓 Certificate Approved!</h1>
+        </div>
+        <div class="content">
+            <p>Congratulations <strong>${studentName}</strong>!</p>
+            <p>Your certificate request for <strong>${courseName}</strong> has been approved.</p>
+            <p>Your certificate will be issued soon.</p>
+            <p>Certificate ID: <strong>${certificateId}</strong></p>
+        </div>
+    `, "#D4AF37");
+
+    await queueEmail(studentEmail, 'Certificate Request Approved', html, { priority: 'normal' });
+};
+
+export const sendCertificateIssuedEmail = async (studentEmail: string, studentName: string, courseName: string, certificateLink: string) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: linear-gradient(to right, #D4AF37, #C5A028);">
+            <h1>🎓 Certificate Issued!</h1>
+        </div>
+        <div class="content">
+            <p>Congratulations <strong>${studentName}</strong>!</p>
+            <p>You have successfully completed <strong>${courseName}</strong>.</p>
+            <p>Your certificate is ready for download.</p>
+            <div style="text-align: center;">
+                <a href="${certificateLink}" class="button" style="background: #D4AF37; color: #fff;">Download Certificate</a>
+            </div>
+            <p>Don't forget to share it on LinkedIn!</p>
+        </div>
+    `, "#D4AF37");
+
+    await queueEmail(studentEmail, 'Your Certificate is Ready!', html, { priority: 'normal' });
+};
+
+export const sendEnrollmentConfirmationEmail = async (user: any, courseName: string, enrollmentId: string, amount: number) => {
+    const paymentAmount = amount;
+    const isEnglishCourse = /english/i.test(courseName);
+    const facebookGroupLink = isEnglishCourse
+        ? (env.EP_FACEBOOK_GROUP_LINK)
+        : (env.MA_FACEBOOK_GROUP_LINK);
+    const whatsappGroupLink = isEnglishCourse
+        ? (env.EP_WHATSAPP_GROUP_LINK)
+        : (env.MA_WHATSAPP_GROUP_LINK);
+    const html = getEmailTemplate(`
+        <div class="header" style="background: #10b981;">
+            <h1>Enrollment Confirmed!</h1>
+        </div>
+        <div class="content">
+   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px 0; font-family: Helvetica, Arial, sans-serif;">
+        <tr>
+            <td align="center">
+                
+                <table role="presentation" class="container" width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin: 0 auto;">
+                    
+               
+
+                    <tr>
+                        <td class="content-padding" style="padding: 40px 30px 20px 30px; color: #333333; line-height: 1.6;">
+                            
+                            <p style="font-size: 16px; margin-bottom: 20px; margin-top: 0;">
+                                <strong>Dear ${user.name},</strong>
+                            </p>
+                            <p style="font-size: 16px; margin-bottom: 20px;">
+                                Congratulations! Your payment has been successfully processed, and you are officially enrolled in <strong>${courseName}</strong>.
+                            </p>
+                            <p style="font-size: 16px; margin-bottom: 20px;">
+                                We are thrilled to welcome you to the Misun Academy learning community. This comprehensive course is designed to equip you with industry-standard design skills.
+                            </p>
+                            
+                            <div style="background-color: #eef7ff; padding: 20px; border-radius: 5px; border-left: 5px solid #0084ff; margin: 30px 0;">
+                                <h3 style="margin-top: 0; color: #0084ff;">🚀 Your Next Steps</h3>
+                                <p style="margin-bottom: 20px;">To get the most out of this course, please join our private community groups immediately for updates and resources.</p>
+                                
+                                <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                                    <tr>
+                                        <td>
+                                            <a href="${facebookGroupLink}" style="display: inline-block; padding: 12px 24px; background-color: #3b5998; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold; margin-right: 10px; margin-bottom: 10px;">Join Facebook Group</a>
+                                            <a href="${whatsappGroupLink}" style="display: inline-block; padding: 12px 24px; background-color: #25D366; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold;">Join WhatsApp Group</a>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </div>
+
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f9f9f9; border-radius: 5px; margin-top: 20px;">
+                                <tr>
+                                    <td style="padding: 20px;">
+                                        <h3 style="margin-top: 0; margin-bottom: 10px; font-size: 18px; color: #333333;">Payment & Enrollment Receipt</h3>
+                                        <p style="margin: 5px 0; font-size: 14px;"><strong>Student Name:</strong> ${user.name}</p>
+                                        <p style="margin: 5px 0; font-size: 14px;"><strong>Student ID:</strong> ${enrollmentId}</p>
+                                        <p style="margin: 5px 0; font-size: 14px;"><strong>Email:</strong> ${user.email}</p>
+                                        <p style="margin: 5px 0; font-size: 14px;"><strong>Amount:</strong> ${paymentAmount} BDT</p>
+                                        <p style="margin: 5px 0; font-size: 14px; color: green;"><strong>Status:</strong> Success ✅</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td style="padding: 0 40px 40px 40px; text-align: center;">
+                            <hr style="border: 0; border-top: 1px solid #eeeeee; margin: 20px 0;">
+                            <p style="margin-bottom: 20px; color: #666;">You can now access your dashboard and start learning!</p>
+                            <a href="${env.MA_FRONTEND_URL}/my-classes" style="display: inline-block; padding: 14px 30px; background-color: #10b981; color: #ffffff; text-decoration: none; border-radius: 50px; font-weight: bold; font-size: 16px;">Go to Dashboard</a>
+                        </td>
+                    </tr>
+                    
+
+                </table>
+            </td>
+        </tr>
+    </table>
+        </div>
+    `, "#10b981");
+
+    await queueEmail(user.email, 'Enrollment Confirmation', html, { eventType: 'enrollment_confirm', eventId: enrollmentId });
+};
+
+
+export const sendWaitingPaymentVerificationEmail = async (student: any, courseName: string, transactionId: string) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: #f59e0b;">
+            <h1>Payment Verification Pending</h1>
+        </div>
+        <div class="content">
+            <p>Dear ${student.name},</p>
+            <p>Your payment for <strong>${courseName}</strong> is pending verification.</p>
+            <div class="highlight-box" style="border-color: #f59e0b;">
+                <p><strong>Transaction ID:</strong> ${transactionId}</p>
+                <p>We will notify you once the verification is complete.</p>
+            </div>
+        </div>
+    `, "#f59e0b");
+    await queueEmail(student.email, 'Payment Verification Pending', html, { eventType: 'payment_verification', eventId: transactionId });
+};
+
+// --- ADMIN BULK EMAILS ---
+
+/**
+ * Send enrollment reminder to registered but not enrolled users
+ */
+export const sendEnrollmentReminderEmail = async (email: string, name: string) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);">
+            <h1>📚 Start Your Learning Journey!</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${name}</strong>,</p>
+            <p>We noticed you registered with Misun Academy but haven't enrolled in any course yet.</p>
+            
+            <div class="highlight-box" style="border-color: #8b5cf6;">
+                <h3 style="color: #8b5cf6; margin-top: 0;">Why Choose Misun Academy?</h3>
+                <ul style="margin: 10px 0; padding-left: 20px;">
+                    <li>Industry-standard curriculum</li>
+                    <li>Expert instructors with real-world experience</li>
+                    <li>Lifetime access to course materials</li>
+                    <li>Certificate upon completion</li>
+                </ul>
+            </div>
+            
+            <p>Don't miss out on this opportunity to upskill yourself and advance your career!</p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="${env.MA_FRONTEND_URL}/courses" class="button" style="background: #8b5cf6;">Browse Courses</a>
+            </div>
+            
+            <p style="font-size: 14px; color: #666;">Have questions? Feel free to reach out to us at <a href="mailto:misunacademybd@gmail.com">misunacademybd@gmail.com</a></p>
+        </div>
+    `, "#8b5cf6");
+
+    await queueEmail(email, 'Complete Your Enrollment - Misun Academy', html, {
+        priority: 'normal',
+        eventType: 'enrollment_reminder'
+    });
+};
+
+/**
+ * Send news and updates to all enrolled students
+ */
+export const sendNewsUpdateEmail = async (email: string, name: string, subject: string, message: string) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
+            <h1>📢 ${subject}</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${name}</strong>,</p>
+            
+            <div style="margin: 30px 0; font-size: 16px; line-height: 1.8;">
+                ${message}
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="${env.MA_FRONTEND_URL}/my-classes" class="button" style="background: #3b82f6;">Go to Dashboard</a>
+            </div>
+            
+            <p style="font-size: 14px; color: #666;">Stay tuned for more updates!</p>
+        </div>
+    `, "#3b82f6");
+
+    await queueEmail(email, subject, html, {
+        priority: 'normal',
+        eventType: 'news_update'
+    });
+};

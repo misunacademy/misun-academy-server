@@ -8,7 +8,7 @@ import { BatchModel } from "../Batch/batch.model.js";
 import { EnrollmentStatus, UserStatus } from "../../types/common.js";
 import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
-import { sendEnrollmentReminderEmail, sendNewsUpdateEmail } from "../../services/emailService.js";
+import { sendEnrollmentReminderEmail, sendNewsUpdateEmail } from "../../services/misunAcademyEmails.js";
 
 const loginUser = catchAsync(async (req: Request, res: Response) => {
     const email = req.body.email;
@@ -123,13 +123,21 @@ const getAllUsers = catchAsync(async (req: Request, res: Response) => {
     const enrollments = userIds.length > 0 ? await EnrollmentModel.find({
         userId: { $in: userIds },
         status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] }
-    }).populate({ path: 'batchId', select: 'title' }).lean() : [];
+    }).populate({
+        path: 'batchId',
+        select: 'title courseId',
+        populate: { path: 'courseId', select: 'title' }
+    }).lean() : [];
 
-    // Map userId -> array of batch titles
+    // Map userId -> array of "Course - Batch" labels
     const batchTitlesByUser: Record<string, string[]> = {};
     enrollments.forEach((enr: any) => {
         const uid = enr.userId?.toString?.();
-        const title = enr.batchId?.title;
+        const batchTitle = enr.batchId?.title;
+        const courseTitle = enr.batchId?.courseId?.title;
+        const title = courseTitle && batchTitle
+            ? `${courseTitle} - ${batchTitle}`
+            : (batchTitle || courseTitle || undefined);
         if (!uid) return;
         if (!batchTitlesByUser[uid]) batchTitlesByUser[uid] = [];
         if (title) batchTitlesByUser[uid].push(title);
@@ -137,7 +145,7 @@ const getAllUsers = catchAsync(async (req: Request, res: Response) => {
 
     const usersWithEnrollment = users.map((u: any) => {
         const obj = u as any;
-        const batches = batchTitlesByUser[obj._id?.toString?.()] || [];
+        const batches = Array.from(new Set(batchTitlesByUser[obj._id?.toString?.()] || []));
         obj.enrolledBatches = batches;
         // keep isEnrolled for backward compatibility
         obj.isEnrolled = batches.length > 0;

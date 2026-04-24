@@ -4,7 +4,8 @@ import sendResponse from "../../utils/sendResponse.js";
 import { DashboardService } from "./dashboard.service.js";
 
 const getDashboardMetaData = catchAsync(async (req: Request, res: Response) => {
-    const result = await DashboardService.getDashboardMetaData();
+    const courseId = typeof req.query.courseId === 'string' ? req.query.courseId : undefined;
+    const result = await DashboardService.getDashboardMetaData(courseId);
     sendResponse(res, {
         statusCode: 200,
         success: true,

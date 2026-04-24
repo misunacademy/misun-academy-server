@@ -7,13 +7,11 @@ import { BatchStatus, EnrollmentStatus } from '../../types/common.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
 import { ProgressStatus } from '../../types/common.js';
-import { sendEnrollmentConfirmationEmail } from '../../services/emailService.js';
 import { UserModel } from '../User/user.model.js';
 import { Status } from '../../types/common.js';
 import { PaymentModel } from '../Payment/payment.model.js';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
-import { ProfileService } from '../Profile/profile.service.js';
 import { StudentIdCounterModel } from '../User/studentIdCounter.model.js';
 
 type MongoDuplicateKeyError = {
@@ -66,6 +64,54 @@ const syncStudentCounterToCurrentMax = async (
         { $max: { count: maxExistingCount } },
         { upsert: true, session }
     );
+};
+
+const assignStudentIdIfMissing = async (
+    userId: string,
+    session: mongoose.ClientSession
+): Promise<void> => {
+    const user = await UserModel.findById(userId).session(session);
+
+    if (!user || user.studentId) {
+        return;
+    }
+
+    const year = new Date().getFullYear().toString();
+    // Keep counter aligned before assigning a new ID.
+    await syncStudentCounterToCurrentMax(year, session);
+
+    const counter = await StudentIdCounterModel.findByIdAndUpdate(
+        { _id: year },
+        { $inc: { count: 1 } },
+        {
+            new: true,
+            upsert: true,
+            session,
+        }
+    );
+
+    if (!counter) {
+        throw new ApiError(
+            StatusCodes.INTERNAL_SERVER_ERROR,
+            'Failed to generate student ID'
+        );
+    }
+
+    const paddedCount = String(counter.count).padStart(4, '0');
+    user.studentId = `SI-${year}-${paddedCount}`;
+
+    try {
+        await user.save({ session });
+    } catch (error) {
+        if (isStudentIdDuplicateError(error)) {
+            throw new ApiError(
+                StatusCodes.CONFLICT,
+                'Could not assign a unique student ID. Please try again.'
+            );
+        }
+
+        throw error;
+    }
 };
 
 /**
@@ -238,6 +284,9 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
                 await existingPendingEnrollment.save({ session });
             }
 
+            // Existing pending enrollments from older data may miss studentId.
+            await assignStudentIdIfMissing(userId, session);
+
             await session.commitTransaction();
 
             return {
@@ -328,46 +377,7 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
         }
 
         // Assign Student ID if not exists
-        const user = await UserModel.findById(userId).session(session);
-
-        if (user && !user.studentId) {
-            const year = new Date().getFullYear().toString();
-            // Keep counter aligned before assigning a new ID.
-            await syncStudentCounterToCurrentMax(year, session);
-
-            const counter = await StudentIdCounterModel.findByIdAndUpdate(
-                { _id: year },
-                { $inc: { count: 1 } },
-                {
-                    new: true,
-                    upsert: true,
-                    session,
-                }
-            );
-
-            if (!counter) {
-                throw new ApiError(
-                    StatusCodes.INTERNAL_SERVER_ERROR,
-                    'Failed to generate student ID'
-                );
-            }
-
-            const paddedCount = String(counter.count).padStart(4, '0');
-            user.studentId = `SI-${year}-${paddedCount}`;
-
-            try {
-                await user.save({ session });
-            } catch (error) {
-                if (isStudentIdDuplicateError(error)) {
-                    throw new ApiError(
-                        StatusCodes.CONFLICT,
-                        'Could not assign a unique student ID. Please try again.'
-                    );
-                }
-
-                throw error;
-            }
-        }
+        await assignStudentIdIfMissing(userId, session);
 
         await session.commitTransaction();
 
@@ -781,6 +791,13 @@ const enrollWithManualPayment = async (
     }
 };
 
+const ensureStudentIdForUser = async (
+    userId: string,
+    session: mongoose.ClientSession
+) => {
+    await assignStudentIdIfMissing(userId, session);
+};
+
 export const EnrollmentService = {
     initiateEnrollment,
     // confirmEnrollment,
@@ -789,4 +806,5 @@ export const EnrollmentService = {
     getEnrollmentDetails,
     initializeModuleProgress,
     generateEnrollmentId, // Export this function
+    ensureStudentIdForUser,
 };
