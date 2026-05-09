@@ -1,11 +1,17 @@
 import { Schema, model } from 'mongoose';
 import { IModule } from './module.interface.js';
 
+
 const moduleSchema = new Schema<IModule>(
     {
         courseId: {
             type: Schema.Types.ObjectId,
             ref: 'Course',
+            required: true,
+        },
+        batchId:{
+            type: Schema.Types.ObjectId,
+            ref: 'Batch',
             required: true,
         },
         title: {
@@ -41,7 +47,7 @@ const moduleSchema = new Schema<IModule>(
 );
 
 // Indexes
-moduleSchema.index({ courseId: 1, orderIndex: 1 });
+moduleSchema.index({ courseId: 1, batchId: 1, orderIndex: 1 });
 moduleSchema.index({ status: 1 });
 
 export const ModuleModel = model<IModule>('Module', moduleSchema);

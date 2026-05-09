@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import catchAsync from "../../utils/catchAsync.js";
 import sendResponse from "../../utils/sendResponse.js";
 import { BatchService } from "./batch.service.js";
+import ApiError from "../../errors/ApiError.js";
 
 const createBatch = catchAsync(async (req: Request, res: Response) => {
     const result = await BatchService.createBatch(req.body);
@@ -15,18 +16,21 @@ const createBatch = catchAsync(async (req: Request, res: Response) => {
 });
 
 const getAllBatches = catchAsync(async (req: Request, res: Response) => {
-    const { status, courseId, upcoming } = req.query;
-    const result = await BatchService.getAllBatches({ 
-        status: status as any, 
+    const { status, courseId, upcoming, page = 1, limit = 10 } = req.query;
+    const result = await BatchService.getAllBatches({
+        status: status as any,
         courseId: courseId as string,
-        upcoming: upcoming === 'true'
+        upcoming: upcoming === 'true',
+        page: Number(page),
+        limit: Number(limit),
     });
 
     sendResponse(res, {
         statusCode: 200,
         success: true,
         message: 'Batches retrieved successfully',
-        data: result,
+        data: result.data,
+        meta: result.pagination
     });
 });
 
@@ -141,4 +145,4 @@ export const BatchController = {
     transitionBatchStatus,
     runAutoTransition,
     deleteBatch,
-}
+};

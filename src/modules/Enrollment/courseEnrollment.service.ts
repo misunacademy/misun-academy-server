@@ -51,7 +51,7 @@ const getCourseProgress = async (userId: string, courseId: string) => {
     });
 
     // Calculate overall progress from lesson completion (to match course-detail percentage approach)
-    const allCourseModules = await ModuleModel.find({ courseId }).sort({ orderIndex: 1 });
+    const allCourseModules = await ModuleModel.find({ courseId, batchId: enrollment.batchId }).sort({ orderIndex: 1 });
     const allModuleIds = allCourseModules.map((m) => m._id);
     const allLessons = await LessonModel.find({ moduleId: { $in: allModuleIds } });
 

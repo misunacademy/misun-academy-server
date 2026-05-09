@@ -21,7 +21,7 @@ export interface ICourse {
     isCertificateAvailable?: boolean;
     price: number;
     discountPercentage?: number;
-    instructor?: string;
+    instructorId?: Types.ObjectId | null;
     features?: string[];
     highlights?: string[];
     createdBy: Types.ObjectId;

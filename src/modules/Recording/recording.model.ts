@@ -46,7 +46,7 @@ const recordingSchema = new Schema<IRecording>(
         },
         instructor: {
             type: Schema.Types.ObjectId,
-            ref: 'Admin',
+            ref: 'User',
         },
         tags: {
             type: [String],
@@ -62,7 +62,7 @@ const recordingSchema = new Schema<IRecording>(
         },
         createdBy: {
             type: Schema.Types.ObjectId,
-            ref: 'Admin',
+            ref: 'User',
             required: true,
         },
     },

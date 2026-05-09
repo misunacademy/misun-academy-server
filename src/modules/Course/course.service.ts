@@ -1,9 +1,12 @@
-import { FilterQuery } from 'mongoose';
+import { FilterQuery, Types } from 'mongoose';
 import { CourseModel } from './course.model.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { LessonModel } from '../Lesson/lesson.model.js';
 import { ICourse } from './course.interface.js';
+import { UserModel } from '../User/user.model.js';
+import ApiError from '../../errors/ApiError.js';
+import { StatusCodes } from 'http-status-codes';
 
 export const CourseService = {
     async createCourse(data: any) {
@@ -43,29 +46,31 @@ export const CourseService = {
         return { data: coursesWithCount, total, page, perPage };
     },
 
-    async getCourseById(id: string) {
-        const course = await CourseModel.findById(id).lean();
+    async getCourseById(id: string, opts: { batchId?: string } = {}) {
+        const course = await CourseModel.findById(id)
+            .populate('instructorId', 'name email image')
+            .lean();
         
         if (!course) return null;
 
-        // Fetch modules and lessons for this course
-        // const ModuleModel = require('../Module/module.model').ModuleModel;
-        // const LessonModel = require('../Lesson/lesson.model').LessonModel;
         
-        const modules = await ModuleModel.find({ courseId: id }).sort({ order: 1 }).lean();
+        const moduleQuery: Record<string, unknown> = { courseId: id };
+        if (opts.batchId) moduleQuery.batchId = opts.batchId;
+
+        const modules = await ModuleModel.find(moduleQuery).sort({ orderIndex: 1 }).lean();
         
         // Fetch lessons for each module
         const curriculum = await Promise.all(
             modules.map(async (module: any) => {
                 const lessons = await LessonModel.find({ moduleId: module._id })
-                    .sort({ order: 1 })
+                    .sort({ orderIndex: 1 })
                     .lean();
                 
                 return {
                     moduleId: module._id.toString(),
                     title: module.title,
                     description: module.description,
-                    order: module.order,
+                    order: module.orderIndex,
                     lessons: lessons.map((lesson: any) => {
                         // Construct video URL if not present but videoId exists
                         let videoUrl = lesson.videoUrl;
@@ -73,7 +78,7 @@ export const CourseService = {
                         if (!videoUrl && lesson.videoId && lesson.videoSource) {
                             if (lesson.videoSource === 'youtube') {
                                 videoUrl = `https://www.youtube.com/watch?v=${lesson.videoId}`;
-                            } else if (lesson.videoSource === 'google_drive') {
+                            } else if (lesson.videoSource === 'googledrive') {
                                 videoUrl = `https://drive.google.com/file/d/${lesson.videoId}/view`;
                             }
                         }
@@ -127,5 +132,29 @@ export const CourseService = {
 
     async removeModule(courseId: string, moduleId: string) {
         return await CourseModel.findByIdAndUpdate(courseId, { $pull: { curriculum: { moduleId } } }, { new: true });
-    }
+    },
+
+    /**
+     * Assign one instructor to a course (replaces any existing).
+     * instructorId must be a User._id with role=instructor. Pass null to unassign.
+     */
+    async assignInstructor(courseId: string, instructorId: string | null) {
+        if (instructorId) {
+            // Validate that the user exists and has instructor role
+            const user = await UserModel.findOne({ _id: instructorId, role: 'instructor' });
+            if (!user) {
+                throw new ApiError(StatusCodes.BAD_REQUEST, 'User not found or does not have instructor role');
+            }
+        }
+
+        const course = await CourseModel.findByIdAndUpdate(
+            courseId,
+            { instructorId: instructorId ? new Types.ObjectId(instructorId) : null },
+            { new: true }
+        ).populate('instructorId', 'name email image');
+
+        if (!course) throw new ApiError(StatusCodes.NOT_FOUND, 'Course not found');
+        return course;
+    },
 };
+

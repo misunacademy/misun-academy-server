@@ -4,6 +4,7 @@ import { ProgressStatus } from '../../types/common.js';
 export interface IModule {
     _id?: Types.ObjectId;
     courseId: Types.ObjectId;
+    batchId: Types.ObjectId;
     title: string;
     description: string;
     orderIndex: number;

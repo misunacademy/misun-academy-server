@@ -1,180 +1,116 @@
 import { StatusCodes } from 'http-status-codes';
-import { InstructorModel } from './instructor.model.js';
+import { Types } from 'mongoose';
+import { UserModel } from '../User/user.model.js';
+import { CourseModel } from '../Course/course.model.js';
 import { BatchModel } from '../Batch/batch.model.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
-import { BatchStatus } from '../../types/common.js';
 import ApiError from '../../errors/ApiError.js';
-import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
+import { ModuleModel } from '../Module/module.model.js';
+import { LessonModel } from '../Lesson/lesson.model.js';
 
 /**
- * Get instructor profile
+ * Resolve a userId string to a User doc with role=instructor.
+ * Throws 404 if not found.
  */
-const getProfile = async (userId: string) => {
-    const instructor = await InstructorModel.findOne({ id: userId });
-    if (!instructor) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor profile not found');
-    }
-    return instructor;
+const resolveInstructor = async (userId: string) => {
+    const user = await UserModel.findOne({ _id: userId, role: 'instructor' });
+    if (!user) throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor not found');
+    return user;
 };
 
 /**
- * Update instructor profile
+ * Helper: verify that userId is the assigned instructor for courseId.
+ */
+const verifyInstructorCourseAccess = async (
+    userId: string,
+    courseId: string
+): Promise<boolean> => {
+    const course = await CourseModel.findOne({
+        _id: courseId,
+        instructorId: new Types.ObjectId(userId),
+    });
+    return !!course;
+};
+
+/**
+ * Get instructor profile (user data + assigned courses summary)
+ */
+const getProfile = async (userId: string) => {
+    const user = await resolveInstructor(userId);
+    const assignedCourses = await CourseModel.find({ instructorId: user._id })
+        .select('title slug thumbnailImage status category level shortDescription')
+        .lean();
+    return { user, assignedCourses };
+};
+
+/**
+ * Update instructor profile fields (name, image via UserModel)
  */
 const updateProfile = async (
     userId: string,
-    updateData: {
-        bio?: string;
-        expertise?: string[];
-        socialLinks?: any;
-        profilePicture?: string;
-    }
+    updateData: { name?: string; image?: string }
 ) => {
-    const instructor = await InstructorModel.findOneAndUpdate(
-        { id: userId },
+    const user = await UserModel.findOneAndUpdate(
+        { _id: userId, role: 'instructor' },
         updateData,
         { new: true, runValidators: true }
     );
-
-    if (!instructor) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor profile not found');
-    }
-
-    return instructor;
+    if (!user) throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor not found');
+    return user;
 };
 
-/**
- * Get instructor dashboard stats
- */
-const getDashboard = async (userId: string) => {
-    const instructor = await InstructorModel.findOne({ id: userId }).populate('id', 'name email');
-    if (!instructor) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor profile not found');
-    }
-
-    // Get assigned batches
-    const batches = await BatchModel.find({
-        'instructors.instructorId': instructor._id,
-    })
-        .populate('courseId', 'title')
-        .select('title batchNumber startDate endDate currentEnrollment maxCapacity status');
-
-    // Calculate total students across all batches
-    const totalStudents = batches.reduce((sum, batch) => sum + batch.currentEnrollment, 0);
-
-    return {
-        instructor: {
-            name: (instructor.id as any).name,
-            rating: instructor.rating,
-            totalBatches: instructor.totalBatchesTaught,
-            totalStudents: totalStudents,
-        },
-        batches,
-        stats: {
-            activeBatches: batches.filter((b) => b.status === BatchStatus.Running).length,
-            totalStudents,
-        },
-    };
-};
 
 /**
- * Get assigned batches
+ * Get all courses assigned to this instructor
  */
-const getAssignedBatches = async (userId: string, status?: string) => {
-    const instructor = await InstructorModel.findOne({ id: userId });
-    if (!instructor) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor profile not found');
-    }
+const getAssignedCourses = async (userId: string) => {
+    await resolveInstructor(userId);
 
-    const query: any = { 'instructors.instructorId': instructor._id };
-    if (status) {
-        query.status = status;
-    }
+    const courses = await CourseModel.find({ instructorId: new Types.ObjectId(userId) })
+        .select('title slug shortDescription thumbnailImage status category level')
+        .lean();
 
-    const batches = await BatchModel.find(query)
-        .populate('courseId', 'title description thumbnail')
-        .sort({ startDate: -1 });
-
-    return batches;
-};
-
-/**
- * Get batch students roster
- */
-const getBatchStudents = async (userId: string, batchId: string) => {
-    // Verify instructor is assigned to this batch
-    const instructor = await InstructorModel.findOne({ id: userId });
-    if (!instructor) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor profile not found');
-    }
-
-    const batch = await BatchModel.findOne({
-        _id: batchId,
-        'instructors.instructorId': instructor._id,
-    });
-
-    if (!batch) {
-        throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this batch');
-    }
-
-    // Get enrollments with user and progress data
-    const enrollments = await EnrollmentModel.find({ batchId })
-        .populate('id', 'name email profilePicture')
-        .select('enrollmentId status enrolledAt accessExpiresAt');
-
-    // Get progress for each enrollment
-    const enrollmentsWithProgress = await Promise.all(
-        enrollments.map(async (enrollment) => {
-            const moduleProgress = await ModuleProgressModel.find(
-                {
-                    enrollmentId: enrollment._id,
-                }
-            );
-
-            const completedModules = moduleProgress.filter(
-                (p: any) => p.completionPercentage === 100
-            ).length;
-            const totalModules = moduleProgress.length;
-
-            return {
-                ...enrollment.toObject(),
-                progress: {
-                    completedModules,
-                    totalModules,
-                    overallProgress:
-                        totalModules > 0 ? (completedModules / totalModules) * 100 : 0,
-                },
-            };
+    const result = await Promise.all(
+        courses.map(async (course: any) => {
+            const batches = await BatchModel.find({ courseId: course._id })
+                .select('title batchNumber status startDate endDate currentEnrollment')
+                .lean();
+            return { ...course, batches };
         })
     );
 
-    return enrollmentsWithProgress;
+    return result;
 };
 
 /**
- * Get batch statistics
+ * Get batch students roster (instructor must be assigned to that course)
+ */
+const getBatchStudents = async (userId: string, batchId: string) => {
+    const batch = await BatchModel.findById(batchId);
+    if (!batch) throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, batch.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    const enrollments = await EnrollmentModel.find({ batchId })
+        .populate('userId', 'name email image')
+        .select('enrollmentId status enrolledAt accessExpiresAt');
+
+    return enrollments;
+};
+
+/**
+ * Get batch statistics (instructor must be assigned to that course)
  */
 const getBatchStatistics = async (userId: string, batchId: string) => {
-    // Verify instructor is assigned to this batch
-    const instructor = await InstructorModel.findOne({ id: userId });
-    if (!instructor) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor profile not found');
-    }
+    const batch = await BatchModel.findById(batchId).populate('courseId', 'title');
+    if (!batch) throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
 
-    const batch = await BatchModel.findOne({
-        _id: batchId,
-        'instructors.instructorId': instructor._id,
-    }).populate('courseId', 'title');
+    const hasAccess = await verifyInstructorCourseAccess(userId, batch.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
 
-    if (!batch) {
-        throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this batch');
-    }
-
-    // Get enrollment statistics
     const totalEnrollments = await EnrollmentModel.countDocuments({ batchId });
-    const activeEnrollments = await EnrollmentModel.countDocuments({
-        batchId,
-        status: 'Active',
-    });
+    const activeEnrollments = await EnrollmentModel.countDocuments({ batchId, status: 'Active' });
 
     return {
         batch: {
@@ -182,18 +118,202 @@ const getBatchStatistics = async (userId: string, batchId: string) => {
             batchNumber: batch.batchNumber,
             course: batch.courseId,
         },
-        enrollments: {
-            total: totalEnrollments,
-            active: activeEnrollments,
-        },
+        enrollments: { total: totalEnrollments, active: activeEnrollments },
     };
+};
+
+/**
+ * Get modules for a course — instructor access only
+ */
+const getCourseModulesForInstructor = async (userId: string, courseId: string, batchId: string) => {
+    await resolveInstructor(userId);
+    const hasAccess = await verifyInstructorCourseAccess(userId, courseId);
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    const batch = await BatchModel.findOne({ _id: batchId, courseId });
+    if (!batch) throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found for this course');
+
+    const modules = await ModuleModel.find({ courseId, batchId }).sort({ orderIndex: 1 });
+    return Promise.all(
+        modules.map(async (mod) => {
+            const lessonCount = await LessonModel.countDocuments({ moduleId: mod._id });
+            return { ...mod.toObject(), lessonCount };
+        })
+    );
+};
+
+/**
+ * Create a module for an assigned course
+ */
+const createModuleForInstructor = async (userId: string, courseId: string, batchId: string, data: any) => {
+    await resolveInstructor(userId);
+    const hasAccess = await verifyInstructorCourseAccess(userId, courseId);
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    const batch = await BatchModel.findOne({ _id: batchId, courseId });
+    if (!batch) throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found for this course');
+
+    if (data.orderIndex !== undefined) {
+        const existing = await ModuleModel.findOne({ courseId, batchId, orderIndex: data.orderIndex });
+        if (existing) throw new ApiError(StatusCodes.CONFLICT, 'Module with this order index already exists');
+    } else {
+        const maxOrder = await ModuleModel.findOne({ courseId, batchId }).sort({ orderIndex: -1 });
+        data.orderIndex = maxOrder ? maxOrder.orderIndex + 1 : 0;
+    }
+
+    return ModuleModel.create({ ...data, courseId, batchId });
+};
+
+/**
+ * Reorder modules for an assigned course
+ */
+const reorderCourseModulesForInstructor = async (
+    userId: string,
+    courseId: string,
+    batchId: string,
+    moduleOrders: { moduleId: string; orderIndex: number }[]
+) => {
+    await resolveInstructor(userId);
+    const hasAccess = await verifyInstructorCourseAccess(userId, courseId);
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    const batch = await BatchModel.findOne({ _id: batchId, courseId });
+    if (!batch) throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found for this course');
+
+    if (!Array.isArray(moduleOrders)) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'moduleOrders must be an array');
+    }
+
+    await Promise.all(
+        moduleOrders.map(({ moduleId, orderIndex }) =>
+            ModuleModel.findByIdAndUpdate(moduleId, { orderIndex })
+        )
+    );
+
+    const modules = await ModuleModel.find({ courseId, batchId }).sort({ orderIndex: 1 });
+    return modules;
+};
+
+/**
+ * Update a module — instructor access only
+ */
+const updateModuleForInstructor = async (userId: string, moduleId: string, data: any) => {
+    await resolveInstructor(userId);
+    const mod = await ModuleModel.findById(moduleId);
+    if (!mod) throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, mod.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    Object.assign(mod, data);
+    await mod.save();
+    return mod;
+};
+
+/**
+ * Delete a module — instructor access only
+ */
+const deleteModuleForInstructor = async (userId: string, moduleId: string) => {
+    await resolveInstructor(userId);
+    const mod = await ModuleModel.findById(moduleId);
+    if (!mod) throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, mod.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    const lessonCount = await LessonModel.countDocuments({ moduleId });
+    if (lessonCount > 0) throw new ApiError(StatusCodes.BAD_REQUEST, 'Cannot delete module with existing lessons. Delete lessons first.');
+
+    await ModuleModel.findByIdAndDelete(moduleId);
+    return null;
+};
+
+/**
+ * Get lessons for a module — instructor access only
+ */
+const getModuleLessonsForInstructor = async (userId: string, moduleId: string) => {
+    await resolveInstructor(userId);
+    const mod = await ModuleModel.findById(moduleId);
+    if (!mod) throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, mod.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    return LessonModel.find({ moduleId }).sort({ orderIndex: 1 });
+};
+
+/**
+ * Create a lesson — instructor access only
+ */
+const createLessonForInstructor = async (userId: string, moduleId: string, data: any) => {
+    await resolveInstructor(userId);
+    const mod = await ModuleModel.findById(moduleId);
+    if (!mod) throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, mod.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    if (data.orderIndex !== undefined) {
+        const existing = await LessonModel.findOne({ moduleId, orderIndex: data.orderIndex });
+        if (existing) throw new ApiError(StatusCodes.CONFLICT, 'Lesson with this order index already exists');
+    } else {
+        const maxOrder = await LessonModel.findOne({ moduleId }).sort({ orderIndex: -1 });
+        data.orderIndex = maxOrder ? maxOrder.orderIndex + 1 : 0;
+    }
+
+    return LessonModel.create({ ...data, moduleId });
+};
+
+/**
+ * Update a lesson — instructor access only
+ */
+const updateLessonForInstructor = async (userId: string, lessonId: string, data: any) => {
+    await resolveInstructor(userId);
+    const lesson = await LessonModel.findById(lessonId);
+    if (!lesson) throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found');
+
+    const mod = await ModuleModel.findById(lesson.moduleId);
+    if (!mod) throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, mod.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    Object.assign(lesson, data);
+    await lesson.save();
+    return lesson;
+};
+
+/**
+ * Delete a lesson — instructor access only
+ */
+const deleteLessonForInstructor = async (userId: string, lessonId: string) => {
+    await resolveInstructor(userId);
+    const lesson = await LessonModel.findById(lessonId);
+    if (!lesson) throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found');
+
+    const mod = await ModuleModel.findById(lesson.moduleId);
+    if (!mod) throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, mod.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    await LessonModel.findByIdAndDelete(lessonId);
+    return null;
 };
 
 export const InstructorService = {
     getProfile,
     updateProfile,
-    getDashboard,
-    getAssignedBatches,
+    getAssignedCourses,
     getBatchStudents,
     getBatchStatistics,
+    getCourseModulesForInstructor,
+    createModuleForInstructor,
+    reorderCourseModulesForInstructor,
+    updateModuleForInstructor,
+    deleteModuleForInstructor,
+    getModuleLessonsForInstructor,
+    createLessonForInstructor,
+    updateLessonForInstructor,
+    deleteLessonForInstructor,
 };

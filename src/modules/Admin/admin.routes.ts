@@ -32,7 +32,7 @@ router.get(
 router.post(
     '/users',
     requireAuth,
-    requireSuperAdmin,  // Only SuperAdmin can create new admins
+    requireAdmin,  // Admin can create instructors/employees
     AdminAuthController.createAdmin
 );
 
@@ -53,7 +53,7 @@ router.patch(
 router.delete(
     '/users/:id',
     requireAuth,
-    requireSuperAdmin,  // Only SuperAdmin can delete
+    requireAdmin,  // Only SuperAdmin can delete
     AdminAuthController.deleteUser
 );
 
@@ -71,6 +71,14 @@ router.post(
     requireAdmin,
     validateRequest(sendNewsUpdateSchema),
     AdminAuthController.sendNewsUpdate
+);
+
+// Get all active instructor profiles (for batch assignment)
+router.get(
+    '/instructors',
+    requireAuth,
+    requireAdmin,
+    AdminAuthController.getAllInstructors
 );
 
 export const AdminAuthRoutes = router;

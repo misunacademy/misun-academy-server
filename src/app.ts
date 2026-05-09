@@ -170,12 +170,14 @@ app.use('/docs', (_req, res, next) => {
     next();
 });
 
-app.use(
-    '/docs',
-    apiReference({
-        url: '/openapi.json',
-    })
-);
+if (process.env.NODE_ENV === 'development') {
+    app.use(
+        '/docs',
+        apiReference({
+            url: '/openapi.json',
+        })
+    );
+}
 
 // Default route for testing
 app.get('/', (req, res) => {

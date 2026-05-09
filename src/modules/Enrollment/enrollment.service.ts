@@ -513,8 +513,8 @@ const initializeModuleProgress = async (enrollmentId: string, batchId: string) =
 
     if (!batch) return;
 
-    // Get all modules for the course
-    const modules = await ModuleModel.find({ courseId: batch.courseId }).sort({ orderIndex: 1 });
+    // Get all modules for the batch
+    const modules = await ModuleModel.find({ courseId: batch.courseId, batchId }).sort({ orderIndex: 1 });
 
     if (modules.length === 0) return;
 
@@ -553,7 +553,9 @@ const getUserEnrollments = async (userId: string, status?: EnrollmentStatus) => 
     const enrollmentsWithProgress = await Promise.all(
         enrollments.map(async (enrollment) => {
             const moduleProgress = await ModuleProgressModel.find({ enrollmentId: enrollment._id });
-            const modules = await ModuleModel.find({ courseId: (enrollment.batchId as any)?.courseId?._id ?? (enrollment.batchId as any)?.courseId });
+            const resolvedBatchId = (enrollment.batchId as any)?._id ?? enrollment.batchId;
+            const resolvedCourseId = (enrollment.batchId as any)?.courseId?._id ?? (enrollment.batchId as any)?.courseId;
+            const modules = await ModuleModel.find({ courseId: resolvedCourseId, batchId: resolvedBatchId });
 
             const totalModules = modules.length;
             const completedModules = moduleProgress.filter(
@@ -608,8 +610,9 @@ const getEnrollmentDetails = async (enrollmentId: string, userId: string) => {
 
     // Get progress statistics
     const moduleProgress = await ModuleProgressModel.find({ enrollmentId });
+    const resolvedBatchId = (enrollment.batchId as any)?._id ?? enrollment.batchId;
     const courseId = (enrollment.batchId as any)?.courseId?._id ?? (enrollment.batchId as any)?.courseId;
-    const modules = courseId ? await ModuleModel.find({ courseId }).sort({ orderIndex: 1 }) : [];
+    const modules = courseId ? await ModuleModel.find({ courseId, batchId: resolvedBatchId }).sort({ orderIndex: 1 }) : [];
 
     const totalModules = modules.length;
     const completedModules = moduleProgress.filter(

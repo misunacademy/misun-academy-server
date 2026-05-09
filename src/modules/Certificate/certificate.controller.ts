@@ -109,14 +109,19 @@ const getPendingCertificates = catchAsync(async (req: Request, res: Response) =>
  * Admin: Get all certificates (optional status filter)
  */
 const getCertificates = catchAsync(async (req: Request, res: Response) => {
-    const { status } = req.query as { status?: string };
-    const certificates = await CertificateService.getAllCertificates(status);
+    const { status, page = 1, limit = 10 } = req.query as { status?: string; page?: string; limit?: string };
+    const certificates = await CertificateService.getAllCertificates({
+        status,
+        page: Number(page),
+        limit: Number(limit),
+    });
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
         message: 'Certificates retrieved successfully',
-        data: certificates,
+        data: certificates.data,
+        meta: certificates.meta,
     });
 });
 

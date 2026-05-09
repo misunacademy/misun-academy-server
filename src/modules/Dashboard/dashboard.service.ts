@@ -3,7 +3,7 @@ import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
 import { UserModel } from "../User/user.model.js";
 import { BatchModel } from "../Batch/batch.model.js";
 import { CourseModel } from "../Course/course.model.js";
-import { EnrollmentStatus } from "../../types/common.js";
+import { BatchStatus, EnrollmentStatus } from "../../types/common.js";
 import mongoose from "mongoose";
 import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
@@ -387,10 +387,42 @@ const getStudentDashboard = async (userId: string) => {
 //     };
 // };
 
+const getInstructorDashboard = async (userId: string) => {
+
+    // Get instructor's single assigned course (1-to-1 constraint)
+    const course = await CourseModel.findOne({ instructorId: userId })
+        .populate('instructorId', 'name email image')
+        .lean();
+
+    if (!course) {
+        return { course: null, enrolledStudents: 0, activeBatches: 0, totalBatches: 0 };
+    }
+
+    // Get all batch IDs for this course
+    const batchIds = await BatchModel.find({ courseId: course._id }).distinct('_id');
+
+    // Count enrolled students via BatchModel (EnrollmentStatus.Active = "active")
+    const enrolledStudents = await EnrollmentModel.countDocuments({
+        batchId: { $in: batchIds },
+        status: EnrollmentStatus.Active,
+    });
+
+    // Count total & running batches (BatchStatus.Running = "running")
+    const [totalBatches, activeBatches] = await Promise.all([
+        BatchModel.countDocuments({ courseId: course._id }),
+        BatchModel.countDocuments({ courseId: course._id, status: BatchStatus.Running }),
+    ]);
+
+    return { course, enrolledStudents, activeBatches, totalBatches };
+};
+
+
+
 export const DashboardService = {
     getDashboardMetaData,
     getAdminDashboard,
     getUserStats,
     getStudentDashboard,
+    getInstructorDashboard,
     // getEmployeeDashboard,
 }

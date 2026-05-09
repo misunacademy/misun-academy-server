@@ -3,15 +3,21 @@ import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { ModuleService } from './module.service.js';
+import ApiError from '../../errors/ApiError.js';
 
 /**
  * Create a new module for a course
  */
 const createModule = catchAsync(async (req: Request, res: Response) => {
     const { courseId } = req.params as { courseId: string };
+    const { batchId } = req.query as { batchId?: string };
     const moduleData = req.body;
 
-    const module = await ModuleService.createModule(courseId, moduleData);
+    if (!batchId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Batch ID is required');
+    }
+
+    const module = await ModuleService.createModule(courseId, batchId, moduleData);
 
     sendResponse(res, {
         statusCode: StatusCodes.CREATED,
@@ -26,14 +32,34 @@ const createModule = catchAsync(async (req: Request, res: Response) => {
  */
 const getCourseModules = catchAsync(async (req: Request, res: Response) => {
     const { courseId } = req.params as { courseId: string };
-    const { status } = req.query as { status?: string };
+    const { status, batchId } = req.query as { status?: string; batchId?: string };
 
-    const modules = await ModuleService.getCourseModules(courseId, status);
+    if (!batchId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Batch ID is required');
+    }
+
+    const modules = await ModuleService.getCourseModules(courseId, batchId, status);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
         message: 'Modules retrieved successfully',
+        data: modules,
+    });
+});
+
+/**
+ * Get modules for a course that do not have batch assignment
+ */
+const getUnassignedCourseModules = catchAsync(async (req: Request, res: Response) => {
+    const { courseId } = req.params as { courseId: string };
+
+    const modules = await ModuleService.getUnassignedCourseModules(courseId);
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Unassigned modules retrieved successfully',
         data: modules,
     });
 });
@@ -92,9 +118,14 @@ const deleteModule = catchAsync(async (req: Request, res: Response) => {
  */
 const reorderModules = catchAsync(async (req: Request, res: Response) => {
     const { courseId } = req.params as { courseId: string };
+    const { batchId } = req.query as { batchId?: string };
     const { moduleOrders } = req.body;
 
-    const modules = await ModuleService.reorderModules(courseId, moduleOrders);
+    if (!batchId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Batch ID is required');
+    }
+
+    const modules = await ModuleService.reorderModules(courseId, batchId, moduleOrders);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -107,6 +138,7 @@ const reorderModules = catchAsync(async (req: Request, res: Response) => {
 export const ModuleController = {
     createModule,
     getCourseModules,
+    getUnassignedCourseModules,
     getModuleById,
     updateModule,
     deleteModule,

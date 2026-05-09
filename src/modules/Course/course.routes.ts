@@ -1,7 +1,6 @@
 import express from 'express';
 import { CourseController } from './course.controller.js';
 import { requireAuth, requireAdmin, requireSuperAdmin, requireInstructor, requireRole } from '../../middlewares/betterAuth.js';
-import { Role } from '../../types/role.js';
 import validateRequest from '../../middlewares/validateRequest.js';
 import { createCourseSchema, updateCourseSchema } from '../../validations/course.validation.js';
 
@@ -27,6 +26,14 @@ router.put(
     requireAdmin,
     validateRequest(updateCourseSchema),
     CourseController.updateCourse
+);
+
+// Admin: assign one instructor to a course (or unassign by passing instructorId: null)
+router.patch(
+    '/:id/instructor',
+    requireAuth,
+    requireAdmin,
+    CourseController.assignInstructor
 );
 
 // Admins and SuperAdmins can delete courses

@@ -119,6 +119,7 @@ const unlockNextModule = async (enrollmentId: string, currentModuleId: string) =
     // Find next module by orderIndex
     const nextModule = await ModuleModel.findOne({
         courseId: currentModule.courseId,
+        batchId: currentModule.batchId,
         orderIndex: currentModule.orderIndex + 1,
     });
 

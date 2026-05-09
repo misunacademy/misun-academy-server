@@ -19,8 +19,8 @@ const getBatchModules = async (batchId: string, enrollmentId: string) => {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
     }
 
-    // Get all modules for the course
-    const modules = await ModuleModel.find({ courseId: batch.courseId }).sort({ orderIndex: 1 });
+    // Get all modules for the batch
+    const modules = await ModuleModel.find({ courseId: batch.courseId, batchId }).sort({ orderIndex: 1 });
 
     // Get progress for all modules
     const moduleProgress = await ModuleProgressModel.find({ enrollmentId });

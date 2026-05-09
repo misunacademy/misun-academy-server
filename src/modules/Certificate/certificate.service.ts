@@ -370,7 +370,8 @@ const enrichCertificateWithCompletion = async (certificate: any) => {
     };
 };
 
-const getAllCertificates = async (status?: string) => {
+const getAllCertificates = async (params?: { status?: string; page?: number; limit?: number }) => {
+    const { status, page = 1, limit = 10 } = params ?? {};
     const normalizedStatus = status?.toLowerCase();
     const statusFilter = normalizedStatus === 'approved'
         ? CertificateStatus.Active
@@ -382,15 +383,34 @@ const getAllCertificates = async (status?: string) => {
 
     const query = statusFilter ? { status: statusFilter } : {};
 
+    const safePage = Math.max(1, page || 1);
+    const safeLimit = Math.max(1, limit || 10);
+    const skip = (safePage - 1) * safeLimit;
+
+    const total = await CertificateModel.countDocuments(query);
+    const totalPages = Math.max(1, Math.ceil(total / safeLimit));
+
     const certificates = await CertificateModel.find(query)
         .populate('userId', 'name email')
         .populate({
             path: 'batchId',
             populate: { path: 'courseId', select: 'title' },
         })
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(safeLimit);
 
-    return Promise.all(certificates.map(enrichCertificateWithCompletion));
+    const data = await Promise.all(certificates.map(enrichCertificateWithCompletion));
+
+    return {
+        data,
+        meta: {
+            total,
+            page: safePage,
+            limit: safeLimit,
+            totalPages,
+        },
+    };
 };
 
 const updateCertificateStatus = async (

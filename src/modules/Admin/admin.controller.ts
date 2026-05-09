@@ -9,6 +9,8 @@ import { EnrollmentStatus, UserStatus } from "../../types/common.js";
 import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
 import { sendEnrollmentReminderEmail, sendNewsUpdateEmail } from "../../services/misunAcademyEmails.js";
+import { getAuth } from "../../config/betterAuth.js";
+import mongoose from "mongoose";
 
 const loginUser = catchAsync(async (req: Request, res: Response) => {
     const email = req.body.email;
@@ -186,18 +188,50 @@ const getUserById = catchAsync(async (req: Request, res: Response) => {
 });
 
 /**
- * Create admin user (SuperAdmin only)
+ * Create user via Better Auth so credential account is properly created.
  * POST /api/v1/admin/users
  */
 const createAdmin = catchAsync(async (req: Request, res: Response) => {
-    const adminData = req.body;
-    const user = await UserModel.create(adminData);
+    const { name, email, password, role = 'instructor', status = 'active', phone, address } = req.body;
+
+    if (!password) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Password is required when creating a user');
+    }
+
+    const auth = getAuth();
+
+    // Use Better Auth signUpEmail so it creates the user AND the credential account record
+    let createdUser: any;
+    try {
+        const result = await auth.api.signUpEmail({
+            body: { name, email, password },
+            asResponse: false,
+        });
+        createdUser = result?.user;
+    } catch (err: any) {
+        const msg = err?.body?.message || err?.message || 'Failed to create user';
+        throw new ApiError(StatusCodes.BAD_REQUEST, msg);
+    }
+
+    if (!createdUser?.id) {
+        throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'User creation failed — no user returned from Better Auth');
+    }
+
+    // Update role, status, emailVerified (admin-created users should not need email verification)
+    const db = mongoose.connection.getClient().db();
+    const patch: Record<string, any> = { role, status, emailVerified: true, updatedAt: new Date() };
+    if (phone) patch.phone = phone;
+    if (address) patch.address = address;
+
+    await db.collection('users').updateOne({ id: createdUser.id }, { $set: patch });
+
+    const updatedUser = await db.collection('users').findOne({ id: createdUser.id }, { projection: { password: 0 } });
 
     sendResponse(res, {
         statusCode: 201,
         success: true,
-        message: 'Admin created successfully',
-        data: user,
+        message: 'User created successfully',
+        data: updatedUser,
     });
 });
 
@@ -378,6 +412,24 @@ const sendNewsUpdate = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+/**
+ * Get all users with role=instructor for admin use.
+ * GET /api/v1/admin/instructors
+ */
+const getAllInstructors = catchAsync(async (req: Request, res: Response) => {
+    const instructors = await UserModel.find({ role: 'instructor' })
+        .select('_id name email image status createdAt')
+        .sort({ name: 1 })
+        .lean();
+
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: 'Instructors retrieved successfully',
+        data: instructors,
+    });
+});
+
 export const AdminAuthController = {
     loginUser,
     getAllUsers,
@@ -388,4 +440,5 @@ export const AdminAuthController = {
     deleteUser,
     sendEnrollmentReminder,
     sendNewsUpdate,
+    getAllInstructors,
 };

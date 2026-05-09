@@ -3,8 +3,10 @@ import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { RecordingService } from './recording.service.js';
+import { CourseModel } from '../Course/course.model.js';
+import { Role } from '../../types/role.js';
 
-// Admin: Create recording
+// Admin/Instructor: Create recording
 const createRecording = catchAsync(async (req: Request, res: Response) => {
     const userId = (req as any).user.id;
     const recording = await RecordingService.createRecording(req.body, userId);
@@ -17,12 +19,56 @@ const createRecording = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-// Admin: Get all recordings with filters
+// Admin/Instructor: Get all recordings with filters
+// Instructors automatically see only recordings for their assigned courses.
 const getAllRecordings = catchAsync(async (req: Request, res: Response) => {
     const { courseId, batchId, isPublished, page, limit } = req.query;
+    const user = (req as any).user;
+
+    // For instructors, restrict to their assigned courses
+    let allowedCourseId = courseId as string | undefined;
+    if (user.role === Role.INSTRUCTOR) {
+        const assignedCourses = await CourseModel.find(
+            { instructorId: user.id },
+            '_id'
+        ).lean();
+        const assignedIds = assignedCourses.map((c: any) => c._id.toString());
+
+        if (courseId && !assignedIds.includes(courseId as string)) {
+            // Requested course not assigned to this instructor
+            return sendResponse(res, {
+                statusCode: StatusCodes.OK,
+                success: true,
+                message: 'Recordings retrieved successfully',
+                data: [],
+                meta: { page: 1, limit: 20, total: 0, totalPages: 0 },
+            });
+        }
+        if (!courseId) {
+            // No specific course requested — must pass courseIds array
+            // Use the service's courseIds filter (extend call below)
+            allowedCourseId = undefined; // handled via courseIds
+            return sendResponse(res, await (async () => {
+                const result = await RecordingService.getAllRecordings({
+                    courseIds: assignedIds,
+                    batchId: batchId as string,
+                    isPublished: isPublished === 'true' ? true : isPublished === 'false' ? false : undefined,
+                    page: page ? parseInt(page as string) : undefined,
+                    limit: limit ? parseInt(limit as string) : undefined,
+                });
+                return {
+                    statusCode: StatusCodes.OK,
+                    success: true,
+                    message: 'Recordings retrieved successfully',
+                    data: result.data,
+                    meta: result.meta,
+                };
+            })());
+        }
+    }
 
     const result = await RecordingService.getAllRecordings({
-        courseId: courseId as string,
+        courseId: allowedCourseId,
         batchId: batchId as string,
         isPublished: isPublished === 'true' ? true : isPublished === 'false' ? false : undefined,
         page: page ? parseInt(page as string) : undefined,
@@ -37,6 +83,7 @@ const getAllRecordings = catchAsync(async (req: Request, res: Response) => {
         meta: result.meta,
     });
 });
+
 
 // Admin: Get recording by ID
 const getRecordingById = catchAsync(async (req: Request, res: Response) => {

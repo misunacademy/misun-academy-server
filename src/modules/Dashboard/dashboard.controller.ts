@@ -57,10 +57,21 @@ const getStudentDashboard = catchAsync(async (req: Request, res: Response) => {
 //     });
 // });
 
+const getInstructorDashboard = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const result = await DashboardService.getInstructorDashboard(id);
+    sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: 'Instructor dashboard data retrieved successfully',
+        data: result,
+    });
+});
+
 export const DashboardController = {
     getDashboardMetaData,
     getAdminDashboard,
     getUserStats,
     getStudentDashboard,
-    // getEmployeeDashboard,
+    getInstructorDashboard,
 }

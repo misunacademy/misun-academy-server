@@ -26,15 +26,21 @@ const createRecording = async (
 
 const getAllRecordings = async (filters: {
     courseId?: string;
+    /** Filter by multiple course IDs (used to scope instructor access) */
+    courseIds?: string[];
     batchId?: string;
     isPublished?: boolean;
     page?: number;
     limit?: number;
 }) => {
-    const { courseId, batchId, isPublished, page = 1, limit = 20 } = filters;
+    const { courseId, courseIds, batchId, isPublished, page = 1, limit = 20 } = filters;
 
     const query: any = {};
-    if (courseId) query.courseId = courseId;
+    if (courseId) {
+        query.courseId = courseId;
+    } else if (courseIds && courseIds.length > 0) {
+        query.courseId = { $in: courseIds };
+    }
     if (batchId) query.batchId = batchId;
     if (isPublished !== undefined) query.isPublished = isPublished;
 
