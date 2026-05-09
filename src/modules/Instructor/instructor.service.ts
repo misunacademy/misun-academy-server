@@ -63,7 +63,7 @@ const updateProfile = async (
 /**
  * Get all courses assigned to this instructor
  */
-const getAssignedCourses = async (userId: string) => {
+const getCoursesWithBatches = async (userId: string) => {
     await resolveInstructor(userId);
 
     const courses = await CourseModel.find({ instructorId: new Types.ObjectId(userId) })
@@ -301,10 +301,11 @@ const deleteLessonForInstructor = async (userId: string, lessonId: string) => {
     return null;
 };
 
+
 export const InstructorService = {
     getProfile,
     updateProfile,
-    getAssignedCourses,
+    getCoursesWithBatches,
     getBatchStudents,
     getBatchStatistics,
     getCourseModulesForInstructor,

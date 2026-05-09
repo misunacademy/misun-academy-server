@@ -33,7 +33,7 @@ const getPaymentHistory = catchAsync(async (req: Request, res: Response) => {
   const result = await PaymentService.getPaymentHistory(req.query);
 
   sendResponse(res, {
-    statusCode: 200,
+    statusCode: StatusCodes.OK,
     success: true,
     message: 'Payment Retrive successfully !',
     meta: result.meta,
@@ -49,7 +49,7 @@ const updatePaymentWithEnrollStatus = catchAsync(async (req: Request, res: Respo
   const result = await PaymentService.updatePaymentWithEnrollStatus(tran_id, status);
 
   sendResponse(res, {
-    statusCode: 200,
+    statusCode: StatusCodes.OK,
     success: true,
     message: 'Payment updated successfully !',
     data: result,
@@ -66,7 +66,7 @@ const getMyPayments = catchAsync(async (req: Request, res: Response) => {
   const result = await PaymentService.getMyPayments(userId);
 
   sendResponse(res, {
-    statusCode: 200,
+    statusCode: StatusCodes.OK,
     success: true,
     message: 'Payments retrieved successfully',
     data: result,

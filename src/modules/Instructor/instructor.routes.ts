@@ -13,7 +13,7 @@ router.put('/profile', InstructorController.updateProfile);
 
 
 // ── Batches ──────────────────────────────────────────────────────────────────
-router.get('/batches', InstructorController.getAssignedBatches);
+router.get('/batches', InstructorController.getCoursesWithBatches);
 router.get('/batches/:batchId/students', InstructorController.getBatchStudents);
 router.get('/batches/:batchId/statistics', InstructorController.getBatchStatistics);
 

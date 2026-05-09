@@ -41,13 +41,12 @@ const updateProfile = catchAsync(async (req: Request, res: Response) => {
 
 
 /**
- * Get assigned batches — redirected to course-level data
- * (kept for API compatibility; returns courses with embedded batches)
+ * Get courses with embedded batches)
  */
-const getAssignedBatches = catchAsync(async (req: Request, res: Response) => {
+const getCoursesWithBatches = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.user as any;
 
-    const result = await InstructorService.getAssignedCourses(id);
+    const result = await InstructorService.getCoursesWithBatches(id);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -94,7 +93,7 @@ const getBatchStatistics = catchAsync(async (req: Request, res: Response) => {
 /** Get courses assigned to the instructor */
 const getAssignedCourses = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.user as any;
-    const result = await InstructorService.getAssignedCourses(id);
+    const result = await InstructorService.getCoursesWithBatches(id);
     sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Assigned courses retrieved successfully', data: result });
 });
 
@@ -199,7 +198,7 @@ const deleteModuleLesson = catchAsync(async (req: Request, res: Response) => {
 export const InstructorController = {
     getProfile,
     updateProfile,
-    getAssignedBatches,
+    getCoursesWithBatches,
     getBatchStudents,
     getBatchStatistics,
     getAssignedCourses,

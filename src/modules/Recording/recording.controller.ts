@@ -24,6 +24,8 @@ const createRecording = catchAsync(async (req: Request, res: Response) => {
 const getAllRecordings = catchAsync(async (req: Request, res: Response) => {
     const { courseId, batchId, isPublished, page, limit } = req.query;
     const user = (req as any).user;
+    const parsedPage = page ? parseInt(page as string) : 1;
+    const parsedLimit = limit ? parseInt(limit as string) : 20;
 
     // For instructors, restrict to their assigned courses
     let allowedCourseId = courseId as string | undefined;
@@ -33,6 +35,16 @@ const getAllRecordings = catchAsync(async (req: Request, res: Response) => {
             '_id'
         ).lean();
         const assignedIds = assignedCourses.map((c: any) => c._id.toString());
+
+        if (assignedIds.length === 0) {
+            return sendResponse(res, {
+                statusCode: StatusCodes.OK,
+                success: true,
+                message: 'Recordings retrieved successfully',
+                data: [],
+                meta: { page: parsedPage, limit: parsedLimit, total: 0, totalPages: 0 },
+            });
+        }
 
         if (courseId && !assignedIds.includes(courseId as string)) {
             // Requested course not assigned to this instructor
@@ -53,8 +65,8 @@ const getAllRecordings = catchAsync(async (req: Request, res: Response) => {
                     courseIds: assignedIds,
                     batchId: batchId as string,
                     isPublished: isPublished === 'true' ? true : isPublished === 'false' ? false : undefined,
-                    page: page ? parseInt(page as string) : undefined,
-                    limit: limit ? parseInt(limit as string) : undefined,
+                    page: parsedPage,
+                    limit: parsedLimit,
                 });
                 return {
                     statusCode: StatusCodes.OK,
@@ -71,8 +83,8 @@ const getAllRecordings = catchAsync(async (req: Request, res: Response) => {
         courseId: allowedCourseId,
         batchId: batchId as string,
         isPublished: isPublished === 'true' ? true : isPublished === 'false' ? false : undefined,
-        page: page ? parseInt(page as string) : undefined,
-        limit: limit ? parseInt(limit as string) : undefined,
+        page: parsedPage,
+        limit: parsedLimit,
     });
 
     sendResponse(res, {
