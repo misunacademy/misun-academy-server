@@ -18,6 +18,7 @@ router.get('/batches/:batchId/students', InstructorController.getBatchStudents);
 router.get('/batches/:batchId/statistics', InstructorController.getBatchStatistics);
 
 // ── Assigned Courses (scoped content management) ─────────────────────────────
+router.get('/students', InstructorController.getInstructorEnrolledStudents);
 router.get('/courses', InstructorController.getAssignedCourses);
 
 // Module CRUD — only for assigned courses

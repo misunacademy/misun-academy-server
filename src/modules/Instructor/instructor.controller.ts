@@ -195,6 +195,21 @@ const deleteModuleLesson = catchAsync(async (req: Request, res: Response) => {
     sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Lesson deleted successfully', data: null });
 });
 
+/** Get enrolled students with pagination and filtering */
+const getInstructorEnrolledStudents = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    
+    const result = await InstructorService.getInstructorEnrolledStudents(id, req.query);
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Enrolled students retrieved successfully',
+        data: result.data,
+        meta: result.meta
+    });
+});
+
 export const InstructorController = {
     getProfile,
     updateProfile,
@@ -211,4 +226,5 @@ export const InstructorController = {
     createModuleLesson,
     updateModuleLesson,
     deleteModuleLesson,
+    getInstructorEnrolledStudents,
 };

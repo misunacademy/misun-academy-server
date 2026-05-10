@@ -302,6 +302,89 @@ const deleteLessonForInstructor = async (userId: string, lessonId: string) => {
 };
 
 
+/**
+ * Get all enrolled students for the instructor with pagination and filtering
+ */
+const getInstructorEnrolledStudents = async (userId: string, query: any) => {
+    await resolveInstructor(userId);
+
+    const { page = 1, limit = 10, search, status, courseId, batchId } = query;
+    const skip = (Number(page) - 1) * Number(limit);
+
+    // 1. Get allowed courses for this instructor
+    let courseQuery: any = { instructorId: new Types.ObjectId(userId) };
+    if (courseId && courseId !== 'all') {
+        courseQuery._id = new Types.ObjectId(courseId);
+    }
+    const courses = await CourseModel.find(courseQuery).select('_id title').lean();
+    const courseIds = courses.map(c => c._id);
+
+    if (courseIds.length === 0) {
+        return { meta: { total: 0, page: Number(page), limit: Number(limit), totalPages: 0 }, data: [] };
+    }
+
+    // 2. Get allowed batches
+    let batchQuery: any = { courseId: { $in: courseIds } };
+    if (batchId && batchId !== 'all') {
+        batchQuery._id = new Types.ObjectId(batchId);
+    }
+    const batches = await BatchModel.find(batchQuery).select('_id title courseId').lean();
+    const batchIds = batches.map(b => b._id);
+
+    if (batchIds.length === 0) {
+        return { meta: { total: 0, page: Number(page), limit: Number(limit), totalPages: 0 }, data: [] };
+    }
+
+    // 3. Construct enrollment query
+    let enrollmentQuery: any = { batchId: { $in: batchIds } };
+    
+    if (status && status !== 'all') {
+        enrollmentQuery.status = new RegExp(`^${status}$`, 'i');
+    }
+
+    // If there is a search term, we need to find matching users first
+    if (search) {
+        const matchingUsers = await UserModel.find({
+            $or: [
+                { name: { $regex: search, $options: 'i' } },
+                { email: { $regex: search, $options: 'i' } }
+            ]
+        }).select('_id');
+        const userIds = matchingUsers.map(u => u._id);
+        enrollmentQuery.userId = { $in: userIds };
+    }
+
+    const total = await EnrollmentModel.countDocuments(enrollmentQuery);
+    const enrollments = await EnrollmentModel.find(enrollmentQuery)
+        .populate('userId', 'name email phone image')
+        .skip(skip)
+        .limit(Number(limit))
+        .sort({ enrolledAt: -1 })
+        .lean();
+
+    // Attach course and batch info
+    const data = enrollments.map((enr: any) => {
+        const batch = batches.find(b => b._id.toString() === enr.batchId?.toString());
+        const course = courses.find(c => c._id.toString() === batch?.courseId?.toString());
+        return {
+            ...enr,
+            batchTitle: batch?.title,
+            courseTitle: course?.title,
+        };
+    });
+
+    return {
+        meta: {
+            total,
+            page: Number(page),
+            limit: Number(limit),
+            totalPages: Math.ceil(total / Number(limit))
+        },
+        data,
+    };
+};
+
+
 export const InstructorService = {
     getProfile,
     updateProfile,
@@ -317,4 +400,5 @@ export const InstructorService = {
     createLessonForInstructor,
     updateLessonForInstructor,
     deleteLessonForInstructor,
+    getInstructorEnrolledStudents,
 };
