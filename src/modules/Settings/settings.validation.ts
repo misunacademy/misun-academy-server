@@ -5,6 +5,9 @@ const updateSettings = z.object({
     popupEnabled: z.boolean().optional(),
     popupImageUrl: z.string().optional(),
     popupLink: z.string().optional(),
+    maintenanceEnabled: z.boolean().optional(),
+    maintenanceTitle: z.string().optional(),
+    maintenanceMessage: z.string().optional(),
   }),
 });
 

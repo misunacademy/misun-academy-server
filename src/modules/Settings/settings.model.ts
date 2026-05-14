@@ -4,6 +4,9 @@ export interface ISettings {
   popupEnabled?: boolean;
   popupImageUrl?: string;
   popupLink?: string;
+  maintenanceEnabled?: boolean;
+  maintenanceTitle?: string;
+  maintenanceMessage?: string;
 }
 
 const settingsSchema = new Schema<ISettings>({
@@ -16,6 +19,18 @@ const settingsSchema = new Schema<ISettings>({
     default: '',
   },
   popupLink: {
+    type: String,
+    default: '',
+  },
+  maintenanceEnabled: {
+    type: Boolean,
+    default: false,
+  },
+  maintenanceTitle: {
+    type: String,
+    default: '',
+  },
+  maintenanceMessage: {
     type: String,
     default: '',
   },
