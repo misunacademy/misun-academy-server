@@ -28,6 +28,11 @@ const getMyProfile = async (userId: string) => {
         whatsapp:    profile?.whatsapp    ?? null,
         bloodGroup:  profile?.bloodGroup  ?? null,
         nidNumber:   profile?.nidNumber   ?? null,
+        dateOfBirth: profile?.dateOfBirth ?? null,
+        tshirtSize:  profile?.tshirtSize  ?? null,
+        designation: profile?.designation ?? null,
+        nidPhotoFrontUrl: profile?.nidPhotoFrontUrl ?? profile?.nidPhotoUrl ?? null,
+        nidPhotoBackUrl:  profile?.nidPhotoBackUrl  ?? null,
         nidPhotoUrl: profile?.nidPhotoUrl ?? null,
     };
 };
@@ -35,7 +40,7 @@ const getMyProfile = async (userId: string) => {
 /**
  * Update the employee's own profile.
  * Base fields (name, phone, address) update the User document.
- * Extended fields (whatsapp, bloodGroup, nidNumber, nidPhotoUrl) upsert EmployeeProfile.
+ * Extended fields (whatsapp, bloodGroup, nidNumber, dateOfBirth, tshirtSize, designation, nid photos) upsert EmployeeProfile.
  */
 const updateMyProfile = async (
     userId: string,
@@ -46,10 +51,18 @@ const updateMyProfile = async (
         whatsapp?: string;
         bloodGroup?: string;
         nidNumber?: string;
+        dateOfBirth?: string | Date | null;
+        tshirtSize?: string | null;
+        designation?: string | null;
+        nidPhotoFrontUrl?: string | null;
+        nidPhotoBackUrl?: string | null;
         nidPhotoUrl?: string;
     }
 ) => {
-    const { name, phone, address, whatsapp, bloodGroup, nidNumber, nidPhotoUrl } = payload;
+    const {
+        name, phone, address, whatsapp, bloodGroup, nidNumber, nidPhotoUrl,
+        dateOfBirth, tshirtSize, designation, nidPhotoFrontUrl, nidPhotoBackUrl,
+    } = payload;
 
     // Update core User fields
     const userUpdate: Record<string, unknown> = {};
@@ -66,6 +79,11 @@ const updateMyProfile = async (
     if (whatsapp    !== undefined) extUpdate.whatsapp    = whatsapp;
     if (bloodGroup  !== undefined) extUpdate.bloodGroup  = bloodGroup;
     if (nidNumber   !== undefined) extUpdate.nidNumber   = nidNumber;
+    if (dateOfBirth !== undefined) extUpdate.dateOfBirth = dateOfBirth;
+    if (tshirtSize  !== undefined) extUpdate.tshirtSize  = tshirtSize;
+    if (designation !== undefined) extUpdate.designation = designation;
+    if (nidPhotoFrontUrl !== undefined) extUpdate.nidPhotoFrontUrl = nidPhotoFrontUrl;
+    if (nidPhotoBackUrl  !== undefined) extUpdate.nidPhotoBackUrl  = nidPhotoBackUrl;
     if (nidPhotoUrl !== undefined) extUpdate.nidPhotoUrl = nidPhotoUrl;
 
     if (Object.keys(extUpdate).length > 0) {
@@ -188,6 +206,11 @@ const getAllEmployees = async (query: {
             whatsapp:    profile?.whatsapp    ?? null,
             bloodGroup:  profile?.bloodGroup  ?? null,
             nidNumber:   profile?.nidNumber   ?? null,
+            dateOfBirth: profile?.dateOfBirth ?? null,
+            tshirtSize:  profile?.tshirtSize  ?? null,
+            designation: profile?.designation ?? null,
+            nidPhotoFrontUrl: profile?.nidPhotoFrontUrl ?? profile?.nidPhotoUrl ?? null,
+            nidPhotoBackUrl:  profile?.nidPhotoBackUrl  ?? null,
             nidPhotoUrl: profile?.nidPhotoUrl ?? null,
         };
     });

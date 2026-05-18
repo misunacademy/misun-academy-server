@@ -13,6 +13,11 @@ const employeeProfileSchema = new Schema<IEmployeeProfileDocument>(
         whatsapp:    { type: String, trim: true },
         bloodGroup:  { type: String, trim: true },
         nidNumber:   { type: String, trim: true },
+        dateOfBirth: { type: Date },
+        tshirtSize:  { type: String, trim: true },
+        designation: { type: String, trim: true },
+        nidPhotoFrontUrl: { type: String },
+        nidPhotoBackUrl:  { type: String },
         nidPhotoUrl: { type: String },
     },
     { timestamps: true }

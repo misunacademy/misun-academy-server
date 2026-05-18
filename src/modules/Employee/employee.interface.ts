@@ -8,7 +8,12 @@ export interface IEmployeeProfile {
     whatsapp?: string;         // WhatsApp contact number
     bloodGroup?: string;       // e.g. "A+", "O-"
     nidNumber?: string;        // National ID card number
-    nidPhotoUrl?: string;      // Cloudinary URL of the uploaded NID photo
+    dateOfBirth?: Date;        // Date of birth
+    tshirtSize?: string;       // T-shirt size (e.g. S, M, L)
+    designation?: string;      // Current designation/title
+    nidPhotoFrontUrl?: string; // Cloudinary URL of the uploaded NID front photo
+    nidPhotoBackUrl?: string;  // Cloudinary URL of the uploaded NID back photo
+    nidPhotoUrl?: string;      // Legacy single NID photo URL
 }
 
 export interface IEmployeeProfileDocument extends IEmployeeProfile, Document {}
