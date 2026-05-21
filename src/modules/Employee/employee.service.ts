@@ -5,6 +5,8 @@ import { UserModel } from '../User/user.model.js';
 import { EmployeeProfileModel, SalaryModel, LeaveRequestModel } from './employee.model.js';
 import { ISalary, ILeaveRequest } from './employee.interface.js';
 import { Role } from '../../types/role.js';
+import { logger } from '../../config/logger.js';
+import { sendEmployeeSalaryPaidEmail } from '../../services/misunAcademyEmails.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EMPLOYEE PROFILE
@@ -244,8 +246,38 @@ const addSalary = async (payload: Omit<ISalary, 'totalAmount'>) => {
 };
 
 const updateSalaryStatus = async (id: string, status: 'Paid' | 'Pending') => {
+    const existing = await SalaryModel.findById(id).lean();
+    if (!existing) throw new ApiError(StatusCodes.NOT_FOUND, 'Salary record not found');
+
+    if (existing.status === status) return existing;
+
     const salary = await SalaryModel.findByIdAndUpdate(id, { status }, { new: true }).lean();
     if (!salary) throw new ApiError(StatusCodes.NOT_FOUND, 'Salary record not found');
+
+    if (status === 'Paid' && existing.status !== 'Paid') {
+        try {
+            const employee = await UserModel.findById(existing.employeeId)
+                .select('name email')
+                .lean();
+            if (employee?.email) {
+                await sendEmployeeSalaryPaidEmail({
+                    email: employee.email,
+                    name: employee.name || existing.employeeName || 'Employee',
+                    salaryId: salary._id.toString(),
+                    month: salary.month,
+                    year: salary.year,
+                    amount: salary.amount,
+                    bonus: salary.bonus,
+                    totalAmount: salary.totalAmount,
+                    paymentDate: salary.paymentDate ?? null,
+                    jobTitle: salary.jobTitle,
+                });
+            }
+        } catch (error: unknown) {
+            logger.error(`Failed to send salary paid email: ${(error as Error).message}`);
+        }
+    }
+
     return salary;
 };
 

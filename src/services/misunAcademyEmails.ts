@@ -190,6 +190,59 @@ export const sendPaymentFailedEmail = async (student: any, courseName: string, r
     await queueEmail(student.email, 'Payment Failed', html, { priority: 'high' });
 };
 
+// --- EMPLOYEE ---
+
+export const sendEmployeeSalaryPaidEmail = async (params: {
+    email: string;
+    name: string;
+    salaryId: string;
+    month?: string;
+    year?: number;
+    amount?: number;
+    bonus?: number;
+    totalAmount?: number;
+    paymentDate?: string | Date | null;
+    jobTitle?: string;
+}) => {
+    const {
+        email, name, salaryId, month, year,
+        amount = 0, bonus = 0, totalAmount,
+        paymentDate, jobTitle,
+    } = params;
+
+    const period = month && year ? `${month} ${year}` : (month || year ? `${month ?? ''} ${year ?? ''}`.trim() : 'N/A');
+    const paidTotal = totalAmount ?? (amount + bonus);
+    const formattedPaymentDate = paymentDate
+        ? new Date(paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+        : 'Not provided';
+
+    const html = getEmailTemplate(`
+        <div class="header" style="background: #10b981;">
+            <h1>Salary Paid</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${name}</strong>,</p>
+            <p>Your salary has been paid, please check it out. Here are the details:</p>
+            <div class="highlight-box">
+                <p><strong>Period:</strong> ${period}</p>
+                ${jobTitle ? `<p><strong>Designation:</strong> ${jobTitle}</p>` : ''}
+                <p><strong>Gross Salary:</strong> BDT ${amount.toLocaleString()}</p>
+                <p><strong>Bonus:</strong> BDT ${bonus.toLocaleString()}</p>
+                <p><strong>Total Paid:</strong> BDT ${paidTotal.toLocaleString()}</p>
+                <p><strong>Payment Date:</strong> ${formattedPaymentDate}</p>
+                <p><strong>Status:</strong> <span style="color:#10b981; font-weight:bold;">PAID</span></p>
+            </div>
+            <p>If you have any questions, please contact us.</p>
+        </div>
+    `, '#10b981');
+
+    await queueEmail(email, 'Salary Paid', html, {
+        eventType: 'salary_paid',
+        eventId: salaryId,
+        priority: 'normal',
+    });
+};
+
 
 // --- ACADEMIC ---
 
