@@ -5,4 +5,8 @@ export interface ISettings {
   maintenanceEnabled?: boolean;
   maintenanceTitle?: string;
   maintenanceMessage?: string;
+  maFacebookGroupLink?: string;
+  maWhatsappGroupLink?: string;
+  epFacebookGroupLink?: string;
+  epWhatsappGroupLink?: string;
 }

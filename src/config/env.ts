@@ -63,7 +63,10 @@ const EnvSchema = z.object({
     // Cloudinary config (required for image uploads)
     CLOUDINARY_CLOUD_NAME: z.string(),
     CLOUDINARY_API_KEY: z.string(),
-    CLOUDINARY_API_SECRET: z.string()
+    CLOUDINARY_API_SECRET: z.string(),
+
+    // Admin Email for Employee Birthday Reminders
+    ADMIN_EMAIL: z.string(),
 });
 
 // Validate and parse environment variables

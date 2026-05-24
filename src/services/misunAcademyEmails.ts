@@ -4,10 +4,26 @@
 // ============================================================================
 
 import env from "../config/env.js";
+import { SettingsService } from "../modules/Settings/settings.service.js";
 import { queueEmail } from "./emailService.js";
 
 const getDisplayCurrency = (currency: string, paymentMethod?: string) => {
     return paymentMethod === 'PhonePay' ? 'INR' : currency;
+};
+
+const resolveGroupLinks = async (courseName: string) => {
+    const groupLinks = await SettingsService.getSocialGroupLinks();
+    const isEnglishCourse = /english/i.test(courseName);
+
+    return isEnglishCourse
+        ? {
+            facebookGroupLink: groupLinks.epFacebookGroupLink,
+            whatsappGroupLink: groupLinks.epWhatsappGroupLink,
+        }
+        : {
+            facebookGroupLink: groupLinks.maFacebookGroupLink,
+            whatsappGroupLink: groupLinks.maWhatsappGroupLink,
+        };
 };
 
 const getEmailTemplate = (content: string, headerColor: string = "#10b981") => `
@@ -368,13 +384,7 @@ export const sendEnrollmentConfirmationEmail = async (
 ) => {
     const paymentAmount = amount;
     const displayCurrency = getDisplayCurrency('BDT', paymentMethod);
-    const isEnglishCourse = /english/i.test(courseName);
-    const facebookGroupLink = isEnglishCourse
-        ? (env.EP_FACEBOOK_GROUP_LINK)
-        : (env.MA_FACEBOOK_GROUP_LINK);
-    const whatsappGroupLink = isEnglishCourse
-        ? (env.EP_WHATSAPP_GROUP_LINK)
-        : (env.MA_WHATSAPP_GROUP_LINK);
+    const { facebookGroupLink, whatsappGroupLink } = await resolveGroupLinks(courseName);
     const html = getEmailTemplate(`
         <div class="header" style="background: #10b981;">
             <h1>Enrollment Confirmed!</h1>

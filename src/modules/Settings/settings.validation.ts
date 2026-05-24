@@ -8,6 +8,10 @@ const updateSettings = z.object({
     maintenanceEnabled: z.boolean().optional(),
     maintenanceTitle: z.string().optional(),
     maintenanceMessage: z.string().optional(),
+    maFacebookGroupLink: z.string().optional(),
+    maWhatsappGroupLink: z.string().optional(),
+    epFacebookGroupLink: z.string().optional(),
+    epWhatsappGroupLink: z.string().optional(),
   }),
 });
 

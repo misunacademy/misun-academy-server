@@ -10,7 +10,8 @@ import { logger } from '../config/logger.js';
 import { sendEmployeeBirthdayReminderEmail } from '../services/misunAcademyEmails.js';
 
 const REMINDER_DAYS = 10;
-const ADMIN_EMAIL = 'misunacademybd@gmail.com';
+// 'misunacademybd@gmail.com'
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL!;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const CRON_SCHEDULE = '0 9 * * *';
 const CRON_TIMEZONE = 'Asia/Dhaka';

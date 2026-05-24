@@ -7,6 +7,10 @@ export interface ISettings {
   maintenanceEnabled?: boolean;
   maintenanceTitle?: string;
   maintenanceMessage?: string;
+  maFacebookGroupLink?: string;
+  maWhatsappGroupLink?: string;
+  epFacebookGroupLink?: string;
+  epWhatsappGroupLink?: string;
 }
 
 const settingsSchema = new Schema<ISettings>({
@@ -31,6 +35,22 @@ const settingsSchema = new Schema<ISettings>({
     default: '',
   },
   maintenanceMessage: {
+    type: String,
+    default: '',
+  },
+  maFacebookGroupLink: {
+    type: String,
+    default: '',
+  },
+  maWhatsappGroupLink: {
+    type: String,
+    default: '',
+  },
+  epFacebookGroupLink: {
+    type: String,
+    default: '',
+  },
+  epWhatsappGroupLink: {
     type: String,
     default: '',
   },
