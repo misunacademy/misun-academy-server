@@ -67,6 +67,9 @@ const courseSchema = new Schema<ICourse>(
             type: Boolean,
             default: true,
         },
+        instructor: {
+            type: String,
+        },
         instructorId: {
             type: Schema.Types.ObjectId,
             ref: 'User',
