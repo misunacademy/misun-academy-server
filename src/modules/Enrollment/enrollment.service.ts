@@ -3,13 +3,14 @@ import ApiError from '../../errors/ApiError.js';
 import { EnrollmentModel } from './enrollment.model.js';
 import { EnrollmentCounterModel } from './enrollmentCounter.model.js';
 import { BatchModel } from '../Batch/batch.model.js';
-import { BatchStatus, EnrollmentStatus } from '../../types/common.js';
+import { BatchStatus, EnrollmentStatus, UserStatus } from '../../types/common.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
 import { ProgressStatus } from '../../types/common.js';
 import { UserModel } from '../User/user.model.js';
 import { Status } from '../../types/common.js';
 import { PaymentModel } from '../Payment/payment.model.js';
+import { ProfileService } from '../Profile/profile.service.js';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import { StudentIdCounterModel } from '../User/studentIdCounter.model.js';
@@ -582,6 +583,71 @@ const getUserEnrollments = async (userId: string, status?: EnrollmentStatus) => 
     return enrollmentsWithProgress;
 };
 
+const getSpecialAccessEnrollments = async (params: {
+    page?: number | string;
+    limit?: number | string;
+    search?: string;
+}) => {
+    const pageNumber = Number(params.page) || 1;
+    const limitNumber = Number(params.limit) || 10;
+    const skip = (pageNumber - 1) * limitNumber;
+    const query: any = { accessType: 'special' };
+
+    if (params.search) {
+        const escaped = params.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = new RegExp(escaped, 'i');
+        const matchedUsers = await UserModel.find({
+            $or: [{ name: searchRegex }, { email: searchRegex }, { phone: searchRegex }],
+        })
+            .select('_id')
+            .lean();
+
+        const userIds = matchedUsers.map((user) => user._id);
+
+        if (userIds.length === 0) {
+            return {
+                data: [],
+                meta: {
+                    total: 0,
+                    page: pageNumber,
+                    limit: limitNumber,
+                    totalPages: 0,
+                },
+            };
+        }
+
+        query.userId = { $in: userIds };
+    }
+
+    const [data, total] = await Promise.all([
+        EnrollmentModel.find(query)
+            .populate({
+                path: 'userId',
+                select: 'name email status studentId',
+            })
+            .populate({
+                path: 'batchId',
+                select: 'title courseId',
+                populate: { path: 'courseId', select: 'title' },
+            })
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limitNumber)
+            .lean(),
+        EnrollmentModel.countDocuments(query),
+    ]);
+
+    return {
+        data,
+        meta: {
+            total,
+            page: pageNumber,
+            limit: limitNumber,
+            totalPages: Math.ceil(total / limitNumber),
+        },
+    };
+};
+
 /**
  * Get enrollment details
  */
@@ -794,6 +860,171 @@ const enrollWithManualPayment = async (
     }
 };
 
+const grantAccessByEmail = async (email: string, courseId: string, batchId: string) => {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Student email is required');
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(courseId)) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid course ID');
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(batchId)) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid batch ID');
+    }
+
+    const session = await mongoose.startSession();
+
+    try {
+        session.startTransaction();
+
+        const user = await UserModel.findOne({ email: normalizedEmail }).session(session);
+
+        if (!user) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'User not found for this email');
+        }
+
+        if (user.status !== UserStatus.Active) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'User is not active');
+        }
+
+        const batch = await BatchModel.findById(batchId).populate('courseId').session(session);
+
+        if (!batch) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
+        }
+
+        const batchCourseId =
+            (batch.courseId as any)?._id?.toString() ??
+            (batch.courseId as any)?.toString();
+
+        if (batchCourseId && batchCourseId !== courseId) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'Selected batch does not belong to the selected course'
+            );
+        }
+
+        let enrollment = await EnrollmentModel.findOne({
+            userId: user._id,
+            batchId: batch._id,
+        }).session(session);
+
+        const isActiveOrCompleted = enrollment
+            ? [EnrollmentStatus.Active, EnrollmentStatus.Completed].includes(enrollment.status)
+            : false;
+
+        if (enrollment && isActiveOrCompleted) {
+            await assignStudentIdIfMissing(user._id.toString(), session);
+
+            if (enrollment.enrollmentId) {
+                await ProfileService.createOrUpdateProfileAfterEnrollment(
+                    user._id.toString(),
+                    enrollment.enrollmentId,
+                    session
+                );
+            }
+
+            await session.commitTransaction();
+
+            return {
+                enrollment,
+                user,
+                batch,
+                wasActive: true,
+            };
+        }
+
+        const wasActive = false;
+
+        if (!enrollment) {
+            const batchNumber = (batch as any).batchNumber?.toString() || '6';
+            const courseSlug = (batch.courseId as any)?.slug || '';
+            const enrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+
+            const created = await EnrollmentModel.create(
+                [
+                    {
+                        userId: user._id,
+                        batchId: batch._id,
+                        status: EnrollmentStatus.Active,
+                        accessType: 'special',
+                        enrollmentId,
+                        enrolledAt: new Date(),
+                    },
+                ],
+                { session }
+            );
+
+            enrollment = created[0];
+        } else {
+            let shouldSave = false;
+
+            if (enrollment.accessType !== 'special') {
+                enrollment.accessType = 'special';
+                shouldSave = true;
+            }
+
+            if (!enrollment.enrollmentId) {
+                const batchNumber = (batch as any).batchNumber?.toString() || '6';
+                const courseSlug = (batch.courseId as any)?.slug || '';
+                enrollment.enrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+                shouldSave = true;
+            }
+
+            if (!wasActive) {
+                enrollment.status = EnrollmentStatus.Active;
+                enrollment.enrolledAt = new Date();
+                shouldSave = true;
+            }
+
+            if (shouldSave) {
+                await enrollment.save({ session });
+            }
+        }
+
+        await assignStudentIdIfMissing(user._id.toString(), session);
+
+        if (!wasActive) {
+            await BatchModel.findByIdAndUpdate(
+                batch._id,
+                { $inc: { currentEnrollment: 1 } },
+                { session }
+            );
+        }
+
+        if (enrollment.enrollmentId) {
+            await ProfileService.createOrUpdateProfileAfterEnrollment(
+                user._id.toString(),
+                enrollment.enrollmentId,
+                session
+            );
+        }
+
+        await session.commitTransaction();
+
+        if (!wasActive) {
+            await initializeModuleProgress(enrollment._id.toString(), batch._id.toString());
+        }
+
+        return {
+            enrollment,
+            user,
+            batch,
+            wasActive,
+        };
+    } catch (error) {
+        if (session.inTransaction()) {
+            await session.abortTransaction();
+        }
+        throw error;
+    } finally {
+        session.endSession();
+    }
+};
+
 const ensureStudentIdForUser = async (
     userId: string,
     session: mongoose.ClientSession
@@ -805,6 +1036,8 @@ export const EnrollmentService = {
     initiateEnrollment,
     // confirmEnrollment,
     enrollWithManualPayment,
+    grantAccessByEmail,
+    getSpecialAccessEnrollments,
     getUserEnrollments,
     getEnrollmentDetails,
     initializeModuleProgress,

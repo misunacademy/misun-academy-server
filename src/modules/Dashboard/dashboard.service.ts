@@ -327,6 +327,7 @@ const getStudentDashboard = async (userId: string) => {
         instructor: enrollment.batchId?.courseId?.instructor || null,
         batchTitle: enrollment.batchId?.title || 'Unknown Batch',
         isCertificateAvailable: enrollment.batchId?.courseId?.isCertificateAvailable ?? true,
+        accessType: enrollment.accessType || 'standard',
 
         batchNumber: enrollment.batchId?.batchNumber || '',
         enrolledAt: enrollment.createdAt,

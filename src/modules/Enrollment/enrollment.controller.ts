@@ -121,12 +121,37 @@ const getEnrollmentDetails = catchAsync(async (req: Request, res: Response) => {
 });
 
 /**
+ * Admin: Get special access enrollments
+ */
+const getSpecialAccessEnrollments = catchAsync(async (req: Request, res: Response) => {
+    const { page, limit, search } = req.query as {
+        page?: string;
+        limit?: string;
+        search?: string;
+    };
+
+    const result = await EnrollmentService.getSpecialAccessEnrollments({
+        page,
+        limit,
+        search,
+    });
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Special access enrollments retrieved successfully',
+        meta: result.meta,
+        data: result.data,
+    });
+});
+
+/**
  * Admin: Get all enrollments with filters
  */
 const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
     const { batchId, courseId, status, page = 1, limit = 10, search } = req.query;
 
-    console.log('Search params:', { batchId, courseId, status, page, limit, search });
+    // console.log('Search params:', { batchId, courseId, status, page, limit, search });
 
     // const EnrollmentModel = require('./enrollment.model').EnrollmentModel;
 
@@ -393,6 +418,55 @@ const updateEnrollmentStatus = catchAsync(async (req: Request, res: Response) =>
 });
 
 /**
+ * Admin: Grant course access by student email
+ */
+const grantAccessByEmail = catchAsync(async (req: Request, res: Response) => {
+    const { email, courseId, batchId } = req.body as {
+        email?: string;
+        courseId?: string;
+        batchId?: string;
+    };
+
+    if (!email || !courseId || !batchId) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'Email, courseId, and batchId are required'
+        );
+    }
+
+    const result = await EnrollmentService.grantAccessByEmail(email, courseId, batchId);
+    const batch = result.batch as any;
+    const course = (batch?.courseId as any) || {};
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: result.wasActive
+            ? 'Student already has access to this batch'
+            : 'Access granted successfully',
+        data: {
+            enrollmentId: result.enrollment.enrollmentId,
+            status: result.enrollment.status,
+            accessType: (result.enrollment as any).accessType,
+            user: {
+                id: result.user._id,
+                name: result.user.name,
+                email: result.user.email,
+                studentId: result.user.studentId,
+            },
+            course: {
+                id: course?._id?.toString() || courseId,
+                title: course?.title,
+            },
+            batch: {
+                id: batch?._id?.toString() || batchId,
+                title: batch?.title,
+            },
+        },
+    });
+});
+
+/**
  * Enroll with manual payment (PhonePay)
  * Creates enrollment awaiting admin verification
  */
@@ -455,6 +529,8 @@ export const EnrollmentController = {
     enrollWithManualPayment,
     getMyEnrollments,
     getEnrollmentDetails,
+    getSpecialAccessEnrollments,
     getAllEnrollments,
     updateEnrollmentStatus,
+    grantAccessByEmail,
 };

@@ -27,6 +27,11 @@ const enrollmentSchema = new Schema<IEnrollment>(
             enum: Object.values(EnrollmentStatus),
             default: EnrollmentStatus.Pending,
         },
+        accessType: {
+            type: String,
+            enum: ['standard', 'special'],
+            default: 'standard',
+        },
         enrolledAt: {
             type: Date,
             default: Date.now,
