@@ -4,6 +4,7 @@ import env from './config/env.js';
 import { logger } from './config/logger.js';
 import { connectDB } from './config/database.js';
 import { initializeEmailWorker } from './services/emailService.js';
+import { scheduleEmployeeBirthdayReminders } from './utils/employeeBirthdayReminderScheduler.js';
 
 let server: Server | null = null;
 let dbConnected = false;
@@ -19,6 +20,7 @@ async function initializeDatabase() {
             
             // Initialize email worker after DB connection
             initializeEmailWorker();
+            scheduleEmployeeBirthdayReminders();
         } catch (error) {
             console.error('❌ Error connecting to database:', error);
             throw error;

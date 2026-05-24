@@ -243,6 +243,66 @@ export const sendEmployeeSalaryPaidEmail = async (params: {
     });
 };
 
+export const sendEmployeeBirthdayReminderEmail = async (params: {
+    to: string;
+    employeeId: string;
+    employeeName: string;
+    employeeEmail: string;
+    employeePhone: string;
+    employeeAddress: string;
+    designation: string;
+    dateOfBirth: Date;
+    upcomingBirthday: Date;
+    daysUntil: number;
+    ageTurning: number;
+}) => {
+    const {
+        to,
+        employeeId,
+        employeeName,
+        employeeEmail,
+        employeePhone,
+        employeeAddress,
+        designation,
+        dateOfBirth,
+        upcomingBirthday,
+        daysUntil,
+        ageTurning,
+    } = params;
+
+    const dobText = dateOfBirth.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const upcomingText = upcomingBirthday.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+    const html = getEmailTemplate(`
+        <div class="header" style="background: #3b82f6;">
+            <h1>Employee Birthday Reminder</h1>
+        </div>
+        <div class="content">
+            <p>Hello Team,</p>
+            <p>An employee birthday is coming up in <strong>${daysUntil}</strong> days.</p>
+            <div class="highlight-box" style="border-color: #3b82f6;">
+                <p><strong>Name:</strong> ${employeeName}</p>
+                <p><strong>Email:</strong> ${employeeEmail}</p>
+                <p><strong>Phone:</strong> ${employeePhone}</p>
+                <p><strong>Address:</strong> ${employeeAddress}</p>
+                <p><strong>Designation:</strong> ${designation}</p>
+                <p><strong>Date of Birth:</strong> ${dobText}</p>
+                <p><strong>Birthday Date:</strong> ${upcomingText}</p>
+                <p><strong>Turning Age:</strong> ${ageTurning}</p>
+            </div>
+            <p>Please plan a birthday wish or celebration accordingly.</p>
+        </div>
+    `, '#3b82f6');
+
+    const eventId = `${employeeId}-${upcomingBirthday.toISOString().slice(0, 10)}`;
+
+    await queueEmail(to, 'Employee Birthday Reminder', html, {
+        eventType: 'employee_birthday_reminder',
+        eventId,
+        priority: 'normal',
+    });
+};
+
 
 // --- ACADEMIC ---
 

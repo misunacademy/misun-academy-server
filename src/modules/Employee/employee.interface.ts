@@ -14,6 +14,8 @@ export interface IEmployeeProfile {
     nidPhotoFrontUrl?: string; // Cloudinary URL of the uploaded NID front photo
     nidPhotoBackUrl?: string;  // Cloudinary URL of the uploaded NID back photo
     nidPhotoUrl?: string;      // Legacy single NID photo URL
+    birthdayReminderSentForYear?: number; // Year when birthday reminder was sent
+    birthdayReminderSentAt?: Date;        // Timestamp when reminder was sent
 }
 
 export interface IEmployeeProfileDocument extends IEmployeeProfile, Document {}

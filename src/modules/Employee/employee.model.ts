@@ -19,6 +19,8 @@ const employeeProfileSchema = new Schema<IEmployeeProfileDocument>(
         nidPhotoFrontUrl: { type: String },
         nidPhotoBackUrl:  { type: String },
         nidPhotoUrl: { type: String },
+        birthdayReminderSentForYear: { type: Number },
+        birthdayReminderSentAt: { type: Date },
     },
     { timestamps: true }
 );
