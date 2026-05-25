@@ -42,7 +42,7 @@ export const updateProfileSchema = z.object({
     industry: z.string().optional(),
     experience: z.enum(['0-1', '1-3', '3-5', '5-10', '10+']).optional(),
     company: z.string().optional(),
-    linkedinUrl: z.string().url().optional(),
+    linkedinUrl: z.string().optional(),
     education: z.array(educationZodSchema).optional(),
     skillLevel: z.enum(['beginner', 'intermediate', 'advanced', 'expert']).optional(),
     learningGoals: z.string().optional(),

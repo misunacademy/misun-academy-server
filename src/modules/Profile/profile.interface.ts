@@ -14,7 +14,7 @@ export interface IEducation {
 export interface IProfile {
   user: Types.ObjectId;
   // Personal Information
-  phone?: string;
+  wpnumber?: string;
   bio?: string;
   address?: string;
   dateOfBirth?: Date;

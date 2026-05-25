@@ -45,7 +45,7 @@ app.use(cors({
         env.MA_FRONTEND_URL!,
         env.EP_FRONTEND_URL!,
         'http://localhost:3000', // Fallback for development
-        'http://localhost:3001'
+        'http://localhost:3001',
     ].filter(Boolean),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

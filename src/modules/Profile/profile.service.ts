@@ -98,14 +98,14 @@ const getProfile = async (userId: string) => {
 };
 
 const updateProfile = async (userId: string, updateData: any) => {
-  const { avatar, name, enrollments, ...profileData } = updateData;
+  const { avatar, name, phone, address, image, enrollments, ...profileData } = updateData;
   const enrollmentRefs = toEnrollmentRefs(enrollments);
 
   // Update user model if avatar or name is provided
-  if (avatar || name) {
+  if (avatar || name || image || phone || address) {
     await UserModel.findOneAndUpdate(
       { _id: userId },
-      { $set: { ...(avatar && { image: avatar }), ...(name && { name }) } },
+      { $set: { ...(avatar && { image: avatar }), ...(name && { name }), ...(image && { image }), ...(phone && { phone }), ...(address && { address }) } },
       { new: true, runValidators: true }
     );
   }

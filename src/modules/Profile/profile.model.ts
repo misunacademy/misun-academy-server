@@ -28,7 +28,7 @@ const profileSchema = new Schema<IProfile>(
     },
 
     // Personal Information
-    phone: { type: String },
+    wpnumber: { type: String },
     bio: { type: String },
     address: { type: String },
     dateOfBirth: { type: Date },
