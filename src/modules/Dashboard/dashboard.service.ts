@@ -118,9 +118,24 @@ const getDashboardMetaData = async (courseId?: string) => {
         },
         { $unwind: "$batch" },
         {
+            $lookup: {
+                from: "courses",
+                localField: "batch.courseId",
+                foreignField: "_id",
+                as: "course",
+            },
+        },
+        {
+            $unwind: {
+                path: "$course",
+                preserveNullAndEmptyArrays: true,
+            },
+        },
+        {
             $group: {
                 _id: "$batch._id",
                 batchTitle: { $first: "$batch.title" },
+                courseTitle: { $first: "$course.title" },
                 batchNumber: {
                     $first: {
                         $concat: ["Batch #", { $toString: "$batch.batchNumber" }]
@@ -171,6 +186,7 @@ const getDashboardMetaData = async (courseId?: string) => {
         batchWiseIncome: batchWiseIncome.map((b: any) => ({
             batchId: b._id,
             batchTitle: b.batchTitle,
+            courseTitle: b.courseTitle,
             batchNumber: b.batchNumber,
             totalIncome: b.totalIncome,
             totalEnrollments: b.totalEnrollments,
