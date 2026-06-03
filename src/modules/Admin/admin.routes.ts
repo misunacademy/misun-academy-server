@@ -1,6 +1,6 @@
 import express from 'express';
 import validateRequest from '../../middlewares/validateRequest.js';
-import { loginValidationSchema, sendNewsUpdateSchema } from './admin.validation.js';
+import { loginValidationSchema, sendNewsUpdateSchema, sendBatchProgressReminderSchema, sendBatchIncompleteReminderSchema } from './admin.validation.js';
 import { AdminAuthController } from './admin.controller.js';
 import { requireAuth, requireAdmin, requireSuperAdmin } from '../../middlewares/betterAuth.js';
 
@@ -71,6 +71,22 @@ router.post(
     requireAdmin,
     validateRequest(sendNewsUpdateSchema),
     AdminAuthController.sendNewsUpdate
+);
+
+router.post(
+    '/send-batch-progress-reminder',
+    requireAuth,
+    requireAdmin,
+    validateRequest(sendBatchProgressReminderSchema),
+    AdminAuthController.sendRunningBatchProgressReminder
+);
+
+router.post(
+    '/send-batch-incomplete-reminder',
+    requireAuth,
+    requireAdmin,
+    validateRequest(sendBatchIncompleteReminderSchema),
+    AdminAuthController.sendCompletedBatchIncompleteReminder
 );
 
 // Get all active instructor profiles (for batch assignment)

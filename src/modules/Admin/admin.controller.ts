@@ -109,6 +109,30 @@ const sendNewsUpdate = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+const sendRunningBatchProgressReminder = catchAsync(async (req: Request, res: Response) => {
+    const { courseId, batchId } = req.body;
+    const result = await AdminService.sendRunningBatchProgressReminder(courseId, batchId);
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: `Batch progress reminder emails queued for ${result.count} students`,
+        data: result,
+    });
+});
+
+const sendCompletedBatchIncompleteReminder = catchAsync(async (req: Request, res: Response) => {
+    const { courseId, batchId } = req.body;
+    const result = await AdminService.sendCompletedBatchIncompleteReminder(courseId, batchId);
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: `Batch completion reminder emails queued for ${result.count} students`,
+        data: result,
+    });
+});
+
 const getAllInstructors = catchAsync(async (req: Request, res: Response) => {
     const unassignedOnly = req.query.unassignedOnly === 'true';
     const instructors = await AdminService.getAllInstructors({ unassignedOnly });
@@ -131,5 +155,7 @@ export const AdminAuthController = {
     deleteUser,
     sendEnrollmentReminder,
     sendNewsUpdate,
+    sendRunningBatchProgressReminder,
+    sendCompletedBatchIncompleteReminder,
     getAllInstructors,
 };

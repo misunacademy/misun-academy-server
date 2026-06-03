@@ -336,6 +336,7 @@ const getStudentDashboard = async (userId: string) => {
     const enrolledCourses = enrollments.map((enrollment: any) => ({
         id: enrollment._id,
         courseId: enrollment.batchId?.courseId?._id || enrollment.batchId?.courseId,
+        batchId: enrollment.batchId?._id,
         courseTitle: enrollment.batchId?.courseId?.title || 'Unknown Course',
         courseSlug: enrollment.batchId?.courseId?.slug || '',
         thumbnailImage: enrollment.batchId?.courseId?.thumbnailImage || '',
@@ -344,7 +345,6 @@ const getStudentDashboard = async (userId: string) => {
         batchTitle: enrollment.batchId?.title || 'Unknown Batch',
         isCertificateAvailable: enrollment.batchId?.courseId?.isCertificateAvailable ?? true,
         accessType: enrollment.accessType || 'standard',
-
         batchNumber: enrollment.batchId?.batchNumber || '',
         enrolledAt: enrollment.createdAt,
         status: enrollment.status,

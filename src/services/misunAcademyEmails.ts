@@ -234,11 +234,12 @@ export const sendEmployeeSalaryPaidEmail = async (params: {
 
     const html = getEmailTemplate(`
         <div class="header" style="background: #10b981;">
-            <h1>Salary Paid</h1>
+            <h1>আপনার স্যালারি এসেছে 🎉</h1>
         </div>
         <div class="content">
-            <p>Hi <strong>${name}</strong>,</p>
-            <p>Your salary has been paid, please check it out. Here are the details:</p>
+            <p>হ্যালো <strong>${name}</strong>,</p>
+            <p>ভালো খবর! আপনার স্যালারি সফলভাবে প্রসেস হয়েছে। নিচে সংক্ষিপ্ত ডিটেইলস দিলাম:</p>
+            <p>আপনার দারুণ কাজের জন্য অনেক ধন্যবাদ! 🎉 ব্যাংক/ওয়ালেটে ক্রেডিট হতে সামান্য সময় লাগতে পারে—কোনো অমিল মনে হলে আমাদের জানাবেন, সমাধান করার চেষ্টা করবো।</p>
             <div class="highlight-box">
                 <p><strong>Period:</strong> ${period}</p>
                 ${jobTitle ? `<p><strong>Designation:</strong> ${jobTitle}</p>` : ''}
@@ -248,11 +249,11 @@ export const sendEmployeeSalaryPaidEmail = async (params: {
                 <p><strong>Payment Date:</strong> ${formattedPaymentDate}</p>
                 <p><strong>Status:</strong> <span style="color:#10b981; font-weight:bold;">PAID</span></p>
             </div>
-            <p>If you have any questions, please contact us.</p>
+            <p>কোনো প্রশ্ন থাকলে জানাবেন—আমরা আছি পাশেই।</p>
         </div>
     `, '#10b981');
 
-    await queueEmail(email, 'Salary Paid', html, {
+    await queueEmail(email, 'আপনার স্যালারি এসেছে 🎉', html, {
         eventType: 'salary_paid',
         eventId: salaryId,
         priority: 'normal',
@@ -542,5 +543,75 @@ export const sendNewsUpdateEmail = async (email: string, name: string, subject: 
     await queueEmail(email, subject, html, {
         priority: 'normal',
         eventType: 'news_update'
+    });
+};
+
+/**
+ * Send progress reminder to running batch students below threshold
+ */
+export const sendRunningBatchProgressReminderEmail = async (
+    email: string,
+    name: string,
+    courseName: string,
+    batchName: string,
+    progress: number,
+) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+            <h1>কোর্সে তোমার পাশে থাকতে চাই</h1>
+        </div>
+        <div class="content">
+            <p>প্রিয় শিক্ষার্থী,</p>
+            <p>তোমার ব্যাচের প্রগতি একটু ধীরে চলছে—চিন্তা করো না, এটা স্বাভাবিক। আমরা চাই তুমি নিজের গতিতে আবার ধারাবাহিক হও।</p>
+            <p>এই সপ্তাহে ছোট একটি লক্ষ্য সেট করো—প্রতিদিন ২০–৩০ মিনিট ভিডিও/প্র্যাকটিস। অল্প অল্প করে এগোলেই দ্রুত কভার হবে।</p>
+            <p>কোনো জটিলতা বা প্রশ্ন থাকলে আমাদের জানাও—আমরা পাশে আছি।</p>
+
+            <div class="highlight-box" style="border-color: #f59e0b;">
+                <p><strong>স্টুডেন্ট:</strong> ${name || 'Student'}</p>
+                <p><strong>কোর্স:</strong> ${courseName}</p>
+                <p><strong>ব্যাচ:</strong> ${batchName}</p>
+                <p><strong>বর্তমান প্রগতি:</strong> ${progress}%</p>
+            </div>
+        </div>
+    `, "#f59e0b");
+
+    await queueEmail(email, 'কোর্সে তোমার পাশে থাকতে চাই', html, {
+        priority: 'normal',
+        eventType: 'batch_progress_reminder',
+    });
+};
+
+/**
+ * Send completion reminder to students in completed batches with incomplete progress
+ */
+export const sendCompletedBatchIncompleteReminderEmail = async (
+    email: string,
+    name: string,
+    courseName: string,
+    batchName: string,
+    progress: number,
+) => {
+    const html = getEmailTemplate(`
+        <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
+            <h1>তোমার শেখার যাত্রা কি থেমে গেছে?</h1>
+        </div>
+        <div class="content">
+            <p>প্রিয় শিক্ষার্থী,</p>
+            <p>${batchName} ব্যাচ শেষ হলেও তোমার কোর্স এখনো অসম্পূর্ণ। তোমার সব কনটেন্ট ও রিসোর্স এখনও আছে।</p>
+            <p>চাই তুমি নিজের সময় অনুযায়ী ধাপে ধাপে শেষ করো—শেষ করলে শেখার আত্মবিশ্বাস আরও বাড়বে।</p>
+            <p>আজই একটি মডিউল বেছে নাও এবং ছোট করে শুরু করো।</p>
+
+            <div class="highlight-box" style="border-color: #3b82f6;">
+                <p><strong>স্টুডেন্ট:</strong> ${name || 'Student'}</p>
+                <p><strong>কোর্স:</strong> ${courseName}</p>
+                <p><strong>ব্যাচ:</strong> ${batchName}</p>
+                <p><strong>বর্তমান প্রগতি:</strong> ${progress}%</p>
+            </div>
+        </div>
+    `, "#3b82f6");
+
+    await queueEmail(email, 'তোমার শেখার যাত্রা কি থেমে গেছে?', html, {
+        priority: 'normal',
+        eventType: 'batch_incomplete_reminder',
     });
 };

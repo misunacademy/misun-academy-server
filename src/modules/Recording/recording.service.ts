@@ -97,20 +97,19 @@ const getBatchRecordings = async (batchId: string) => {
 
 const getStudentRecordings = async (userId: string) => {
     // Get student's enrollments
-    // const { EnrollmentModel } = require('../Enrollment/enrollment.model');
     const enrollments = await EnrollmentModel.find({
         userId: userId,
         status: 'active',
     }).select('batchId');
 
-    console.log('Student Enrollments:', {
-        userId,
-        enrollmentCount: enrollments.length,
-        enrollments: enrollments.map((e: any) => ({
-            batchId: e.batchId,
-            status: e.status
-        }))
-    });
+    // console.log('Student Enrollments:', {
+    //     userId,
+    //     enrollmentCount: enrollments.length,
+    //     enrollments: enrollments.map((e: any) => ({
+    //         batchId: e.batchId,
+    //         status: e.status
+    //     }))
+    // });
 
     const batchIds = enrollments.map((e: any) => e.batchId);
 

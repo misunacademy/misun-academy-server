@@ -656,8 +656,6 @@ const getMyPayments = async (userId: string) => {
  * Initiate SSLCommerz payment
  */
 const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) => {
-    // const SSLCommerzPayment = require('sslcommerz-lts');
-    // const config = require('../../config/env.js').default;
 
     const enrollment = await EnrollmentModel.findOne({ enrollmentId, userId })
         .populate('batchId')
@@ -678,6 +676,11 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
     const batch = enrollment.batchId as any;
     const user = enrollment.userId as any;
 
+    // const customerPhone = (user?.phone || '').toString().trim();
+    // if (!customerPhone) {
+    //     throw new ApiError(StatusCodes.BAD_REQUEST, 'Phone number is required for SSLCommerz payments');
+    // }
+
     const store_id = config.SSL_STORE_ID;
     const store_passwd = config.SSL_STORE_PASSWORD;
     const is_live = config.SSL_IS_LIVE === 'true';
@@ -694,14 +697,14 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
     const paymentData = {
         store_id: config.SSL_STORE_ID,
         store_passwd: config.SSL_STORE_PASSWORD,
-        total_amount: batch.price,
+        total_amount: Number(batch.price),
         currency: "BDT",
         tran_id: transactionId,
         success_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}`,
         fail_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=failed`,
         cancel_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=cancel`,
         ipn_url: `${config.SERVER_URL}/api/v1/payments/webhook`,
-        product_name: `Graphics Design Course - ${batch.title}`,
+        product_name: getCourseBatchLabel(batch),
         cus_name: user.name,
         cus_email: user.email,
         cus_add1: user.address || 'N/A',
@@ -726,31 +729,7 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         value_b: userId,
         value_c: batch._id.toString(),
     };
-    // const paymentData = {
-    //     total_amount: batch.price,
-    //     currency: batch.currency || 'BDT',
-    //     tran_id: transactionId, // Use generated transaction ID, not enrollment ID
-    //     success_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=success`,
-    //     fail_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=failed`,
-    //     cancel_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=cancel`,
-    //     ipn_url: `${config.SERVER_URL}/api/v1/payments/webhook`,
-    //     product_name: batch.title,
-    //     product_category: 'Education',
-    //     product_profile: 'general',
-    //     cus_name: user.name,
-    //     cus_email: user.email,
-    //     cus_add1: 'N/A',
-    //     cus_city: 'N/A',
-    //     cus_state: 'N/A',
-    //     cus_postcode: 'N/A',
-    //     cus_country: 'Bangladesh',
-    //     cus_phone: user.phoneNumber || 'N/A',
-    //     shipping_method: 'NO',
-    //     multi_card_name: 'mastercard,visacard,amexcard',
-    //     value_a: enrollmentId, // Store enrollment ID for reference
-    //     value_b: userId,
-    //     value_c: batch._id.toString(),
-    // };
+
 
     // Reuse a single payment record per enrollment and rotate transaction ID per retry.
     await PaymentModel.findOneAndUpdate(

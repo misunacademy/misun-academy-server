@@ -5,11 +5,15 @@ import { UserModel } from "../User/user.model.js";
 import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
 import { BatchModel } from "../Batch/batch.model.js";
 import { CourseModel } from "../Course/course.model.js";
-import { EnrollmentStatus, UserStatus } from "../../types/common.js";
+import { ModuleModel } from "../Module/module.model.js";
+import { LessonProgressModel } from "../Progress/lessonProgress.model.js";
+import { ModuleProgressModel } from "../Progress/moduleProgress.model.js";
+import { BatchStatus, EnrollmentStatus, LessonProgressStatus, UserStatus } from "../../types/common.js";
 import { generateToken } from "../../utils/jwt.js";
 import { getAuth } from "../../config/betterAuth.js";
 import mongoose from "mongoose";
 import { sendEnrollmentReminderEmail, sendNewsUpdateEmail } from "../../services/misunAcademyEmails.js";
+import { sendCourseCompletedBatchIncompleteReminderEmail, sendCourseRunningBatchProgressReminderEmail } from "../../services/courseEmailRouter.js";
 
 const login = async (email: string, password: string) => {
     const admin = await AdminModel.findOne({ email });
@@ -366,6 +370,190 @@ const sendNewsUpdate = async (subject: string, message: string) => {
     return { count: enrolledUsers.length };
 };
 
+const resolveBatchContext = async (courseId: string, batchId: string) => {
+    if (!courseId || !batchId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Course ID and Batch ID are required');
+    }
+
+    const batch = await BatchModel.findById(batchId)
+        .populate({ path: 'courseId', select: 'title slug' })
+        .lean();
+
+    if (!batch) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
+    }
+
+    const course = (batch as any).courseId;
+    if (!course?._id) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Course not found for batch');
+    }
+
+    if (courseId && course._id.toString() !== courseId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Batch does not belong to the provided course');
+    }
+
+    return { batch, course };
+};
+
+const getEnrollmentProgressSnapshot = async (
+    enrollmentIds: mongoose.Types.ObjectId[],
+    courseId: mongoose.Types.ObjectId,
+    batchId: mongoose.Types.ObjectId,
+) => {
+    const totalModules = await ModuleModel.countDocuments({ courseId, batchId });
+    const progressRecords = enrollmentIds.length
+        ? await ModuleProgressModel.find(
+            { enrollmentId: { $in: enrollmentIds } },
+            { enrollmentId: 1, completionPercentage: 1 }
+        ).lean()
+        : [];
+
+    const completionSumByEnrollment: Record<string, number> = {};
+    for (const record of progressRecords as any[]) {
+        const key = record.enrollmentId?.toString();
+        if (!key) continue;
+        completionSumByEnrollment[key] = (completionSumByEnrollment[key] || 0) + (record.completionPercentage || 0);
+    }
+
+    return { totalModules, completionSumByEnrollment };
+};
+
+const sendRunningBatchProgressReminder = async (courseId: string, batchId: string) => {
+    const { batch, course } = await resolveBatchContext(courseId, batchId);
+
+    const now = new Date();
+    const isRunning = batch.status === BatchStatus.Running
+        || (batch.startDate && batch.endDate && batch.startDate <= now && batch.endDate >= now);
+
+    if (!isRunning) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Batch is not running');
+    }
+
+    const enrollments = await EnrollmentModel.find({
+        batchId: batch._id,
+        status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] },
+    })
+        .populate({ path: 'userId', select: 'name email status emailVerified' })
+        .lean();
+
+    const eligibleEnrollments = enrollments.filter((enrollment: any) => {
+        const user = enrollment.userId as any;
+        return user?.email && user?.status === UserStatus.Active && user?.emailVerified === true;
+    });
+
+    if (eligibleEnrollments.length === 0) {
+        return { count: 0 };
+    }
+
+    const enrollmentIds = eligibleEnrollments.map((enrollment: any) => enrollment._id);
+    const { totalModules, completionSumByEnrollment } = await getEnrollmentProgressSnapshot(
+        enrollmentIds,
+        course._id,
+        batch._id,
+    );
+
+    const context = { courseName: course.title, courseSlug: course.slug };
+    const sendTasks = eligibleEnrollments
+        .map((enrollment: any) => {
+            const user = enrollment.userId as any;
+            const key = enrollment._id?.toString();
+            const completionSum = key ? (completionSumByEnrollment[key] || 0) : 0;
+            const overallProgress = totalModules > 0
+                ? Math.round(completionSum / totalModules)
+                : 0;
+
+            if (overallProgress >= 50) {
+                return null;
+            }
+
+            return sendCourseRunningBatchProgressReminderEmail(
+                context,
+                user.email,
+                user.name || 'Student',
+                course.title,
+                batch.title,
+                overallProgress,
+            );
+        })
+        .filter(Boolean) as Promise<void>[];
+
+    if (sendTasks.length > 0) {
+        await Promise.all(sendTasks);
+    }
+
+    return { count: sendTasks.length };
+};
+
+const sendCompletedBatchIncompleteReminder = async (courseId: string, batchId: string) => {
+    const { batch, course } = await resolveBatchContext(courseId, batchId);
+
+    const now = new Date();
+    const isCompleted = batch.status === BatchStatus.Completed
+        || (batch.endDate && batch.endDate < now);
+
+    if (!isCompleted) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Batch is not completed yet');
+    }
+
+    const enrollments = await EnrollmentModel.find({
+        batchId: batch._id,
+        status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] },
+    })
+        .populate({ path: 'userId', select: 'name email status emailVerified' })
+        .lean();
+
+    const eligibleEnrollments = enrollments.filter((enrollment: any) => {
+        const user = enrollment.userId as any;
+        return user?.email && user?.status === UserStatus.Active && user?.emailVerified === true;
+    });
+
+    if (eligibleEnrollments.length === 0) {
+        return { count: 0 };
+    }
+
+    const enrollmentIds = eligibleEnrollments.map((enrollment: any) => enrollment._id);
+    const [progressSnapshot, progressedEnrollmentIds] = await Promise.all([
+        getEnrollmentProgressSnapshot(enrollmentIds, course._id, batch._id),
+        LessonProgressModel.distinct('enrollmentId', {
+            enrollmentId: { $in: enrollmentIds },
+            status: { $ne: LessonProgressStatus.NotStarted },
+        }),
+    ]);
+
+    const progressedSet = new Set((progressedEnrollmentIds as any[]).map((id) => id.toString()));
+    const context = { courseName: course.title, courseSlug: course.slug };
+    const sendTasks = eligibleEnrollments
+        .map((enrollment: any) => {
+            const user = enrollment.userId as any;
+            const key = enrollment._id?.toString();
+            const completionSum = key ? (progressSnapshot.completionSumByEnrollment[key] || 0) : 0;
+            const overallProgress = progressSnapshot.totalModules > 0
+                ? Math.round(completionSum / progressSnapshot.totalModules)
+                : 0;
+            const hasProgress = key ? progressedSet.has(key) : false;
+
+            if (overallProgress >= 100 && hasProgress) {
+                return null;
+            }
+
+            return sendCourseCompletedBatchIncompleteReminderEmail(
+                context,
+                user.email,
+                user.name || 'Student',
+                course.title,
+                batch.title,
+                overallProgress,
+            );
+        })
+        .filter(Boolean) as Promise<void>[];
+
+    if (sendTasks.length > 0) {
+        await Promise.all(sendTasks);
+    }
+
+    return { count: sendTasks.length };
+};
+
 const getAllInstructors = async (opts: { unassignedOnly?: boolean } = {}) => {
     const query: Record<string, any> = { role: 'instructor' };
 
@@ -392,5 +580,7 @@ export const AdminService = {
     deleteUser,
     sendEnrollmentReminder,
     sendNewsUpdate,
+    sendRunningBatchProgressReminder,
+    sendCompletedBatchIncompleteReminder,
     getAllInstructors,
 };

@@ -1,17 +1,21 @@
 import {
     sendBatchStartReminderEmail as sendMisunBatchStartReminderEmail,
+    sendCompletedBatchIncompleteReminderEmail as sendMisunCompletedBatchIncompleteReminderEmail,
     sendEnrollmentConfirmationEmail as sendMisunEnrollmentConfirmationEmail,
     sendPaymentFailedEmail as sendMisunPaymentFailedEmail,
     sendPaymentReviewEmail as sendMisunPaymentReviewEmail,
     sendPaymentSuccessEmail as sendMisunPaymentSuccessEmail,
+    sendRunningBatchProgressReminderEmail as sendMisunRunningBatchProgressReminderEmail,
     sendWaitingPaymentVerificationEmail as sendMisunWaitingPaymentVerificationEmail,
 } from './misunAcademyEmails.js';
 import {
     sendBatchStartReminderEmail as sendEsunBatchStartReminderEmail,
+    sendCompletedBatchIncompleteReminderEmail as sendEsunCompletedBatchIncompleteReminderEmail,
     sendEnrollmentConfirmationEmail as sendEsunEnrollmentConfirmationEmail,
     sendPaymentFailedEmail as sendEsunPaymentFailedEmail,
     sendPaymentReviewEmail as sendEsunPaymentReviewEmail,
     sendPaymentSuccessEmail as sendEsunPaymentSuccessEmail,
+    sendRunningBatchProgressReminderEmail as sendEsunRunningBatchProgressReminderEmail,
     sendWaitingPaymentVerificationEmail as sendEsunWaitingPaymentVerificationEmail,
 } from './esunPointEmails.js';
 
@@ -108,4 +112,34 @@ export const sendCourseWaitingPaymentVerificationEmail = async (
     }
 
     return sendMisunWaitingPaymentVerificationEmail(student, courseName, transactionId);
+};
+
+export const sendCourseRunningBatchProgressReminderEmail = async (
+    context: CourseEmailContext,
+    email: string,
+    name: string,
+    courseName: string,
+    batchName: string,
+    progress: number,
+) => {
+    if (isEnglishCourse(context)) {
+        return sendEsunRunningBatchProgressReminderEmail(email, name, courseName, batchName, progress);
+    }
+
+    return sendMisunRunningBatchProgressReminderEmail(email, name, courseName, batchName, progress);
+};
+
+export const sendCourseCompletedBatchIncompleteReminderEmail = async (
+    context: CourseEmailContext,
+    email: string,
+    name: string,
+    courseName: string,
+    batchName: string,
+    progress: number,
+) => {
+    if (isEnglishCourse(context)) {
+        return sendEsunCompletedBatchIncompleteReminderEmail(email, name, courseName, batchName, progress);
+    }
+
+    return sendMisunCompletedBatchIncompleteReminderEmail(email, name, courseName, batchName, progress);
 };
