@@ -19,6 +19,8 @@ router.get('/admin/employees',             requireAuth, requireAdmin, EmployeeCo
 router.get('/admin/salaries',              requireAuth, requireAdmin, EmployeeController.getAllSalariesAdmin);
 router.post('/admin/salaries',             requireAuth, requireAdmin, EmployeeController.addSalary);
 router.patch('/admin/salaries/:id/status', requireAuth, requireAdmin, EmployeeController.updateSalaryStatus);
+router.put('/admin/salaries/:id',          requireAuth, requireAdmin, EmployeeController.updateSalary);
+router.delete('/admin/salaries/:id',       requireAuth, requireAdmin, EmployeeController.deleteSalary);
 
 // Leave management
 router.get('/admin/leave',                 requireAuth, requireAdmin, EmployeeController.getAllLeaveRequestsAdmin);

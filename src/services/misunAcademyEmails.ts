@@ -1,4 +1,3 @@
-
 // ============================================================================
 // 4. TEMPLATE ENGINE
 // ============================================================================
@@ -8,22 +7,22 @@ import { SettingsService } from "../modules/Settings/settings.service.js";
 import { queueEmail } from "./emailService.js";
 
 const getDisplayCurrency = (currency: string, paymentMethod?: string) => {
-    return paymentMethod === 'PhonePay' ? 'INR' : currency;
+  return paymentMethod === "PhonePay" ? "INR" : currency;
 };
 
 const resolveGroupLinks = async (courseName: string) => {
-    const groupLinks = await SettingsService.getSocialGroupLinks();
-    const isEnglishCourse = /english/i.test(courseName);
+  const groupLinks = await SettingsService.getSocialGroupLinks();
+  const isEnglishCourse = /english/i.test(courseName);
 
-    return isEnglishCourse
-        ? {
-            facebookGroupLink: groupLinks.epFacebookGroupLink,
-            whatsappGroupLink: groupLinks.epWhatsappGroupLink,
-        }
-        : {
-            facebookGroupLink: groupLinks.maFacebookGroupLink,
-            whatsappGroupLink: groupLinks.maWhatsappGroupLink,
-        };
+  return isEnglishCourse
+    ? {
+        facebookGroupLink: groupLinks.epFacebookGroupLink,
+        whatsappGroupLink: groupLinks.epWhatsappGroupLink,
+      }
+    : {
+        facebookGroupLink: groupLinks.maFacebookGroupLink,
+        whatsappGroupLink: groupLinks.maWhatsappGroupLink,
+      };
 };
 
 const getEmailTemplate = (content: string, headerColor: string = "#10b981") => `
@@ -63,8 +62,8 @@ const getEmailTemplate = (content: string, headerColor: string = "#10b981") => `
             <p><a href="mailto:misunacademybd@gmail.com">misunacademybd@gmail.com</a></p>
             <div class="footer-social">
                 <a class="icon-facebook" href="${env.MA_EMAIL_SOCIAL_FACEBOOK}" target="_blank" rel="noopener noreferrer" title="Facebook" aria-label="Facebook">f</a>
-                <a class="icon-youtube" href="${env.MA_EMAIL_SOCIAL_YOUTUBE || 'https://www.youtube.com/@misunacademybd'}" target="_blank" rel="noopener noreferrer" title="YouTube" aria-label="YouTube">▶️</a>
-                <a class="icon-linkedin" href="${env.MA_EMAIL_SOCIAL_LINKEDIN || 'https://www.linkedin.com/company/misun-academy'}" target="_blank" rel="noopener noreferrer" title="LinkedIn" aria-label="LinkedIn">in</a>
+                <a class="icon-youtube" href="${env.MA_EMAIL_SOCIAL_YOUTUBE || "https://www.youtube.com/@misunacademybd"}" target="_blank" rel="noopener noreferrer" title="YouTube" aria-label="YouTube">▶️</a>
+                <a class="icon-linkedin" href="${env.MA_EMAIL_SOCIAL_LINKEDIN || "https://www.linkedin.com/company/misun-academy"}" target="_blank" rel="noopener noreferrer" title="LinkedIn" aria-label="LinkedIn">in</a>
             </div>
             <p>© ${new Date().getFullYear()} Misun Academy. All rights reserved.</p>
         </div>
@@ -79,9 +78,14 @@ const getEmailTemplate = (content: string, headerColor: string = "#10b981") => `
 
 // --- AUTHENTICATION ---
 
-export const sendVerificationEmail = async (email: string, name: string, token: string) => {
-    const link = `${env.MA_FRONTEND_URL}/verify-email?token=${token}`;
-    const html = getEmailTemplate(`
+export const sendVerificationEmail = async (
+  email: string,
+  name: string,
+  token: string,
+) => {
+  const link = `${env.MA_FRONTEND_URL}/verify-email?token=${token}`;
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
             <h1>Verify Your Email</h1>
         </div>
@@ -93,25 +97,35 @@ export const sendVerificationEmail = async (email: string, name: string, token: 
             </div>
             <p style="font-size: 12px;">Link expires in 24 hours.</p>
         </div>
-    `, "#10b981");
+    `,
+    "#10b981",
+  );
 
-    await queueEmail(email, 'Verify Your Email', html, {
-        priority: 'high',
-        eventType: 'verify_email',
-        eventId: token
-    });
+  await queueEmail(email, "Verify Your Email", html, {
+    priority: "high",
+    eventType: "verify_email",
+    eventId: token,
+  });
 };
 
-export const sendPasswordResetEmail = async (email: string, name: string, token: string) => {
-    console.log('[EmailService] 📧 Preparing password reset email');
-    console.log('[EmailService] Recipient:', email);
-    console.log('[EmailService] Name:', name);
-    console.log('[EmailService] Token (first 15):', token.substring(0, 15) + '...');
+export const sendPasswordResetEmail = async (
+  email: string,
+  name: string,
+  token: string,
+) => {
+  console.log("[EmailService] 📧 Preparing password reset email");
+  console.log("[EmailService] Recipient:", email);
+  console.log("[EmailService] Name:", name);
+  console.log(
+    "[EmailService] Token (first 15):",
+    token.substring(0, 15) + "...",
+  );
 
-    const link = `${env.MA_FRONTEND_URL}/reset-password?token=${token}`;
-    console.log('[EmailService] Reset link:', link);
+  const link = `${env.MA_FRONTEND_URL}/reset-password?token=${token}`;
+  console.log("[EmailService] Reset link:", link);
 
-    const html = getEmailTemplate(`
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);">
             <h1>Reset Password</h1>
         </div>
@@ -125,30 +139,33 @@ export const sendPasswordResetEmail = async (email: string, name: string, token:
                 <p>If you did not request this, please ignore this email.</p>
             </div>
         </div>
-    `, "#ef4444");
+    `,
+    "#ef4444",
+  );
 
-    console.log('[EmailService] Queueing email...');
-    await queueEmail(email, 'Reset Password Request', html, {
-        priority: 'high',
-        eventType: 'reset_pass',
-        eventId: token
-    });
-    console.log('[EmailService] ✅ Email queued successfully');
+  console.log("[EmailService] Queueing email...");
+  await queueEmail(email, "Reset Password Request", html, {
+    priority: "high",
+    eventType: "reset_pass",
+    eventId: token,
+  });
+  console.log("[EmailService] ✅ Email queued successfully");
 };
 
 // --- PAYMENTS & ENROLLMENT ---
 
 export const sendPaymentSuccessEmail = async (
-    email: string,
-    name: string,
-    amount: number,
-    currency: string,
-    courseName: string,
-    transactionId: string,
-    paymentMethod?: string,
+  email: string,
+  name: string,
+  amount: number,
+  currency: string,
+  courseName: string,
+  transactionId: string,
+  paymentMethod?: string,
 ) => {
-    const displayCurrency = getDisplayCurrency(currency, paymentMethod);
-    const html = getEmailTemplate(`
+  const displayCurrency = getDisplayCurrency(currency, paymentMethod);
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: #10b981;">
             <h1>Payment Successful!</h1>
         </div>
@@ -167,13 +184,23 @@ export const sendPaymentSuccessEmail = async (
                 <a href="${env.MA_FRONTEND_URL}/my-classes" class="button">Go to Dashboard</a>
             </div>
         </div>
-    `, "#10b981");
+    `,
+    "#10b981",
+  );
 
-    await queueEmail(email, 'Payment Receipt', html, { eventType: 'payment_success', eventId: transactionId });
+  await queueEmail(email, "Payment Receipt", html, {
+    eventType: "payment_success",
+    eventId: transactionId,
+  });
 };
 
-export const sendPaymentReviewEmail = async (student: any, courseName: string, transactionId: string) => {
-    const html = getEmailTemplate(`
+export const sendPaymentReviewEmail = async (
+  student: any,
+  courseName: string,
+  transactionId: string,
+) => {
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: #f59e0b;">
             <h1>Payment Under Review</h1>
         </div>
@@ -185,13 +212,23 @@ export const sendPaymentReviewEmail = async (student: any, courseName: string, t
                 <p>Please allow 24 hours for manual verification.</p>
             </div>
         </div>
-    `, "#f59e0b");
+    `,
+    "#f59e0b",
+  );
 
-    await queueEmail(student.email, 'Payment Under Review', html, { eventType: 'payment_review', eventId: transactionId });
+  await queueEmail(student.email, "Payment Under Review", html, {
+    eventType: "payment_review",
+    eventId: transactionId,
+  });
 };
 
-export const sendPaymentFailedEmail = async (student: any, courseName: string, reason: string) => {
-    const html = getEmailTemplate(`
+export const sendPaymentFailedEmail = async (
+  student: any,
+  courseName: string,
+  reason: string,
+) => {
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: #ef4444;">
             <h1>Payment Failed</h1>
         </div>
@@ -201,48 +238,68 @@ export const sendPaymentFailedEmail = async (student: any, courseName: string, r
             <p><strong>Reason:</strong> ${reason}</p>
             <p>Please try again or contact support.</p>
         </div>
-    `, "#ef4444");
+    `,
+    "#ef4444",
+  );
 
-    await queueEmail(student.email, 'Payment Failed', html, { priority: 'high' });
+  await queueEmail(student.email, "Payment Failed", html, { priority: "high" });
 };
 
 // --- EMPLOYEE ---
 
 export const sendEmployeeSalaryPaidEmail = async (params: {
-    email: string;
-    name: string;
-    salaryId: string;
-    month?: string;
-    year?: number;
-    amount?: number;
-    bonus?: number;
-    totalAmount?: number;
-    paymentDate?: string | Date | null;
-    jobTitle?: string;
+  email: string;
+  name: string;
+  salaryId: string;
+  month?: string;
+  year?: number;
+  amount?: number;
+  bonus?: number;
+  totalAmount?: number;
+  paymentDate?: string | Date | null;
+  jobTitle?: string;
 }) => {
-    const {
-        email, name, salaryId, month, year,
-        amount = 0, bonus = 0, totalAmount,
-        paymentDate, jobTitle,
-    } = params;
+  const {
+    email,
+    name,
+    salaryId,
+    month,
+    year,
+    amount = 0,
+    bonus = 0,
+    totalAmount,
+    paymentDate,
+    jobTitle,
+  } = params;
 
-    const period = month && year ? `${month} ${year}` : (month || year ? `${month ?? ''} ${year ?? ''}`.trim() : 'N/A');
-    const paidTotal = totalAmount ?? (amount + bonus);
-    const formattedPaymentDate = paymentDate
-        ? new Date(paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-        : 'Not provided';
+  const period =
+    month && year
+      ? `${month} ${year}`
+      : month || year
+        ? `${month ?? ""} ${year ?? ""}`.trim()
+        : "N/A";
+  const paidTotal = totalAmount ?? amount + bonus;
+  const formattedPaymentDate = paymentDate
+    ? new Date(paymentDate).toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "Not provided";
 
-    const html = getEmailTemplate(`
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: #10b981;">
             <h1>আপনার স্যালারি এসেছে 🎉</h1>
         </div>
         <div class="content">
             <p>হ্যালো <strong>${name}</strong>,</p>
-            <p>ভালো খবর! আপনার স্যালারি সফলভাবে প্রসেস হয়েছে। নিচে সংক্ষিপ্ত ডিটেইলস দিলাম:</p>
+            <p>ভালো খবর! আপনার স্যালারি সফলভাবে প্রসেস হয়েছে।</p>
             <p>আপনার দারুণ কাজের জন্য অনেক ধন্যবাদ! 🎉 ব্যাংক/ওয়ালেটে ক্রেডিট হতে সামান্য সময় লাগতে পারে—কোনো অমিল মনে হলে আমাদের জানাবেন, সমাধান করার চেষ্টা করবো।</p>
+            <p>সংক্ষিপ্ত ডিটেইলস :</p>
             <div class="highlight-box">
                 <p><strong>Period:</strong> ${period}</p>
-                ${jobTitle ? `<p><strong>Designation:</strong> ${jobTitle}</p>` : ''}
+                ${jobTitle ? `<p><strong>Designation:</strong> ${jobTitle}</p>` : ""}
                 <p><strong>Gross Salary:</strong> BDT ${amount.toLocaleString()}</p>
                 <p><strong>Bonus:</strong> BDT ${bonus.toLocaleString()}</p>
                 <p><strong>Total Paid:</strong> BDT ${paidTotal.toLocaleString()}</p>
@@ -251,46 +308,57 @@ export const sendEmployeeSalaryPaidEmail = async (params: {
             </div>
             <p>কোনো প্রশ্ন থাকলে জানাবেন—আমরা আছি পাশেই।</p>
         </div>
-    `, '#10b981');
+    `,
+    "#10b981",
+  );
 
-    await queueEmail(email, 'আপনার স্যালারি এসেছে 🎉', html, {
-        eventType: 'salary_paid',
-        eventId: salaryId,
-        priority: 'normal',
-    });
+  await queueEmail(email, "আপনার স্যালারি এসেছে 🎉", html, {
+    eventType: "salary_paid",
+    eventId: salaryId,
+    priority: "normal",
+  });
 };
 
 export const sendEmployeeBirthdayReminderEmail = async (params: {
-    to: string;
-    employeeId: string;
-    employeeName: string;
-    employeeEmail: string;
-    employeePhone: string;
-    employeeAddress: string;
-    designation: string;
-    dateOfBirth: Date;
-    upcomingBirthday: Date;
-    daysUntil: number;
-    ageTurning: number;
+  to: string;
+  employeeId: string;
+  employeeName: string;
+  employeeEmail: string;
+  employeePhone: string;
+  employeeAddress: string;
+  designation: string;
+  dateOfBirth: Date;
+  upcomingBirthday: Date;
+  daysUntil: number;
+  ageTurning: number;
 }) => {
-    const {
-        to,
-        employeeId,
-        employeeName,
-        employeeEmail,
-        employeePhone,
-        employeeAddress,
-        designation,
-        dateOfBirth,
-        upcomingBirthday,
-        daysUntil,
-        ageTurning,
-    } = params;
+  const {
+    to,
+    employeeId,
+    employeeName,
+    employeeEmail,
+    employeePhone,
+    employeeAddress,
+    designation,
+    dateOfBirth,
+    upcomingBirthday,
+    daysUntil,
+    ageTurning,
+  } = params;
 
-    const dobText = dateOfBirth.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    const upcomingText = upcomingBirthday.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const dobText = dateOfBirth.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+  const upcomingText = upcomingBirthday.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 
-    const html = getEmailTemplate(`
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: #3b82f6;">
             <h1>Employee Birthday Reminder</h1>
         </div>
@@ -309,22 +377,29 @@ export const sendEmployeeBirthdayReminderEmail = async (params: {
             </div>
             <p>Please plan a birthday wish or celebration accordingly.</p>
         </div>
-    `, '#3b82f6');
+    `,
+    "#3b82f6",
+  );
 
-    const eventId = `${employeeId}-${upcomingBirthday.toISOString().slice(0, 10)}`;
+  const eventId = `${employeeId}-${upcomingBirthday.toISOString().slice(0, 10)}`;
 
-    await queueEmail(to, 'Employee Birthday Reminder', html, {
-        eventType: 'employee_birthday_reminder',
-        eventId,
-        priority: 'normal',
-    });
+  await queueEmail(to, "Employee Birthday Reminder", html, {
+    eventType: "employee_birthday_reminder",
+    eventId,
+    priority: "normal",
+  });
 };
-
 
 // --- ACADEMIC ---
 
-export const sendBatchStartReminderEmail = async (studentEmail: string, studentName: string, batchName: string, startDate: string) => {
-    const html = getEmailTemplate(`
+export const sendBatchStartReminderEmail = async (
+  studentEmail: string,
+  studentName: string,
+  batchName: string,
+  startDate: string,
+) => {
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: #3b82f6;">
             <h1>Class Starting Soon!</h1>
         </div>
@@ -336,13 +411,21 @@ export const sendBatchStartReminderEmail = async (studentEmail: string, studentN
                 <a href="${env.MA_FRONTEND_URL}/classroom" class="button" style="background: #3b82f6;">Enter Classroom</a>
             </div>
         </div>
-    `, "#3b82f6");
+    `,
+    "#3b82f6",
+  );
 
-    await queueEmail(studentEmail, `Reminder: ${batchName} Starts Soon`, html);
+  await queueEmail(studentEmail, `Reminder: ${batchName} Starts Soon`, html);
 };
 
-export const sendCertificateApprovedEmail = async (studentEmail: string, studentName: string, courseName: string, certificateId: string) => {
-    const html = getEmailTemplate(`
+export const sendCertificateApprovedEmail = async (
+  studentEmail: string,
+  studentName: string,
+  courseName: string,
+  certificateId: string,
+) => {
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: linear-gradient(to right, #D4AF37, #C5A028);">
             <h1>🎓 Certificate Approved!</h1>
         </div>
@@ -352,13 +435,23 @@ export const sendCertificateApprovedEmail = async (studentEmail: string, student
             <p>Your certificate will be issued soon.</p>
             <p>Certificate ID: <strong>${certificateId}</strong></p>
         </div>
-    `, "#D4AF37");
+    `,
+    "#D4AF37",
+  );
 
-    await queueEmail(studentEmail, 'Certificate Request Approved', html, { priority: 'normal' });
+  await queueEmail(studentEmail, "Certificate Request Approved", html, {
+    priority: "normal",
+  });
 };
 
-export const sendCertificateIssuedEmail = async (studentEmail: string, studentName: string, courseName: string, certificateLink: string) => {
-    const html = getEmailTemplate(`
+export const sendCertificateIssuedEmail = async (
+  studentEmail: string,
+  studentName: string,
+  courseName: string,
+  certificateLink: string,
+) => {
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: linear-gradient(to right, #D4AF37, #C5A028);">
             <h1>🎓 Certificate Issued!</h1>
         </div>
@@ -371,22 +464,28 @@ export const sendCertificateIssuedEmail = async (studentEmail: string, studentNa
             </div>
             <p>Don't forget to share it on LinkedIn!</p>
         </div>
-    `, "#D4AF37");
+    `,
+    "#D4AF37",
+  );
 
-    await queueEmail(studentEmail, 'Your Certificate is Ready!', html, { priority: 'normal' });
+  await queueEmail(studentEmail, "Your Certificate is Ready!", html, {
+    priority: "normal",
+  });
 };
 
 export const sendEnrollmentConfirmationEmail = async (
-    user: any,
-    courseName: string,
-    enrollmentId: string,
-    amount: number,
-    paymentMethod?: string,
+  user: any,
+  courseName: string,
+  enrollmentId: string,
+  amount: number,
+  paymentMethod?: string,
 ) => {
-    const paymentAmount = amount;
-    const displayCurrency = getDisplayCurrency('BDT', paymentMethod);
-    const { facebookGroupLink, whatsappGroupLink } = await resolveGroupLinks(courseName);
-    const html = getEmailTemplate(`
+  const paymentAmount = amount;
+  const displayCurrency = getDisplayCurrency("BDT", paymentMethod);
+  const { facebookGroupLink, whatsappGroupLink } =
+    await resolveGroupLinks(courseName);
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: #10b981;">
             <h1>Enrollment Confirmed!</h1>
         </div>
@@ -454,14 +553,23 @@ export const sendEnrollmentConfirmationEmail = async (
         </tr>
     </table>
         </div>
-    `, "#10b981");
+    `,
+    "#10b981",
+  );
 
-    await queueEmail(user.email, 'Enrollment Confirmation', html, { eventType: 'enrollment_confirm', eventId: enrollmentId });
+  await queueEmail(user.email, "Enrollment Confirmation", html, {
+    eventType: "enrollment_confirm",
+    eventId: enrollmentId,
+  });
 };
 
-
-export const sendWaitingPaymentVerificationEmail = async (student: any, courseName: string, transactionId: string) => {
-    const html = getEmailTemplate(`
+export const sendWaitingPaymentVerificationEmail = async (
+  student: any,
+  courseName: string,
+  transactionId: string,
+) => {
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: #f59e0b;">
             <h1>Payment Verification Pending</h1>
         </div>
@@ -473,8 +581,13 @@ export const sendWaitingPaymentVerificationEmail = async (student: any, courseNa
                 <p>We will notify you once the verification is complete.</p>
             </div>
         </div>
-    `, "#f59e0b");
-    await queueEmail(student.email, 'Payment Verification Pending', html, { eventType: 'payment_verification', eventId: transactionId });
+    `,
+    "#f59e0b",
+  );
+  await queueEmail(student.email, "Payment Verification Pending", html, {
+    eventType: "payment_verification",
+    eventId: transactionId,
+  });
 };
 
 // --- ADMIN BULK EMAILS ---
@@ -482,8 +595,12 @@ export const sendWaitingPaymentVerificationEmail = async (student: any, courseNa
 /**
  * Send enrollment reminder to registered but not enrolled users
  */
-export const sendEnrollmentReminderEmail = async (email: string, name: string) => {
-    const html = getEmailTemplate(`
+export const sendEnrollmentReminderEmail = async (
+  email: string,
+  name: string,
+) => {
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);">
             <h1>📚 Start Your Learning Journey!</h1>
         </div>
@@ -509,19 +626,27 @@ export const sendEnrollmentReminderEmail = async (email: string, name: string) =
             
             <p style="font-size: 14px; color: #666;">Have questions? Feel free to reach out to us at <a href="mailto:misunacademybd@gmail.com">misunacademybd@gmail.com</a></p>
         </div>
-    `, "#8b5cf6");
+    `,
+    "#8b5cf6",
+  );
 
-    await queueEmail(email, 'Complete Your Enrollment - Misun Academy', html, {
-        priority: 'normal',
-        eventType: 'enrollment_reminder'
-    });
+  await queueEmail(email, "Complete Your Enrollment - Misun Academy", html, {
+    priority: "normal",
+    eventType: "enrollment_reminder",
+  });
 };
 
 /**
  * Send news and updates to all enrolled students
  */
-export const sendNewsUpdateEmail = async (email: string, name: string, subject: string, message: string) => {
-    const html = getEmailTemplate(`
+export const sendNewsUpdateEmail = async (
+  email: string,
+  name: string,
+  subject: string,
+  message: string,
+) => {
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
             <h1>📢 ${subject}</h1>
         </div>
@@ -538,25 +663,28 @@ export const sendNewsUpdateEmail = async (email: string, name: string, subject: 
             
             <p style="font-size: 14px; color: #666;">Stay tuned for more updates!</p>
         </div>
-    `, "#3b82f6");
+    `,
+    "#3b82f6",
+  );
 
-    await queueEmail(email, subject, html, {
-        priority: 'normal',
-        eventType: 'news_update'
-    });
+  await queueEmail(email, subject, html, {
+    priority: "normal",
+    eventType: "news_update",
+  });
 };
 
 /**
  * Send progress reminder to running batch students below threshold
  */
 export const sendRunningBatchProgressReminderEmail = async (
-    email: string,
-    name: string,
-    courseName: string,
-    batchName: string,
-    progress: number,
+  email: string,
+  name: string,
+  courseName: string,
+  batchName: string,
+  progress: number,
 ) => {
-    const html = getEmailTemplate(`
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
             <h1>তুমি ক্লাস রেকর্ডগুলো ঠিকমতো দেখছো না, তুমি কি কোনো প্রবলেমে আছো?</h1>
         </div>
@@ -581,7 +709,7 @@ export const sendRunningBatchProgressReminderEmail = async (
             </p>
 
             <div class="highlight-box" style="border-color: #f59e0b;">
-                <p><strong>স্টুডেন্ট:</strong> ${name || 'Student'}</p>
+                <p><strong>স্টুডেন্ট:</strong> ${name || "Student"}</p>
                 <p><strong>কোর্স:</strong> ${courseName}</p>
                 <p><strong>ব্যাচ:</strong> ${batchName}</p>
                 <p><strong>বর্তমান প্রগতি:</strong> ${progress}%</p>
@@ -600,30 +728,33 @@ export const sendRunningBatchProgressReminderEmail = async (
 
             <p>তোমার জন্য অনেক শুভকামনা। ❤️</p>
         </div>
-    `, "#f59e0b");
+    `,
+    "#f59e0b",
+  );
 
-    await queueEmail(
-        email,
-        'তুমি ক্লাস রেকর্ডগুলো ঠিকমতো দেখছো না, তুমি কি কোনো প্রবলেমে আছো?',
-        html,
-        {
-            priority: 'normal',
-            eventType: 'batch_progress_reminder',
-        }
-    );
+  await queueEmail(
+    email,
+    "তুমি ক্লাস রেকর্ডগুলো ঠিকমতো দেখছো না, তুমি কি কোনো প্রবলেমে আছো?",
+    html,
+    {
+      priority: "normal",
+      eventType: "batch_progress_reminder",
+    },
+  );
 };
 
 /**
  * Send completion reminder to students in completed batches with incomplete progress
  */
 export const sendCompletedBatchIncompleteReminderEmail = async (
-    email: string,
-    name: string,
-    courseName: string,
-    batchName: string,
-    progress: number,
+  email: string,
+  name: string,
+  courseName: string,
+  batchName: string,
+  progress: number,
 ) => {
-    const html = getEmailTemplate(`
+  const html = getEmailTemplate(
+    `
         <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
             <h1>তোমার কোর্স এখনো অসম্পূর্ণ — আমরা তোমাকে সাহায্য করতে চাই</h1>
         </div>
@@ -645,7 +776,7 @@ export const sendCompletedBatchIncompleteReminderEmail = async (
             </p>
 
             <div class="highlight-box" style="border-color: #3b82f6;">
-                <p><strong>স্টুডেন্ট:</strong> ${name || 'Student'}</p>
+                <p><strong>স্টুডেন্ট:</strong> ${name || "Student"}</p>
                 <p><strong>কোর্স:</strong> ${courseName}</p>
                 <p><strong>ব্যাচ:</strong> ${batchName}</p>
                 <p><strong>বর্তমান প্রগতি:</strong> ${progress}%</p>
@@ -672,16 +803,17 @@ export const sendCompletedBatchIncompleteReminderEmail = async (
 
             <p>তোমার জন্য অনেক শুভকামনা। ❤️</p>
         </div>
-    `, "#3b82f6");
+    `,
+    "#3b82f6",
+  );
 
-    await queueEmail(
-        email,
-        'তোমার কোর্স এখনো অসম্পূর্ণ — আমরা তোমাকে সাহায্য করতে চাই',
-        html,
-        {
-            priority: 'normal',
-            eventType: 'batch_incomplete_reminder',
-        }
-    );
+  await queueEmail(
+    email,
+    "তোমার কোর্স এখনো অসম্পূর্ণ — আমরা তোমাকে সাহায্য করতে চাই",
+    html,
+    {
+      priority: "normal",
+      eventType: "batch_incomplete_reminder",
+    },
+  );
 };
-

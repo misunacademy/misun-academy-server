@@ -135,6 +135,30 @@ const updateSalaryStatus = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+/** PUT /employee/admin/salaries/:id */
+const updateSalary = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.params as { id: string };
+    const result = await EmployeeService.updateSalary(id, req.body);
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Salary record updated successfully',
+        data: result,
+    });
+});
+
+/** DELETE /employee/admin/salaries/:id */
+const deleteSalary = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.params as { id: string };
+    const result = await EmployeeService.deleteSalary(id);
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Salary record deleted successfully',
+        data: result,
+    });
+});
+
 /** GET /employee/admin/leave */
 const getAllLeaveRequestsAdmin = catchAsync(async (req: Request, res: Response) => {
     const result = await EmployeeService.getAllLeaveRequestsAdmin(
@@ -175,6 +199,8 @@ export const EmployeeController = {
     getAllSalariesAdmin,
     addSalary,
     updateSalaryStatus,
+    updateSalary,
+    deleteSalary,
     getAllLeaveRequestsAdmin,
     updateLeaveStatus,
 };

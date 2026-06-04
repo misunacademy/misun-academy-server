@@ -281,6 +281,68 @@ const updateSalaryStatus = async (id: string, status: 'Paid' | 'Pending') => {
     return salary;
 };
 
+const updateSalary = async (
+    id: string,
+    payload: {
+        jobTitle?: string;
+        month?: string;
+        year?: number;
+        amount?: number;
+        bonus?: number;
+        paymentDate?: string;
+        status?: 'Paid' | 'Pending';
+    }
+) => {
+    // Use find + save so the pre('save') hook recalculates totalAmount
+    const salary = await SalaryModel.findById(id);
+    if (!salary) throw new ApiError(StatusCodes.NOT_FOUND, 'Salary record not found');
+
+    const previousStatus = salary.status;
+
+    if (payload.jobTitle    !== undefined) salary.jobTitle    = payload.jobTitle;
+    if (payload.month       !== undefined) salary.month       = payload.month;
+    if (payload.year        !== undefined) salary.year        = payload.year;
+    if (payload.amount      !== undefined) salary.amount      = payload.amount;
+    if (payload.bonus       !== undefined) salary.bonus       = payload.bonus;
+    if (payload.status      !== undefined) salary.status      = payload.status;
+    if (payload.paymentDate !== undefined) {
+        salary.paymentDate = payload.paymentDate ? new Date(payload.paymentDate) : undefined;
+    }
+
+    const updated = await salary.save();
+
+    // Send email if status flipped to Paid
+    if (payload.status === 'Paid' && previousStatus !== 'Paid') {
+        try {
+            const employee = await UserModel.findById(salary.employeeId).select('name email').lean();
+            if (employee?.email) {
+                await sendEmployeeSalaryPaidEmail({
+                    email:       employee.email,
+                    name:        employee.name || salary.employeeName || 'Employee',
+                    salaryId:    updated._id.toString(),
+                    month:       updated.month,
+                    year:        updated.year,
+                    amount:      updated.amount,
+                    bonus:       updated.bonus,
+                    totalAmount: updated.totalAmount,
+                    paymentDate: updated.paymentDate ?? null,
+                    jobTitle:    updated.jobTitle,
+                });
+            }
+        } catch (error: unknown) {
+            logger.error(`Failed to send salary paid email: ${(error as Error).message}`);
+        }
+    }
+
+    return updated;
+};
+
+const deleteSalary = async (id: string) => {
+    const salary = await SalaryModel.findByIdAndDelete(id).lean();
+    if (!salary) throw new ApiError(StatusCodes.NOT_FOUND, 'Salary record not found');
+    return salary;
+};
+
 const getAllLeaveRequestsAdmin = async (query: {
     page?: number; limit?: number; status?: string;
 }) => {
@@ -323,6 +385,8 @@ export const EmployeeService = {
     getAllSalariesAdmin,
     addSalary,
     updateSalaryStatus,
+    updateSalary,
+    deleteSalary,
     getAllLeaveRequestsAdmin,
     updateLeaveStatus,
 };
