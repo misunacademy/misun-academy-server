@@ -14,9 +14,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "docs:generate": "node scripts/generateOpenApi.cjs",
-    "seed:courses": "ts-node src/scripts/seedCourses.ts",
-    "seed:superAdmin": "ts-node src/scripts/seedsuperAdmin.ts",
-    "migrate:emailVerification": "ts-node src/scripts/migrateEmailVerification.ts",
+    "seed:courses": "tsx src/scripts/seedCourses.ts",
+    "seed:superAdmin": "tsx src/scripts/seedSuperAdmin.ts",
+    "migrate:emailVerification": "tsx src/scripts/migrateEmailVerification.ts",
     "test": "jest --runInBand"
   },
   "devDependencies": {

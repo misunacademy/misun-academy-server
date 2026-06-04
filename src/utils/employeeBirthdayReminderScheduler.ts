@@ -11,7 +11,7 @@ import { sendEmployeeBirthdayReminderEmail } from '../services/misunAcademyEmail
 
 const REMINDER_DAYS = 10;
 // 'misunacademybd@gmail.com'
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL!;
+const ADMIN_EMAIL = process.env.NODE_ENV === 'production' ? 'misunacademybd@gmail.com' : process.env.ADMIN_EMAIL!;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const CRON_SCHEDULE = '0 9 * * *';
 const CRON_TIMEZONE = 'Asia/Dhaka';
