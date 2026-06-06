@@ -11,8 +11,17 @@ import { ModuleModel } from '../Module/module.model.js';
 const findEnrollmentForCourse = async (
     userId: string,
     courseId: string,
-    statuses: EnrollmentStatus[]
+    statuses: EnrollmentStatus[],
+    batchId?: string
 ) => {
+    if (batchId) {
+        return EnrollmentModel.findOne({
+            userId,
+            status: { $in: statuses },
+            batchId,
+        });
+    }
+
     const batches = await BatchModel.find({ courseId }).select('_id');
     const batchIds = batches.map((b) => b._id);
 
@@ -30,11 +39,11 @@ const findEnrollmentForCourse = async (
 /**
  * Get course progress for a user
  */
-const getCourseProgress = async (userId: string, courseId: string) => {
+const getCourseProgress = async (userId: string, courseId: string, batchId?: string) => {
     const enrollment = await findEnrollmentForCourse(userId, courseId, [
         EnrollmentStatus.Active,
         EnrollmentStatus.Completed,
-    ]);
+    ], batchId);
 
     if (!enrollment) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'No enrollment found for this course');
@@ -110,9 +119,12 @@ const getCourseProgress = async (userId: string, courseId: string) => {
  * Complete a lesson for a user
  */
 const completeLesson = async (userId: string, courseId: string, moduleId: string, lessonId: string) => {
+    const module = await ModuleModel.findById(moduleId);
+    const batchId = module?.batchId?.toString();
+
     const enrollment = await findEnrollmentForCourse(userId, courseId, [
         EnrollmentStatus.Active,
-    ]);
+    ], batchId);
 
     if (!enrollment) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'No active enrollment found for this course');
