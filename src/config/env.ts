@@ -67,6 +67,9 @@ const EnvSchema = z.object({
 
     // Admin Email for Employee Birthday Reminders
     ADMIN_EMAIL: z.string(),
+
+    // Groq AI API Key
+    GROQ_API_KEY: z.string().optional(),
 });
 
 // Validate and parse environment variables

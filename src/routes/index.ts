@@ -18,6 +18,7 @@ import { RecordingRoutes } from '../modules/Recording/recording.routes.js';
 import { ProfileRoutes } from '../modules/Profile/profile.routes.js';
 import { SettingsRoutes } from '../modules/Settings/settings.routes.js';
 import { EmployeeRoutes } from '../modules/Employee/employee.routes.js';
+import { ChatRoutes } from '../modules/Chat/chat.routes.js';
 
 
 const router = express.Router();
@@ -95,6 +96,10 @@ const moduleRoutes = [
     {
         path: '/employee',
         route: EmployeeRoutes,
+    },
+    {
+        path: '/chat',
+        route: ChatRoutes,
     },
 ];
 
