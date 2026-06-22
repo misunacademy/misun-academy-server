@@ -69,6 +69,16 @@ function buildSystemPrompt(
 - **লক্ষ্য:** শিক্ষার্থীদের বাস্তব-জীবনের দক্ষতা দিয়ে সজ্জিত করা যাতে তারা ফ্রিল্যান্সিং এবং পেশাদার ক্যারিয়ারে সফল হতে পারে
 - **SEO কীওয়ার্ড:** misun academy, misun academy khulna, graphics design, graphic design institute in khulna, freelancing course khulna, english learning platform
 
+### ESUN POINT — ইংলিশ কোর্সের সাব-ব্র্যান্ড
+- **সাবডোমেইন:** esun.misun-academy.com (একটি আলাদা ওয়েবসাইট)
+- **ব্র্যান্ড নাম:** ESUN POINT
+- **ফোকাস:** শুধুমাত্র ইংলিশ ফর প্রফেশনাল কমিউনিকেশন কোর্স
+- **ট্যাগলাইন:** "Master English With Confidence"
+- **বিবরণ:** "Strong communication is your most valuable asset. Build practical skills for workplace meetings, presentations, and interviews with expert guidance from Esun Point."
+- **ইনস্ট্রাক্টর:** পুষ্পিতা সিংহ (৩+ বছর অভিজ্ঞতা, ১০০+ ক্লাস)
+- **ফেসবুক:** https://www.facebook.com/esunpoint
+- **ইউটিউব:** https://www.youtube.com/@EsunPoint
+
 ## পরিসংখ্যান
 - **সফল প্রকল্প:** ১২০০+ টি
 - **সাইড প্রজেক্ট:** ৫০+ টি
@@ -174,14 +184,15 @@ SSLCommerz-এর মাধ্যমে নিম্নলিখিত পদ্
 - কোর্সের ডেমো ভিডিও ও তথ্য দেখে নিশ্চিত হয়ে তবেই এনরোল করুন
 
 ## টিম মেম্বারগণ
-1. **মিঠুন** — প্রতিষ্ঠাতা ও প্রধান প্রশিক্ষক
-2. **পুষ্পিতা সিংহ** — লিড ইন্সট্রাক্টর, ইংলিশ ফর প্রফেশনাল কমিউনিকেশন
-3. **দেবব্রত** — টিম মেম্বার
-4. **নূর** — টিম মেম্বার
-5. **মেহেদী** — টিম মেম্বার
-6. **নেয়ামুর** — টিম মেম্বার
-7. **আজেফুল** — টিম মেম্বার
-8. **সাকিন** — টিম মেম্বার
+1. **মিঠুন সরকার (Mithun Sarkar)** — প্রতিষ্ঠাতা ও CEO, Misun Academy
+2. **পুষ্পিতা সিংহ (Puspita Singha)** — লিড ইন্সট্রাক্টর, ইংলিশ ফর প্রফেশনাল কমিউনিকেশন
+3. **দেবব্রত বিশ্বাস (Debbroto Biswas)** — সিনিয়র ভিজুয়ালাইজার
+4. **নূরনবী হোসেন শাগর (Nurnobi Hossen Shagor)** — সিনিয়র ভিজুয়ালাইজার
+5. **মোঃ নূর নবী ইসলাম (MD. Nur Nobe Islam)** — ভিডিও এডিটর
+6. **আজেফুল মালিক (Ajeful Mallick)** — ডিজাইন অ্যান্ড সোশ্যাল মিডিয়া কো-অর্ডিনেটর
+7. **মেহেদী হাসান (Mehedi Hasan)** — ওয়েব ডেভেলপার
+8. **এস. এম. নেয়ামুর রহমান (S. M. Nayemur Rahman)** — মার্কেটিং এক্সিকিউটিভ
+9. **নাফিউন সাকিন (Nafiun Sakin)** — কমিউনিটি গ্রোথ ম্যানেজার
 
 ## সাধারণ জিজ্ঞাসা (FAQ)
 1. **প্রশ্ন:** Misun Academy কি?
@@ -218,10 +229,12 @@ SSLCommerz-এর মাধ্যমে নিম্নলিখিত পদ্
 - **ইমেইল:** misunacademybd@gmail.com
 - **ট্রেড লাইসেন্স:** নং ২৭/৫৩৬ (খুলনা সিটি কর্পোরেশন)
 - **ওয়েবসাইট:** www.misun-academy.com
-- **ফেসবুক:** https://www.facebook.com/misunacademy
-- **ইউটিউব:** https://www.youtube.com/@misunacademy
+- **ফেসবুক (Misun Academy):** https://www.facebook.com/misunacademy
+- **ফেসবুক (ESUN POINT):** https://www.facebook.com/esunpoint
+- **ইউটিউব (Misun Academy):** https://www.youtube.com/@misunacademy
+- **ইউটিউব (ESUN POINT):** https://www.youtube.com/@EsunPoint
+- **ESUN POINT সাইট:** https://esun.misun-academy.com
 - **ফেসবুক গ্রুপ:** https://www.facebook.com/share/g/1HU3uRbuEF
-
 
 ## ক্লাস ও সাপোর্ট সময়সূচী
 - **মেইন ক্লাস:** শনিবার + বুধবার (রাত ৯-১১টা)
