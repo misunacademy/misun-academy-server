@@ -11,6 +11,7 @@ import { BatchStatus } from '../../types/common.js';
 interface BatchInfo {
   title: string;
   price: number;
+  manualPaymentPrice?: number;
   startDate: string;
   endDate: string;
   enrollmentStartDate: string;
@@ -96,7 +97,7 @@ async function getSystemContext(): Promise<SystemContext> {
   try {
     const batches = await BatchModel.find({ status: BatchStatus.Upcoming })
       .populate<{ courseId: { title: string } | null }>('courseId', 'title')
-      .select('title price startDate endDate enrollmentStartDate enrollmentEndDate status courseId')
+      .select('title price manualPaymentPrice startDate endDate enrollmentStartDate enrollmentEndDate status courseId')
       .sort({ startDate: 1 })
       .lean()
       .exec();
@@ -104,6 +105,7 @@ async function getSystemContext(): Promise<SystemContext> {
     const batchList: BatchInfo[] = batches.map((b) => ({
       title: sanitizeForPrompt(b.title ?? ''),
       price: typeof b.price === 'number' ? b.price : 0,
+      manualPaymentPrice: typeof b.manualPaymentPrice === 'number' ? b.manualPaymentPrice : undefined,
       startDate: formatBanglaDate(b.startDate),
       endDate: formatBanglaDate(b.endDate),
       enrollmentStartDate: formatBanglaDate(b.enrollmentStartDate),
@@ -223,7 +225,10 @@ function buildBatchContext(batches: BatchInfo[]): string {
     .map(
       (b, i) =>
         `${i + 1}. **${b.courseTitle} - ${b.title}**\n` +
-        `   - মূল্য: ৳${b.price}\n` +
+        `   - মূল্য: ৳${b.price} (বাংলাদেশী শিক্ষার্থীদের জন্য)\n` +
+        (b.manualPaymentPrice !== undefined
+          ? `   - মূল্য (ভারতীয় শিক্ষার্থী): ₹${b.manualPaymentPrice} (PhonePe-এর মাধ্যমে)\n`
+          : '') +
         `   - ভর্তি শুরুর তারিখ: ${b.enrollmentStartDate}\n` +
         `   - ভর্তির শেষ তারিখ: ${b.enrollmentEndDate}\n` +
         `   - ক্লাস শুরুর তারিখ: ${b.startDate}\n` +
@@ -273,145 +278,37 @@ function buildSystemPrompt(context: SystemContext, userName?: string): string {
 ## আমাদের কোর্সসমূহ
 আমাদের বর্তমানে দুটি প্রধান কোর্স রয়েছে:
 
----
-
 ### ১. কমপ্লিট গ্রাফিক ডিজাইন উইথ ফ্রিল্যান্সিং
-এটি একটি ৪ মাসের লাইভ অনলাইন কোর্স। এই কোর্সটি ৩টি সাব-কোর্সে বিভক্ত:
+- মেয়াদ: ৪ মাস (লাইভ অনলাইন)
+- ৩টি সাব-কোর্স: 🎨 Photoshop Hero, ✏️ Illustrator Wizard, 🎯 Guardian in Client Hunting
+- মূল্য: আসন্ন ব্যাচের মূল্য নিচে "আসন্ন ব্যাচ সমূহ" অংশে দেখুন
 
-#### 🎨 Photoshop Hero — ইমেজ এডিটিং ও ডিজিটাল ডিজাইন মাস্টারক্লাস
-**মডিউল সমূহ (মোট ৮টি):**
-1. Fundamental Concept of Design Theory (2 ঘন্টা)
-2. Mastering Image Selection | Background Remove | Image Placement (3 ঘন্টা)
-3. Advance Image Enhancement (2.5 ঘন্টা)
-4. Brush and Clone Special Class (2 ঘন্টা)
-5. Advance Gradient and Perfect Background Selection (2.5 ঘন্টা)
-6. Pen Tool Special Class (3 ঘন্টা)
-7. Typography Special Class (2 ঘন্টা)
-8. Basic to Advance Animation in Photoshop (Cartoon, Google Ad) (4 ঘন্টা)
+**Photoshop Hero-এর বিস্তারিত সিলেবাস (শুধুমাত্র চাইলে দেখাও):**
+মোট ৮টি মডিউল — Design Theory, Image Selection & Background Remove, Image Enhancement, Brush & Clone, Gradient & Background Selection, Pen Tool, Typography, Animation in Photoshop.
+প্রজেক্ট: Skin Retouching, Social Media Design, YouTube Thumbnail, Facebook Cover, Natok Thumbnail, Image Manipulation, Glowing Effect, Product Manipulation, AI in Design, Idea Generation, Carousel Design.
 
-**প্রজেক্টসমূহ:**
-- Advance Skin Retouching for Natok, YouTube and Social Media Poster
-- Social Media Design Masterclass
-- YouTube Thumbnail Design Masterclass
-- Facebook Cover Design Special Class
-- Natok Thumbnail Design Special Class
-- Advance Image Manipulation Masterclass
-- Advance Image Editing with Advanced Glowing Effect
-- Product Manipulation Special Class
-- Use AI in Your Design (AI Implementation Masterclass)
-- Advance Idea Generation for Design
-- Instagram Advance Carousel Design
+**Illustrator Wizard-এর বিস্তারিত সিলেবাস (শুধুমাত্র চাইলে দেখাও):**
+মোট ১০টি মডিউল — Interfacing, Pen Tool & Typography, Custom Shape, Mandala Design, Paint & Blob Brush, Rotation & Reflection, Pathfinder & Shape Builder, Gradient & Blend, Symbol Tool, Infographic Design.
+প্রজেক্ট: Business Card, Logo, Vector Tracing, Banner, T-Shirt, Book Cover, Flyer, Portfolio Building.
 
-#### ✏️ Illustrator Wizard — প্রিন্টিং ডিজাইন ও ভেক্টর গ্রাফিক
-**মডিউল সমূহ (মোট ১০টি):**
-1. Basic to Advance Interfacing | Create Your Own Interface (2 ঘন্টা)
-2. Mastering Pen Tool and Typography (3 ঘন্টা)
-3. Custom Shape Creation | Advance Shape Making (2.5 ঘন্টা)
-4. Mandala Design Special Class (3 ঘন্টা)
-5. Paint & Blob Brush Advanced Techniques (2 ঘন্টা)
-6. Rotation and Reflection in Design (2 ঘন্টা)
-7. Pathfinder and Shape Builder Special Class (2.5 ঘন্টা)
-8. Gradient and Blend Tool Masterclass (3 ঘন্টা)
-9. Symbol Tool Special Class (Create Your Own Symbol) (2 ঘন্টা)
-10. Advance Techniques for Infographic Design (3 ঘন্টা)
-
-**প্রজেক্টসমূহ:**
-- Business Card Design, Logo Design Masterclass
-- Vector & Image Tracing and Banner Design
-- T-Shirt Design, Book Cover Design, Flyer Design
-- Personal Portfolio Building
-- Advanced Techniques to Grow Portfolio
-- Client Reach Design Ideas
-
-#### 🎯 Guardian in Client Hunting — ক্লায়েন্ট খোঁজা ও ফ্রিল্যান্সিং
-**মডিউল সমূহ (মোট ১০টি):**
-1. Local Client Hunting (2 ঘন্টা)
-2. International Client Hunting (3 ঘন্টা)
-3. Marketing Tips and Tricks (2.5 ঘন্টা)
-4. How to Find a Remote Job (2 ঘন্টা)
-5. Facebook Client Tricks (1.5 ঘন্টা)
-6. LinkedIn Client Tricks (1.5 ঘন্টা)
-7. Email & Number Marketing (2 ঘন্টা)
-8. Fiverr Marketplace Masterclass (3 ঘন্টা)
-9. CV/Resume Building & Job Apply (2 ঘন্টা)
-10. Passive Income with Design (2.5 ঘন্টা)
-
----
+**Guardian in Client Hunting-এর বিস্তারিত সিলেবাস (শুধুমাত্র চাইলে দেখাও):**
+মোট ১০টি মডিউল — Local & International Client Hunting, Marketing Tips, Remote Job, Facebook & LinkedIn Tricks, Email Marketing, Fiverr Masterclass, CV/Resume, Passive Income.
 
 ### ২. ইংলিশ ফর প্রফেশনাল কমিউনিকেশন
-এটি একটি ৩ মাসের লাইভ অনলাইন কোর্স। শুধু গ্রামার মুখস্থ নয় — বাস্তব কথোপকথন, মেন্টরশিপ ও লাইভ প্র্যাকটিসের মাধ্যমে আত্মবিশ্বাসের সাথে ইংরেজি বলতে শেখানো হয়।
+- মেয়াদ: ৩ মাস (লাইভ অনলাইন)
+- ইন্সট্রাক্টর: পুষ্পিতা সিংহ (৩+ বছর অভিজ্ঞতা)
+- মূল্য: আসন্ন ব্যাচের মূল্য নিচে "আসন্ন ব্যাচ সমূহ" অংশে দেখুন
 
-**কোর্স ফিচার:**
-- ১:১ মেন্টরশিপ সেশন — দুর্বল জায়গা চিহ্নিত করে ব্যক্তিগত গাইডেন্স
-- দিনে ৩ বার লাইভ সাপোর্ট (সকাল, দুপুর, রাত)
-- ২৪/৭ হোয়াটসঅ্যাপ প্রাইভেট গ্রুপ সাপোর্ট
-- ১:১ স্পিকিং ফিডব্যাক সেশন — উচ্চারণ ও স্পিকিং স্টাইলে ব্যক্তিগত পর্যালোচনা
-- জব ইন্টারভিউ সরাসরি প্রস্তুতি — মক ইন্টারভিউ ও রিয়েল-লাইফ প্র্যাকটিস
-- ৩ মাসে ১০০% সাফল্যের গ্যারান্টি (নিয়মিত অংশগ্রহণ সাপেক্ষে)
-- রোলপ্লে ও গ্রুপ ডিসকাশন প্র্যাকটিস
-- কোর্স শেষে ডিজিটাল সার্টিফিকেট (LinkedIn ও CV-তে যোগযোগ্য)
-
-**ইনস্ট্রাক্টর:** পুষ্পিতা সিংহ — লিড ইন্সট্রাক্টর (৩+ বছর অভিজ্ঞতা, ১০০+ ক্লাস)
-বিশেষত্ব: বিজনেস ইংলিশ, পাবলিক স্পিকিং, ইন্টারভিউ প্রিপারেশন, ইমেইল রাইটিং, প্রেজেন্টেশন স্কিলস, এক্সেন্ট ট্রেনিং
-
-## ইংলিশ ফর প্রফেশনাল কমিউনিকেশন — বিস্তারিত সিলেবাস
-মোট ২০টি ক্লাস (প্রতি ক্লাস ১-১.৫ ঘন্টা)
-
-**কোর্সের উদ্দেশ্য:**
-1. প্রফেশনাল ও একাডেমিক ক্ষেত্রে আত্মবিশ্বাসের সাথে ইংরেজিতে যোগাযোগ করা
-2. পেশাদার ইমেইল, মেসেজ ও ছোট রিপোর্ট সঠিকভাবে লেখা
-3. মিটিং, প্রেজেন্টেশন ও আলোচনায় সাবলীলভাবে কথা বলা
-4. দৈনন্দিন যোগাযোগের জন্য প্রয়োজনীয় গ্রামার সঠিকভাবে ব্যবহার করা
-5. স্পিকিং ও রাইটিং-এ সাধারণ ভুলগুলি এড়ানো
-
-**মডিউল ১: Foundations of Professional English (সপ্তাহ ১-২, ক্লাস ১-২)**
-- সেন্টেন্স স্ট্রাকচার (S+V+O), বেসিক টেন্স (Present, Past, Future)
-- সাধারণ গ্রামার মিস্টেক, বেসিক পাংচুয়েশন
-- ক্লাস ১: Self-introduction, simple present tense, speaking practice
-- ক্লাস ২: Simple past & future, punctuation, writing short sentences
-
-**মডিউল ২: Grammar for Professional Communication (সপ্তাহ ৩-৪, ক্লাস ৩-৪)**
-- মডাল ভার্ব (can, could, should, would), পোলাইট রিকোয়েস্ট ও অফার
-- প্রিপজিশন (সময়, স্থান, কাজের প্রসঙ্গে), কমন মিস্টেক এড়ানো
-- ক্লাস ৩: Modal verbs, polite requests, speaking practice
-- ক্লাস ৪: Prepositions, common mistakes, writing practice
-
-**মডিউল ৩: Professional Vocabulary & Expressions (সপ্তাহ ৫, ক্লাস ৫-৬)**
-- ওয়ার্কপ্লেস ও একাডেমিক শব্দভাণ্ডার, কলোকেশন
-- পোলাইট এক্সপ্রেশন ও টোন, কাজ/প্রজেক্ট নিয়ে কথা বলা
-- ক্লাস ৫: Vocabulary and polite expressions, speaking exercises
-- ক্লাস ৬: Collocations, writing emails/messages
-
-**মডিউল ৪: Professional Writing Skills (সপ্তাহ ৬-৭, ক্লাস ৭-১০)**
-- প্রফেশনাল ইমেইল, ইনফরমেশন রিকোয়েস্ট, আপডেট দেওয়া
-- কমপ্লেইন্ট হ্যান্ডলিং, ছোট রিপোর্ট বা সামারি রাইটিং
-- ক্লাস ৭: Email writing, requesting information
-- ক্লাস ৮: Replying to messages, follow-ups
-- ক্লাস ৯: Writing updates, explanations, short reports
-- ক্লাস ১০: Asking for clarification, handling complaints
-
-**মডিউল ৫: Speaking for Workplace Communication (সপ্তাহ ৮, ক্লাস ১১-১২)**
-- মিটিং-এ প্রশ্ন করা ও উত্তর দেওয়া, মতামত পোলাইটলি প্রকাশ
-- ইন্সট্রাকশন ও এক্সপ্লেনেশন, ডিসএগ্রিমেন্ট প্রফেশনালি হ্যান্ডলিং
-- ক্লাস ১১: Speaking clearly, asking & answering questions
-- ক্লাস ১২: Expressing opinions, giving instructions
-
-**মডিউল ৬: Presentation & Public Speaking (সপ্তাহ ৯, ক্লাস ১৩-১৪)**
-- প্রেজেন্টেশন স্ট্রাকচার, নিজেকে ও টপিক ইন্ট্রোডিউস করা
-- ট্রানজিশন ফ্রেজ, অডিয়েন্স প্রশ্ন হ্যান্ডলিং, কনফিডেন্টলি স্পিকিং
-- ক্লাস ১৩: Presentation structure, short topic presentation
-- ক্লাস ১৪: Transitions, handling questions, peer feedback
-
-**মডিউল ৭: Advanced Professional Communication (সপ্তাহ ১০, ক্লাস ১৫-২০)**
-- ওয়ার্কপ্লেস এটিকেট, প্রফেশনাল টোন (রাইটিং ও স্পিকিং)
-- পোলাইট রিফিউজাল ও নেগোসিয়েশন
-- ক্লায়েন্ট, সুপারভাইজার ও শিক্ষকদের সাথে যোগাযোগ
-- ক্লাস ১৫: Writing & speaking for professional scenarios
-- ক্লাস ১৬: Role-plays — negotiation, complaints, emails
-- ক্লাস ১৭: Real-life conversation simulations
-- ক্লাস ১৮: Final assessment — messages & speaking
-- ক্লাস ১৯: Feedback, corrections, tips for independent practice
-- ক্লাস ২০: Wrap-up, certificate preparation
+**ইংলিশ কোর্সের বিস্তারিত সিলেবাস (শুধুমাত্র চাইলে দেখাও):**
+মোট ২০টি ক্লাস, ৭টি মডিউল:
+১. Foundations of Professional English (বেসিক গ্রামার, টেন্স)
+২. Grammar for Professional Communication (Modal verbs, Prepositions)
+৩. Professional Vocabulary & Expressions
+৪. Professional Writing Skills (ইমেইল, রিপোর্ট)
+৫. Speaking for Workplace Communication (মিটিং, ডিসকাশন)
+৬. Presentation & Public Speaking
+৭. Advanced Professional Communication (নেগোসিয়েশন, রোলপ্লে)
+ফিচার: ১:১ মেন্টরশিপ, দিনে ৩ বার লাইভ সাপোর্ট, ২৪/৭ WhatsApp গ্রুপ, মক ইন্টারভিউ, ডিজিটাল সার্টিফিকেট।
 
 ## আসন্ন ব্যাচ সমূহ
 ${batchContext}
@@ -436,7 +333,7 @@ SSLCommerz-এর মাধ্যমে নিম্নলিখিত পদ্
 পেমেন্ট সম্পূর্ণ নিরাপদ এবং SSLCommerz-এর মাধ্যমে এনক্রিপ্টেড।
 
 ### ম্যানুয়াল পেমেন্ট (বিকাশ/নগদ/রকেট)
-- **PhonePe (ভারতীয় শিক্ষার্থীদের জন্য):** +91 9123944746 (Khokon Sarkar)
+- **PhonePe (ভারতীয় শিক্ষার্থীদের জন্য):** +91 9123944746 (Khokon Sarkar) — মূল্য **ভারতীয় রুপিতে (₹)** পরিশোধ করতে হবে (প্রতিটি ব্যাচের ₹ মূল্য উপরে "আসন্ন ব্যাচ সমূহ" অংশে দেখুন)
 - ম্যানুয়াল পেমেন্ট করলে প্রশাসক ভেরিফাই করে দিলে এনরোলমেন্ট অ্যাক্টিভেট হবে
 
 ## রিফান্ড নীতি (সর্বশেষ আপডেট: ১৯ জুলাই, ২০২৫)
@@ -502,7 +399,7 @@ misunacademybd@gmail.com-এ ইমেইল করুন এবং নিচে
 17. **প্রশ্ন:** ইংলিশ কোর্সের জন্য আমার কি আগে থেকে ইংরেজি জানতে হবে?
     **উত্তর:** একেবারেই না। শূন্য থেকে শুরু করা যাবে। আপনার বর্তমান লেভেল যাই হোক, ধাপে ধাপে এগিয়ে যেতে পারবেন।
 18. **প্রশ্ন:** আমি যদি বিদেশ থেকে এনরোল করতে চাই?
-    **উত্তর:** বিদেশী শিক্ষার্থীরা PhonePe (ভারত: +91 9123944746) বা SSLCommerz-এর মাধ্যমে পেমেন্ট করতে পারেন।
+    **উত্তর:** বিদেশী শিক্ষার্থীরা PhonePe (ভারত: +91 9123944746) বা SSLCommerz-এর মাধ্যমে পেমেন্ট করতে পারেন। ভারতীয় শিক্ষার্থীরা PhonePe-এ **ভারতীয় রুপিতে (₹)** পেমেন্ট করবেন — প্রতিটি ব্যাচের ₹ মূল্য ব্যাচের তথ্যে দেওয়া আছে।
 
 ## যোগাযোগ ও সাপোর্ট
 - **ঠিকানা:** ৮৫, সুলতান আহমেদ রোড, মৌলভীপাড়া, ওয়ার্ড নম্বর: ২৭, খুলনা
@@ -556,9 +453,10 @@ ${userLine}
 
 ### মূল নিয়মসমূহ
 
-**১. উত্তর সংক্ষিপ্ত রাখো:**
+**১. উত্তর সংক্ষিপ্ত রাখো (PROGRESSIVE DISCLOSURE নিয়ম):**
 - সাধারণ প্রশ্নের উত্তর ২-৪ লাইনের মধ্যে দাও
-- একটি প্রশ্নের জন্য পুরো সিলেবাস বা দীর্ঘ তালিকা দেওয়ার দরকার নেই
+- **"কি কি কোর্স আছে?" বা "কোর্স সম্পর্কে জানতে চাই" — এই ধরনের প্রশ্নে শুধু কোর্সের নাম, মেয়াদ ও মূল্য বলো। মডিউল বা প্রজেক্ট লিস্ট দেওয়ার দরকার নেই।**
+- **বিস্তারিত সিলেবাস, মডিউল বা প্রজেক্ট তালিকা শুধুমাত্র তখনই দাও যখন user স্পষ্টভাবে জিজ্ঞেস করে: "সিলেবাস দেখাও", "বিস্তারিত বলো", "মডিউলগুলো কি কি" ইত্যাদি।**
 - যা জিজ্ঞেস করা হয়েছে শুধু সেটার উত্তর দাও
 
 **২. সরাসরি ও কনফিডেন্ট হও:**
