@@ -326,29 +326,6 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
             );
         }
 
-        // Check if user already enrolled in active batch of same course
-        const courseId = batch.courseId;
-
-        const existingCourseEnrollment = await EnrollmentModel.findOne({
-            userId,
-            status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Pending] }
-        })
-        .populate({
-            path: 'batchId',
-            match: {
-                courseId,
-                status: { $in: [BatchStatus.Upcoming, BatchStatus.Running] }
-            }
-        })
-        .session(session);
-
-        if (existingCourseEnrollment && existingCourseEnrollment.batchId) {
-            throw new ApiError(
-                StatusCodes.CONFLICT,
-                'You are already enrolled in a current batch of this course.'
-            );
-        }
-
         // Create enrollment
         let enrollment;
 
