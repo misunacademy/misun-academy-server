@@ -19,6 +19,7 @@ import { ProfileRoutes } from '../modules/Profile/profile.routes.js';
 import { SettingsRoutes } from '../modules/Settings/settings.routes.js';
 import { EmployeeRoutes } from '../modules/Employee/employee.routes.js';
 import { ChatRoutes } from '../modules/Chat/chat.routes.js';
+import { NotificationRoutes } from '../modules/Notification/notification.routes.js';
 
 
 const router = express.Router();
@@ -100,6 +101,10 @@ const moduleRoutes = [
     {
         path: '/chat',
         route: ChatRoutes,
+    },
+    {
+        path: '/notifications',
+        route: NotificationRoutes,
     },
 ];
 

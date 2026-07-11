@@ -13,6 +13,7 @@ import { EnrollmentModel } from './enrollment.model.js';
 import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { ProgressStatus } from '../../types/common.js';
+import { NotificationService } from '../Notification/notification.service.js';
 /**
  * Initiate enrollment for a batch
  * Creates pending enrollment and returns payment URL
@@ -65,6 +66,24 @@ const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
         enrollmentId,
         id
     );
+
+    setImmediate(async () => {
+        try {
+            const user = await UserModel.findById(id);
+            const batch = result.batch as any;
+            const courseTitle = batch?.courseId?.title || batch?.title || 'Course';
+            if (user) {
+                await NotificationService.createNotificationForAdmins({
+                    type: 'enrollment',
+                    title: 'New Enrollment',
+                    message: `${user.name} has enrolled in ${courseTitle} - ${batch.title}`,
+                    link: '/dashboard/admin/student',
+                });
+            }
+        } catch (error) {
+            console.error('Failed to send enrollment notification:', error);
+        }
+    });
 
     sendResponse(res, {
         statusCode: StatusCodes.CREATED,
@@ -438,6 +457,22 @@ const grantAccessByEmail = catchAsync(async (req: Request, res: Response) => {
     const batch = result.batch as any;
     const course = (batch?.courseId as any) || {};
 
+    if (!result.wasActive) {
+        setImmediate(async () => {
+            try {
+                await NotificationService.createNotification({
+                    userId: result.user._id.toString(),
+                    type: 'access_granted',
+                    title: 'Course Access Granted',
+                    message: `You have been granted access to ${course?.title || 'Course'} - ${batch?.title}`,
+                    link: '/my-classes',
+                });
+            } catch (error) {
+                console.error('Failed to send access granted notification:', error);
+            }
+        });
+    }
+
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
@@ -487,8 +522,25 @@ const enrollWithManualPayment = catchAsync(async (req: Request, res: Response) =
         paymentData
     );
 
-    // Send payment verification pending email
     const user = await UserModel.findById(id);
+
+    setImmediate(async () => {
+        try {
+            if (user) {
+                const courseData = (result.batch as any)?.courseId;
+                const courseTitle = typeof courseData === 'object' ? courseData?.title : '';
+                await NotificationService.createNotificationForAdmins({
+                    type: 'payment_pending',
+                    title: 'Manual Payment Pending',
+                    message: `${user.name} submitted a manual payment for ${courseTitle || result.batch.title}`,
+                    link: '/dashboard/admin/payment',
+                });
+            }
+        } catch (error) {
+            console.error('Failed to send payment pending notification:', error);
+        }
+    });
+
     if (user) {
         const courseData = (result.batch as any)?.courseId;
         const rawCourseName = typeof courseData === 'object'

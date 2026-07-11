@@ -5,11 +5,31 @@ import sendResponse from '../../utils/sendResponse.js';
 import { RecordingService } from './recording.service.js';
 import { CourseModel } from '../Course/course.model.js';
 import { Role } from '../../types/role.js';
+import { NotificationService } from '../Notification/notification.service.js';
 
 // Admin/Instructor: Create recording
 const createRecording = catchAsync(async (req: Request, res: Response) => {
     const userId = (req as any).user.id;
     const recording = await RecordingService.createRecording(req.body, userId);
+
+    if (recording.isPublished) {
+        setImmediate(async () => {
+            try {
+                await NotificationService.createBatchNotification(
+                    recording.batchId.toString(),
+                    {
+                        type: 'recording_published',
+                        title: 'New Live Recording',
+                        message: `New recording "${recording.title}" is now available`,
+                        link: '/my-classes',
+                    },
+                    userId
+                );
+            } catch (error) {
+                console.error('Failed to send recording notification:', error);
+            }
+        });
+    }
 
     sendResponse(res, {
         statusCode: StatusCodes.CREATED,
@@ -139,7 +159,33 @@ const getStudentRecordings = catchAsync(async (req: Request, res: Response) => {
 // Admin: Update recording
 const updateRecording = catchAsync(async (req: Request, res: Response) => {
     const { recordingId } = req.params as { recordingId: string };
+    const userId = (req as any).user.id;
+
+    const { RecordingModel } = await import('./recording.model.js');
+    const oldRecording = await RecordingModel.findById(recordingId).lean();
+
     const recording = await RecordingService.updateRecording(recordingId, req.body);
+
+    const wasPublished = oldRecording?.isPublished;
+    const nowPublished = recording.isPublished;
+    if (!wasPublished && nowPublished) {
+        setImmediate(async () => {
+            try {
+                await NotificationService.createBatchNotification(
+                    recording.batchId.toString(),
+                    {
+                        type: 'recording_published',
+                        title: 'New Live Recording',
+                        message: `New recording "${recording.title}" is now available`,
+                        link: '/my-classes',
+                    },
+                    userId
+                );
+            } catch (error) {
+                console.error('Failed to send recording notification:', error);
+            }
+        });
+    }
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,

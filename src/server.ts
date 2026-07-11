@@ -5,6 +5,7 @@ import { logger } from './config/logger.js';
 import { connectDB } from './config/database.js';
 import { initializeEmailWorker } from './services/emailService.js';
 import { scheduleEmployeeBirthdayReminders } from './utils/employeeBirthdayReminderScheduler.js';
+import { initializeSocketIO } from './services/socketService.js';
 
 let server: Server | null = null;
 let dbConnected = false;
@@ -29,13 +30,16 @@ async function initializeDatabase() {
 }
 
 async function startServer() {
-    try {
-        await initializeDatabase();
+        try {
+            await initializeDatabase();
 
-        server = http.createServer(app);
-        server.listen(env.PORT, () => {
-            console.log(`🚀 Server is running on port ${env.PORT}`);
-        });
+            server = http.createServer(app);
+
+            initializeSocketIO(server);
+
+            server.listen(env.PORT, () => {
+                console.log(`🚀 Server is running on port ${env.PORT}`);
+            });
         // await seedSuperAdmin();
         handleProcessEvents();
     } catch (error) {
