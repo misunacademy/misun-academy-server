@@ -10,8 +10,9 @@ import { CourseEnrollmentService } from './courseEnrollment.service.js';
 const getCourseProgress = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.user as any;
     const { courseId } = req.params as { courseId: string };
+    const { batchId } = req.query as { batchId?: string };
 
-    const progress = await CourseEnrollmentService.getCourseProgress(id, courseId);
+    const progress = await CourseEnrollmentService.getCourseProgress(id, courseId, batchId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,

@@ -13,7 +13,7 @@ import {
     sendCertificateIssuedEmail,
     sendCertificateApprovedEmail,
     sendEnrollmentConfirmationEmail,
-} from '../services/emailService.js';
+} from '../services/misunAcademyEmails.js';
 import { connectDB } from '../config/database.js';
 
 // Test email address - CHANGE THIS TO YOUR ACTUAL TEST EMAIL

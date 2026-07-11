@@ -36,7 +36,8 @@ const getAllCourses = catchAsync(async (req: Request, res: Response) => {
 });
 
 const getCourseById = catchAsync(async (req: Request, res: Response) => {
-    const course = await CourseService.getCourseById(req.params.id as string);
+    const batchId = typeof req.query.batchId === 'string' ? req.query.batchId : undefined;
+    const course = await CourseService.getCourseById(req.params.id as string, { batchId });
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -79,6 +80,20 @@ const deleteCourse = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+const assignInstructor = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { instructorId } = req.body as { instructorId: string | null };
+
+    const course = await CourseService.assignInstructor(id, instructorId ?? null);
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: instructorId ? 'Instructor assigned successfully' : 'Instructor removed successfully',
+        data: course,
+    });
+});
+
 export const CourseController = {
     createCourse,
     getAllCourses,
@@ -86,4 +101,5 @@ export const CourseController = {
     getCourseBySlug,
     updateCourse,
     deleteCourse,
+    assignInstructor,
 };

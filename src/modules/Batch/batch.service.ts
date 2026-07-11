@@ -48,12 +48,14 @@ export const BatchService = {
     },
 
     /**
-     * Get all batches with optional filters
+     * Get all batches with optional filters and pagination
      */
     getAllBatches: async (filters?: {
         status?: BatchStatus;
         courseId?: string;
         upcoming?: boolean;
+        page?: number;
+        limit?: number;
     }) => {
         const query: any = {};
 
@@ -63,11 +65,34 @@ export const BatchService = {
             query.status = { $in: [BatchStatus.Upcoming, BatchStatus.Running] };
         }
 
-        return await BatchModel.find(query)
+        // Pagination
+        const page = Math.max(1, filters?.page || 1);
+        const limit = Math.max(1, filters?.limit || 10);
+        const skip = (page - 1) * limit;
+
+        // Get total count
+        const total = await BatchModel.countDocuments(query);
+        const totalPages = Math.ceil(total / limit);
+
+        // Get paginated data
+        const data = await BatchModel.find(query)
             .populate('courseId')
-            .populate('instructors', 'name')
-            .sort({ startDate: -1 });
+            // .populate('instructors', 'name')
+            .sort({ startDate: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        return {
+            data,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages,
+            },
+        };
     },
+
 
     /**
      * Get current enrollment batch for a specific course
@@ -76,7 +101,7 @@ export const BatchService = {
     getCurrentEnrollmentBatch: async (courseId?: string) => {
         const now = new Date();
         const query: any = {
-            status: { $in: ['upcoming', 'running'] },
+            status: 'upcoming',
             enrollmentEndDate: { $gte: now },
         };
 
@@ -86,7 +111,7 @@ export const BatchService = {
 
         const batch = await BatchModel.findOne(query)
             .populate('courseId')
-            .populate('instructors', 'name')
+            // .populate('instructors', 'name')
             .sort({ enrollmentStartDate: 1 });
 
         return batch;
@@ -116,7 +141,7 @@ export const BatchService = {
     getBatchById: async (id: string) => {
         const batch = await BatchModel.findById(id)
             .populate('courseId')
-            .populate('instructors');
+        // .populate('instructors');
 
         if (!batch) {
             throw new ApiError(StatusCodes.NOT_FOUND, "Batch not found");
@@ -222,14 +247,54 @@ export const BatchService = {
             throw new ApiError(StatusCodes.NOT_FOUND, "Batch not found");
         }
 
-        // if (batch.currentEnrollment > 0) {
-        //     throw new ApiError(
-        //         StatusCodes.BAD_REQUEST, 
-        //         "Cannot delete batch with active enrollments"
-        //     );
-        // }
-
         await BatchModel.findByIdAndDelete(id);
         return { message: "Batch deleted successfully" };
     },
+
+    /**
+     * get upcoming batches for a course (used by student-facing views to show open enrollments)
+     */
+    getUpcomingBatches: async (filters?: {
+        status?: BatchStatus;
+        courseId?: string;
+        upcoming?: boolean;
+        page?: number;
+        limit?: number;
+    }) => {
+        const query: any = {};
+
+        if (filters?.status) query.status = filters.status;
+        if (filters?.courseId) query.courseId = filters.courseId;
+        if (filters?.upcoming) {
+            query.status = BatchStatus.Upcoming;
+        }
+
+        // Pagination
+        const page = Math.max(1, filters?.page || 1);
+        const limit = Math.max(1, filters?.limit || 10);
+        const skip = (page - 1) * limit;
+
+        // Get total count
+        const total = await BatchModel.countDocuments(query);
+        const totalPages = Math.ceil(total / limit);
+
+        // Get paginated data
+        const data = await BatchModel.find(query)
+            .populate('courseId')
+            // .populate('instructors', 'name')
+            .sort({ startDate: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        return {
+            data,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages,
+            },
+        };
+    },
 };
+

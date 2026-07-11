@@ -1,33 +1,33 @@
 import express from 'express';
 import { RecordingController } from './recording.controller.js';
-import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
+import { requireAuth, requireInstructor } from '../../middlewares/betterAuth.js';
 import { checkBatchEnrollment } from '../../middlewares/batchAccess.js';
 
 const router = express.Router();
 
-// Admin routes
-router.post('/', requireAuth, requireAdmin, RecordingController.createRecording);
+// Admin/Instructor routes
+router.post('/', requireAuth, requireInstructor, RecordingController.createRecording);
 
-router.get('/', requireAuth, requireAdmin, RecordingController.getAllRecordings);
+router.get('/', requireAuth, requireInstructor, RecordingController.getAllRecordings);
 
 router.get(
     '/:recordingId',
     requireAuth,
-    requireAdmin,
+    requireInstructor,
     RecordingController.getRecordingById
 );
 
 router.put(
     '/:recordingId',
     requireAuth,
-    requireAdmin,
+    requireInstructor,
     RecordingController.updateRecording
 );
 
 router.delete(
     '/:recordingId',
     requireAuth,
-    requireAdmin,
+    requireInstructor,
     RecordingController.deleteRecording
 );
 

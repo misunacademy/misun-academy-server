@@ -1,64 +1,18 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+import { apiReference } from '@scalar/express-api-reference';
 import router from './routes/index.js';
 import globalErrorHandler from './middlewares/globalErrorHandler.js';
 import env from './config/env.js';
 import { connectDB } from './config/database.js';
 
 const app = express();
-
-const toOrigin = (value?: string | null): string | null => {
-    if (!value) return null;
-    try {
-        return new URL(value).origin;
-    } catch {
-        return null;
-    }
-};
-
-const withHostVariants = (origin: string): string[] => {
-    const variants = new Set<string>([origin]);
-
-    try {
-        const url = new URL(origin);
-        const host = url.hostname;
-        if (host.startsWith('www.')) {
-            url.hostname = host.replace(/^www\./, '');
-            variants.add(url.origin);
-        } else {
-            url.hostname = `www.${host}`;
-            variants.add(url.origin);
-        }
-    } catch {
-        // Ignore malformed values.
-    }
-
-    return Array.from(variants);
-};
-
-const allowedOrigins = new Set<string>();
-for (const rawOrigin of [
-    env.MA_FRONTEND_URL,
-    env.EP_FRONTEND_URL,
-    env.CLIENT_URL,
-    env.SSL_PAYMENT_API,
-    env.SSL_VALIDATION_API,
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'https://securepay.sslcommerz.com',
-    'https://sandbox.sslcommerz.com',
-    'https://seamless-epay.sslcommerz.com',
-]) {
-    const origin = toOrigin(rawOrigin);
-    if (!origin) continue;
-    for (const variant of withHostVariants(origin)) {
-        allowedOrigins.add(variant);
-    }
-}
 
 app.set("trust proxy", 1);
 
@@ -87,19 +41,12 @@ if (process.env.VERCEL) {
 
 // Middleware
 app.use(cors({
-    origin: (origin, callback) => {
-        if (!origin) {
-            callback(null, true);
-            return;
-        }
-
-        if (allowedOrigins.has(origin)) {
-            callback(null, true);
-            return;
-        }
-
-        callback(new Error(`CORS blocked for origin: ${origin}`));
-    },
+    origin: [
+        env.MA_FRONTEND_URL!,
+        env.EP_FRONTEND_URL!,
+        'http://localhost:3000', // Fallback for development
+        'http://localhost:3001',
+    ].filter(Boolean),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
@@ -200,6 +147,37 @@ const apiRateLimiter = rateLimit({
 // Routes (Better Auth already mounted above)
 // Apply rate limiter specifically to API routes
 app.use('/api/v1', apiRateLimiter, router);
+
+const openApiSpecPath = path.resolve(process.cwd(), 'openapi.json');
+
+app.get('/openapi.json', (_req, res) => {
+    if (!fs.existsSync(openApiSpecPath)) {
+        return res.status(500).json({
+            success: false,
+            message: 'OpenAPI spec not found. Run: npm run docs:generate',
+        });
+    }
+
+    return res.sendFile(openApiSpecPath);
+});
+
+// Scalar serves a CDN script and inline bootstrap script; relax CSP only for docs UI.
+app.use('/docs', (_req, res, next) => {
+    res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https:; font-src 'self' data: https:"
+    );
+    next();
+});
+
+if (process.env.NODE_ENV === 'development') {
+    app.use(
+        '/docs',
+        apiReference({
+            url: '/openapi.json',
+        })
+    );
+}
 
 // Default route for testing
 app.get('/', (req, res) => {

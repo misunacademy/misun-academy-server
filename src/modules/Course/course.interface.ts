@@ -22,6 +22,7 @@ export interface ICourse {
     price: number;
     discountPercentage?: number;
     instructor?: string;
+    instructorId?: Types.ObjectId | null;
     features?: string[];
     highlights?: string[];
     createdBy: Types.ObjectId;

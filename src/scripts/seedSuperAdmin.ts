@@ -1,44 +1,64 @@
 import 'dotenv/config.js';
 import mongoose from 'mongoose';
-import { AdminModel } from '../modules/Admin/admin.model.js';
 import { UserModel } from '../modules/User/user.model.js';
 import { Role } from '../types/role.js';
 import env from '../config/env.js';
 import { connectDB } from '../config/database.js';
+import { getAuth } from '../config/betterAuth.js';
+import ApiError from '../errors/ApiError.js';
+import { StatusCodes } from 'http-status-codes';
+import { UserStatus } from '../types/common.js';
 
 export const seedSuperAdmin = async () => {
     try {
         await connectDB();
 
-        // Ensure Admin collection has the super admin
-        const existingAdmin = await AdminModel.findOne({ email: env.SUPER_ADMIN_EMAIL });
-        if (!existingAdmin) {
-            await AdminModel.create({
-                name: 'Super Admin',
-                email: env.SUPER_ADMIN_EMAIL,
-                password: env.SUPER_ADMIN_PASSWORD, // hashed in pre-save hook
-                emailVerified:true,
-                role: Role.SUPERADMIN,
+        const auth = getAuth();
+
+        try {
+            await auth.api.signUpEmail({
+                body: {
+                    name: 'Super Admin',
+                    email: env.SUPER_ADMIN_EMAIL,
+                    password: env.SUPER_ADMIN_PASSWORD,
+                    asResponse: false,
+                }
             });
-            console.log('✅ Super Admin created in Admin collection');
-        } else {
-            console.log('Super Admin already exists in Admin collection');
+        } catch (err: any) {
+            const msg = err?.body?.message || err?.message || 'Failed to create user';
+            if (msg.includes('User already exists')) {
+                console.log('Super Admin already exists in Better Auth, proceeding to update metadata...');
+            } else {
+                throw new ApiError(StatusCodes.BAD_REQUEST, msg);
+            }
         }
 
-        // Also ensure a matching User document exists so normal /auth/login works
-        const existingUser = await UserModel.findOne({ email: env.SUPER_ADMIN_EMAIL });
-        if (!existingUser) {
-            await UserModel.create({
-                name: 'Super Admin',
-                email: env.SUPER_ADMIN_EMAIL,
-                password: env.SUPER_ADMIN_PASSWORD,
-                role: Role.SUPERADMIN,
-                status: 'active',
-                emailVerified: true,
-            });
-            console.log('✅ Super Admin created in User collection');
+        const userPayload: Record<string, any> = {
+            name: 'Super Admin',
+            email: env.SUPER_ADMIN_EMAIL,
+            emailVerified: true,
+            status: UserStatus.Active,
+            role: Role.SUPERADMIN,
+        };
+
+        // Persist local user metadata for the newly created auth account
+        let localUser = await UserModel.findOne({ email: env.SUPER_ADMIN_EMAIL }).select('-password').lean();
+
+        if (localUser) {
+            localUser = await UserModel.findByIdAndUpdate(
+                localUser._id,
+                userPayload,
+                { new: true, runValidators: true },
+            )
+                .select('-password')
+                .lean();
         } else {
-            console.log('Super Admin already exists in User collection');
+            const createdLocalUser = await UserModel.create(userPayload);
+            localUser = await UserModel.findById(createdLocalUser._id).select('-password').lean();
+        }
+
+        if (!localUser) {
+            throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'User creation failed after auth registration');
         }
 
         console.log('✅ Seeding complete');

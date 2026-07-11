@@ -20,7 +20,6 @@ const EnvSchema = z.object({
     AUTH_COOKIE_DOMAIN: z.string().optional(),
     GOOGLE_CLIENT_ID: z.string(),
     GOOGLE_CLIENT_SECRET: z.string(),
-    GOOGLE_REDIRECT_URI: z.string().optional(),
     CLIENT_URL: z.string().optional(),
 
     // JWT (DEPRECATED - will be removed after migration)
@@ -47,19 +46,30 @@ const EnvSchema = z.object({
     EMAIL_MAX_RETRIES: z.string().optional().default('3'),
 
     // Social media group links (optional)
-    FACEBOOK_GROUP_LINK: z.string().optional(),
-    WHATSAPP_GROUP_LINK: z.string().optional(),
-    EMAIL_SOCIAL_YOUTUBE: z.string().optional(),
-    EMAIL_SOCIAL_FACEBOOK: z.string().optional(),
-    EMAIL_SOCIAL_TWITTER: z.string().optional(),
-    EMAIL_SOCIAL_LINKEDIN: z.string().optional(),
-    EMAIL_SOCIAL_INSTAGRAM: z.string().optional(),
-    EMAIL_SOCIAL_WEBSITE: z.string().optional(),
+    MA_FACEBOOK_GROUP_LINK: z.string().optional(),
+    MA_WHATSAPP_GROUP_LINK: z.string().optional(),
+    EP_FACEBOOK_GROUP_LINK: z.string().optional(),
+    EP_WHATSAPP_GROUP_LINK: z.string().optional(),
+
+    MA_EMAIL_SOCIAL_YOUTUBE: z.string().optional(),
+    MA_EMAIL_SOCIAL_FACEBOOK: z.string().optional(),
+    MA_EMAIL_SOCIAL_TWITTER: z.string().optional(),
+    MA_EMAIL_SOCIAL_LINKEDIN: z.string().optional(),
+    MA_EMAIL_SOCIAL_WEBSITE: z.string().optional(),
+
+    EP_EMAIL_SOCIAL_YOUTUBE: z.string().optional(),
+    EP_EMAIL_SOCIAL_FACEBOOK: z.string().optional(),
 
     // Cloudinary config (required for image uploads)
     CLOUDINARY_CLOUD_NAME: z.string(),
     CLOUDINARY_API_KEY: z.string(),
-    CLOUDINARY_API_SECRET: z.string()
+    CLOUDINARY_API_SECRET: z.string(),
+
+    // Admin Email for Employee Birthday Reminders
+    ADMIN_EMAIL: z.string(),
+
+    // Groq AI API Key
+    GROQ_API_KEY: z.string().optional(),
 });
 
 // Validate and parse environment variables

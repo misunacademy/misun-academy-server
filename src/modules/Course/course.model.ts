@@ -70,6 +70,11 @@ const courseSchema = new Schema<ICourse>(
         instructor: {
             type: String,
         },
+        instructorId: {
+            type: Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
         features: {
             type: [String],
             default: [],

@@ -1,6 +1,6 @@
 // Static imports for CJS-compatible packages only
 import mongoose from 'mongoose';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../services/emailService.js';
+import { sendVerificationEmail, sendPasswordResetEmail } from '../services/misunAcademyEmails.js';
 import { Role } from '../types/role.js';
 import { UserStatus } from '../types/common.js';
 import { ProfileModel } from '../modules/Profile/profile.model.js';
@@ -10,60 +10,15 @@ import { mongodbAdapter } from 'better-auth/adapters/mongodb';
 // Use the shared email service for auth emails (reuse SMTP config & retry logic)
 let authInstance: any = null;
 
-const toOrigin = (value?: string | null): string | null => {
-  if (!value) return null;
-  try {
-    return new URL(value).origin;
-  } catch {
-    return null;
-  }
-};
-
-const withHostVariants = (origin: string): string[] => {
-  const variants = new Set<string>([origin]);
-
-  try {
-    const url = new URL(origin);
-    const host = url.hostname;
-    if (host.startsWith('www.')) {
-      url.hostname = host.replace(/^www\./, '');
-      variants.add(url.origin);
-    } else {
-      url.hostname = `www.${host}`;
-      variants.add(url.origin);
-    }
-  } catch {
-    // Ignore malformed values.
-  }
-
-  return Array.from(variants);
-};
-
 export const initializeAuth = async () => {
   if (authInstance) {
     return authInstance;
   }
 
-  const authBaseUrl = process.env.BETTER_AUTH_URL!.replace(/\/+$/, '');
-  const googleRedirectUri =
-    process.env.GOOGLE_REDIRECT_URI?.trim() || `${authBaseUrl}/callback/google`;
 
   const authCookieDomain = process.env.AUTH_COOKIE_DOMAIN?.trim();
   const enableCrossSubDomainCookies =
     process.env.NODE_ENV === 'production' && Boolean(authCookieDomain);
-
-  const trustedOrigins = new Set<string>();
-  for (const rawOrigin of [
-    process.env.MA_FRONTEND_URL,
-    process.env.CLIENT_URL,
-    process.env.EP_FRONTEND_URL,
-  ]) {
-    const origin = toOrigin(rawOrigin);
-    if (!origin) continue;
-    for (const variant of withHostVariants(origin)) {
-      trustedOrigins.add(variant);
-    }
-  }
 
   authInstance = betterAuth({
     database: mongodbAdapter(mongoose.connection.getClient().db(), {
@@ -73,7 +28,7 @@ export const initializeAuth = async () => {
       client: mongoose.connection.getClient(),
     }),
     // 'http://localhost:5000/api/v1/auth'
-    baseURL: authBaseUrl,
+    baseURL: process.env.BETTER_AUTH_URL!,
     secret: process.env.BETTER_AUTH_SECRET!,
 
     // Redirect to client after OAuth
@@ -146,7 +101,7 @@ export const initializeAuth = async () => {
         // Always get refresh token and prompt for account selection
         accessType: 'offline',
         prompt: 'select_account consent',
-        redirectURI: googleRedirectUri,
+        redirectURI: `${process.env.BETTER_AUTH_URL}/callback/google`,
       },
     },
 
@@ -206,13 +161,17 @@ export const initializeAuth = async () => {
       // Let MongoDB adapter handle ObjectId generation natively
 
       defaultCookieAttributes: {
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'none',
+        secure: true,
         httpOnly: true,
       },
     },
 
-    trustedOrigins: Array.from(trustedOrigins),
+    trustedOrigins: [
+      process.env.MA_FRONTEND_URL!,
+      process.env.CLIENT_URL!,
+      process.env.EP_FRONTEND_URL!,
+    ].filter(Boolean), // Filter out any undefined values
 
     // Database hooks for custom logic
     databaseHooks: {

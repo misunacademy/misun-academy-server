@@ -6,11 +6,16 @@ import ApiError from '../../errors/ApiError.js';
 /**
  * Create a new module for a course
  */
-const createModule = async (courseId: string, moduleData: any) => {
+const createModule = async (courseId: string, batchId: string, moduleData: any) => {
+    if (!batchId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Batch ID is required');
+    }
+
     // Check if order index exists
     if (moduleData.orderIndex !== undefined) {
         const existingModule = await ModuleModel.findOne({
             courseId,
+            batchId,
             orderIndex: moduleData.orderIndex,
         });
 
@@ -22,13 +27,14 @@ const createModule = async (courseId: string, moduleData: any) => {
         }
     } else {
         // Auto-assign order index
-        const maxOrder = await ModuleModel.findOne({ courseId }).sort({ orderIndex: -1 });
+        const maxOrder = await ModuleModel.findOne({ courseId, batchId }).sort({ orderIndex: -1 });
         moduleData.orderIndex = maxOrder ? maxOrder.orderIndex + 1 : 0;
     }
 
     const module = await ModuleModel.create({
         ...moduleData,
         courseId,
+        batchId,
     });
 
     return module;
@@ -37,8 +43,8 @@ const createModule = async (courseId: string, moduleData: any) => {
 /**
  * Get all modules for a course
  */
-const getCourseModules = async (courseId: string, status?: string) => {
-    const query: any = { courseId };
+const getCourseModules = async (courseId: string, batchId: string, status?: string) => {
+    const query: any = { courseId, batchId };
     if (status) query.status = status;
 
     const modules = await ModuleModel.find(query).sort({ orderIndex: 1 });
@@ -85,10 +91,15 @@ const updateModule = async (moduleId: string, updateData: any) => {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
     }
 
+    if (updateData.batchId && module.batchId && updateData.batchId.toString() !== module.batchId.toString()) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Batch cannot be changed for a module');
+    }
+
     // Check order index conflict
     if (updateData.orderIndex !== undefined && updateData.orderIndex !== module.orderIndex) {
         const existingModule = await ModuleModel.findOne({
             courseId: module.courseId,
+            batchId: module.batchId,
             orderIndex: updateData.orderIndex,
             _id: { $ne: moduleId },
         });
@@ -134,7 +145,11 @@ const deleteModule = async (moduleId: string) => {
 /**
  * Reorder modules
  */
-const reorderModules = async (courseId: string, moduleOrders: { moduleId: string; orderIndex: number }[]) => {
+const reorderModules = async (
+    courseId: string,
+    batchId: string,
+    moduleOrders: { moduleId: string; orderIndex: number }[]
+) => {
     if (!Array.isArray(moduleOrders)) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'moduleOrders must be an array');
     }
@@ -146,13 +161,26 @@ const reorderModules = async (courseId: string, moduleOrders: { moduleId: string
         )
     );
 
-    const modules = await ModuleModel.find({ courseId }).sort({ orderIndex: 1 });
+    const modules = await ModuleModel.find({ courseId, batchId }).sort({ orderIndex: 1 });
+    return modules;
+};
+
+/**
+ * Get modules without batch assignment for a course
+ */
+const getUnassignedCourseModules = async (courseId: string) => {
+    const modules = await ModuleModel.find({
+        courseId,
+        $or: [{ batchId: { $exists: false } }, { batchId: null }],
+    }).sort({ orderIndex: 1 });
+
     return modules;
 };
 
 export const ModuleService = {
     createModule,
     getCourseModules,
+    getUnassignedCourseModules,
     getModuleById,
     updateModule,
     deleteModule,

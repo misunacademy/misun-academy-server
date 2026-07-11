@@ -14,6 +14,9 @@ router.post('/courses/:courseId/modules', ModuleController.createModule);
 // Get all modules for a course
 router.get('/courses/:courseId/modules', ModuleController.getCourseModules);
 
+// Get unassigned modules for a course
+router.get('/courses/:courseId/modules/unassigned', ModuleController.getUnassignedCourseModules);
+
 // Reorder modules
 router.put('/courses/:courseId/modules/reorder', ModuleController.reorderModules);
 

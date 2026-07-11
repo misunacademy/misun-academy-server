@@ -2,11 +2,13 @@ import { Request, Response } from "express";
 import catchAsync from "../../utils/catchAsync.js";
 import sendResponse from "../../utils/sendResponse.js";
 import { DashboardService } from "./dashboard.service.js";
+import { StatusCodes } from "http-status-codes";
 
 const getDashboardMetaData = catchAsync(async (req: Request, res: Response) => {
-    const result = await DashboardService.getDashboardMetaData();
+    const courseId = typeof req.query.courseId === 'string' ? req.query.courseId : undefined;
+    const result = await DashboardService.getDashboardMetaData(courseId);
     sendResponse(res, {
-        statusCode: 200,
+        statusCode: StatusCodes.OK,
         success: true,
         message: 'Metadata Retrive successfully !',
         data: result,
@@ -16,7 +18,7 @@ const getDashboardMetaData = catchAsync(async (req: Request, res: Response) => {
 const getAdminDashboard = catchAsync(async (req: Request, res: Response) => {
     const result = await DashboardService.getAdminDashboard();
     sendResponse(res, {
-        statusCode: 200,
+        statusCode: StatusCodes.OK,
         success: true,
         message: 'Admin dashboard data retrieved successfully',
         data: result,
@@ -26,7 +28,7 @@ const getAdminDashboard = catchAsync(async (req: Request, res: Response) => {
 const getUserStats = catchAsync(async (req: Request, res: Response) => {
     const result = await DashboardService.getUserStats();
     sendResponse(res, {
-        statusCode: 200,
+        statusCode: StatusCodes.OK,
         success: true,
         message: 'User stats retrieved successfully',
         data: result,
@@ -37,7 +39,7 @@ const getStudentDashboard = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.user as any;
     const result = await DashboardService.getStudentDashboard(id);
     sendResponse(res, {
-        statusCode: 200,
+        statusCode: StatusCodes.OK,
         success: true,
         message: 'Student dashboard data retrieved successfully',
         data: result,
@@ -49,17 +51,28 @@ const getStudentDashboard = catchAsync(async (req: Request, res: Response) => {
 //     const { id } = req.user as any;
 //     const result = await DashboardService.getEmployeeDashboard(id);
 //     sendResponse(res, {
-//         statusCode: 200,
+//         statusCode: StatusCodes.OK,
 //         success: true,
 //         message: 'Employee dashboard data retrieved successfully',
 //         data: result,
 //     });
 // });
 
+const getInstructorDashboard = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const result = await DashboardService.getInstructorDashboard(id);
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Instructor dashboard data retrieved successfully',
+        data: result,
+    });
+});
+
 export const DashboardController = {
     getDashboardMetaData,
     getAdminDashboard,
     getUserStats,
     getStudentDashboard,
-    // getEmployeeDashboard,
+    getInstructorDashboard,
 }

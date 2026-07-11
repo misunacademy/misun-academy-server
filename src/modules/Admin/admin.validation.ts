@@ -21,3 +21,17 @@ export const sendNewsUpdateSchema = z.object({
         message: z.string().min(1, { message: 'Message is required' }),
     }),
 });
+
+export const sendBatchProgressReminderSchema = z.object({
+    body: z.object({
+        courseId: z.string().min(1, { message: 'Course ID is required' }),
+        batchId: z.string().min(1, { message: 'Batch ID is required' }),
+    }),
+});
+
+export const sendBatchIncompleteReminderSchema = z.object({
+    body: z.object({
+        courseId: z.string().min(1, { message: 'Course ID is required' }),
+        batchId: z.string().min(1, { message: 'Batch ID is required' }),
+    }),
+});

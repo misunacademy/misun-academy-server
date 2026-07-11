@@ -26,15 +26,21 @@ const createRecording = async (
 
 const getAllRecordings = async (filters: {
     courseId?: string;
+    /** Filter by multiple course IDs (used to scope instructor access) */
+    courseIds?: string[];
     batchId?: string;
     isPublished?: boolean;
     page?: number;
     limit?: number;
 }) => {
-    const { courseId, batchId, isPublished, page = 1, limit = 20 } = filters;
+    const { courseId, courseIds, batchId, isPublished, page = 1, limit = 20 } = filters;
 
     const query: any = {};
-    if (courseId) query.courseId = courseId;
+    if (courseId) {
+        query.courseId = courseId;
+    } else if (courseIds && courseIds.length > 0) {
+        query.courseId = { $in: courseIds };
+    }
     if (batchId) query.batchId = batchId;
     if (isPublished !== undefined) query.isPublished = isPublished;
 
@@ -91,20 +97,19 @@ const getBatchRecordings = async (batchId: string) => {
 
 const getStudentRecordings = async (userId: string) => {
     // Get student's enrollments
-    // const { EnrollmentModel } = require('../Enrollment/enrollment.model');
     const enrollments = await EnrollmentModel.find({
         userId: userId,
         status: 'active',
     }).select('batchId');
 
-    console.log('Student Enrollments:', {
-        userId,
-        enrollmentCount: enrollments.length,
-        enrollments: enrollments.map((e: any) => ({
-            batchId: e.batchId,
-            status: e.status
-        }))
-    });
+    // console.log('Student Enrollments:', {
+    //     userId,
+    //     enrollmentCount: enrollments.length,
+    //     enrollments: enrollments.map((e: any) => ({
+    //         batchId: e.batchId,
+    //         status: e.status
+    //     }))
+    // });
 
     const batchIds = enrollments.map((e: any) => e.batchId);
 

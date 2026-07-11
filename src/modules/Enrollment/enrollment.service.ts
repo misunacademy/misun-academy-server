@@ -3,17 +3,16 @@ import ApiError from '../../errors/ApiError.js';
 import { EnrollmentModel } from './enrollment.model.js';
 import { EnrollmentCounterModel } from './enrollmentCounter.model.js';
 import { BatchModel } from '../Batch/batch.model.js';
-import { BatchStatus, EnrollmentStatus } from '../../types/common.js';
+import { BatchStatus, EnrollmentStatus, UserStatus } from '../../types/common.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
 import { ProgressStatus } from '../../types/common.js';
-import { sendEnrollmentConfirmationEmail } from '../../services/emailService.js';
 import { UserModel } from '../User/user.model.js';
 import { Status } from '../../types/common.js';
 import { PaymentModel } from '../Payment/payment.model.js';
+import { ProfileService } from '../Profile/profile.service.js';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
-import { ProfileService } from '../Profile/profile.service.js';
 import { StudentIdCounterModel } from '../User/studentIdCounter.model.js';
 
 type MongoDuplicateKeyError = {
@@ -68,6 +67,54 @@ const syncStudentCounterToCurrentMax = async (
     );
 };
 
+const assignStudentIdIfMissing = async (
+    userId: string,
+    session: mongoose.ClientSession
+): Promise<void> => {
+    const user = await UserModel.findById(userId).session(session);
+
+    if (!user || user.studentId) {
+        return;
+    }
+
+    const year = new Date().getFullYear().toString();
+    // Keep counter aligned before assigning a new ID.
+    await syncStudentCounterToCurrentMax(year, session);
+
+    const counter = await StudentIdCounterModel.findByIdAndUpdate(
+        { _id: year },
+        { $inc: { count: 1 } },
+        {
+            new: true,
+            upsert: true,
+            session,
+        }
+    );
+
+    if (!counter) {
+        throw new ApiError(
+            StatusCodes.INTERNAL_SERVER_ERROR,
+            'Failed to generate student ID'
+        );
+    }
+
+    const paddedCount = String(counter.count).padStart(4, '0');
+    user.studentId = `SI-${year}-${paddedCount}`;
+
+    try {
+        await user.save({ session });
+    } catch (error) {
+        if (isStudentIdDuplicateError(error)) {
+            throw new ApiError(
+                StatusCodes.CONFLICT,
+                'Could not assign a unique student ID. Please try again.'
+            );
+        }
+
+        throw error;
+    }
+};
+
 /**
  * Generate unique enrollment ID
  */
@@ -77,7 +124,7 @@ const syncStudentCounterToCurrentMax = async (
 //     const paddedCount = String(count + 1).padStart(5, '0');
 //     return `MA-${batch}${year}${paddedCount}`;
 // };
-const generateEnrollmentId = async (batch: string, courseSlug: string ): Promise<string> => {
+const generateEnrollmentId = async (batch: string = '', courseSlug: string = ''): Promise<string> => {
     const year = new Date().getFullYear();
 
     const isEnglishCourse = courseSlug.toLowerCase().includes('english');
@@ -231,13 +278,15 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
             // Ensure existing enrollment has an enrollmentId (required for SSLCommerz flow)
             if (!existingPendingEnrollment.enrollmentId) {
                 const batchObj = existingPendingEnrollment.batchId as any;
-                // const batchNumber = batchObj?.batchNumber?.toString() || '6';
-                const batchNumber = batchObj?.title?.split(' ')[1];
+                const batchNumber = batchObj?.title.split(' ')[1];
                 const courseSlug = (batchObj?.courseId as any)?.slug || '';
                 const generatedEnrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
                 existingPendingEnrollment.enrollmentId = generatedEnrollmentId;
                 await existingPendingEnrollment.save({ session });
             }
+
+            // Existing pending enrollments from older data may miss studentId.
+            await assignStudentIdIfMissing(userId, session);
 
             await session.commitTransaction();
 
@@ -277,29 +326,6 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
             );
         }
 
-        // Check if user already enrolled in active batch of same course
-        const courseId = batch.courseId;
-
-        const existingCourseEnrollment = await EnrollmentModel.findOne({
-            userId,
-            status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Pending] }
-        })
-        .populate({
-            path: 'batchId',
-            match: {
-                courseId,
-                status: { $in: [BatchStatus.Upcoming, BatchStatus.Running] }
-            }
-        })
-        .session(session);
-
-        if (existingCourseEnrollment && existingCourseEnrollment.batchId) {
-            throw new ApiError(
-                StatusCodes.CONFLICT,
-                'You are already enrolled in a current batch of this course.'
-            );
-        }
-
         // Create enrollment
         let enrollment;
 
@@ -329,46 +355,7 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
         }
 
         // Assign Student ID if not exists
-        const user = await UserModel.findById(userId).session(session);
-
-        if (user && !user.studentId) {
-            const year = new Date().getFullYear().toString();
-            // Keep counter aligned before assigning a new ID.
-            await syncStudentCounterToCurrentMax(year, session);
-
-            const counter = await StudentIdCounterModel.findByIdAndUpdate(
-                { _id: year },
-                { $inc: { count: 1 } },
-                {
-                    new: true,
-                    upsert: true,
-                    session,
-                }
-            );
-
-            if (!counter) {
-                throw new ApiError(
-                    StatusCodes.INTERNAL_SERVER_ERROR,
-                    'Failed to generate student ID'
-                );
-            }
-
-            const paddedCount = String(counter.count).padStart(4, '0');
-            user.studentId = `SI-${year}-${paddedCount}`;
-
-            try {
-                await user.save({ session });
-            } catch (error) {
-                if (isStudentIdDuplicateError(error)) {
-                    throw new ApiError(
-                        StatusCodes.CONFLICT,
-                        'Could not assign a unique student ID. Please try again.'
-                    );
-                }
-
-                throw error;
-            }
-        }
+        await assignStudentIdIfMissing(userId, session);
 
         await session.commitTransaction();
 
@@ -504,8 +491,8 @@ const initializeModuleProgress = async (enrollmentId: string, batchId: string) =
 
     if (!batch) return;
 
-    // Get all modules for the course
-    const modules = await ModuleModel.find({ courseId: batch.courseId }).sort({ orderIndex: 1 });
+    // Get all modules for the batch
+    const modules = await ModuleModel.find({ courseId: batch.courseId, batchId }).sort({ orderIndex: 1 });
 
     if (modules.length === 0) return;
 
@@ -544,7 +531,9 @@ const getUserEnrollments = async (userId: string, status?: EnrollmentStatus) => 
     const enrollmentsWithProgress = await Promise.all(
         enrollments.map(async (enrollment) => {
             const moduleProgress = await ModuleProgressModel.find({ enrollmentId: enrollment._id });
-            const modules = await ModuleModel.find({ courseId: (enrollment.batchId as any)?.courseId?._id ?? (enrollment.batchId as any)?.courseId });
+            const resolvedBatchId = (enrollment.batchId as any)?._id ?? enrollment.batchId;
+            const resolvedCourseId = (enrollment.batchId as any)?.courseId?._id ?? (enrollment.batchId as any)?.courseId;
+            const modules = await ModuleModel.find({ courseId: resolvedCourseId, batchId: resolvedBatchId });
 
             const totalModules = modules.length;
             const completedModules = moduleProgress.filter(
@@ -569,6 +558,71 @@ const getUserEnrollments = async (userId: string, status?: EnrollmentStatus) => 
     );
 
     return enrollmentsWithProgress;
+};
+
+const getSpecialAccessEnrollments = async (params: {
+    page?: number | string;
+    limit?: number | string;
+    search?: string;
+}) => {
+    const pageNumber = Number(params.page) || 1;
+    const limitNumber = Number(params.limit) || 10;
+    const skip = (pageNumber - 1) * limitNumber;
+    const query: any = { accessType: 'special' };
+
+    if (params.search) {
+        const escaped = params.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = new RegExp(escaped, 'i');
+        const matchedUsers = await UserModel.find({
+            $or: [{ name: searchRegex }, { email: searchRegex }, { phone: searchRegex }],
+        })
+            .select('_id')
+            .lean();
+
+        const userIds = matchedUsers.map((user) => user._id);
+
+        if (userIds.length === 0) {
+            return {
+                data: [],
+                meta: {
+                    total: 0,
+                    page: pageNumber,
+                    limit: limitNumber,
+                    totalPages: 0,
+                },
+            };
+        }
+
+        query.userId = { $in: userIds };
+    }
+
+    const [data, total] = await Promise.all([
+        EnrollmentModel.find(query)
+            .populate({
+                path: 'userId',
+                select: 'name email status studentId',
+            })
+            .populate({
+                path: 'batchId',
+                select: 'title courseId',
+                populate: { path: 'courseId', select: 'title' },
+            })
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limitNumber)
+            .lean(),
+        EnrollmentModel.countDocuments(query),
+    ]);
+
+    return {
+        data,
+        meta: {
+            total,
+            page: pageNumber,
+            limit: limitNumber,
+            totalPages: Math.ceil(total / limitNumber),
+        },
+    };
 };
 
 /**
@@ -599,8 +653,9 @@ const getEnrollmentDetails = async (enrollmentId: string, userId: string) => {
 
     // Get progress statistics
     const moduleProgress = await ModuleProgressModel.find({ enrollmentId });
+    const resolvedBatchId = (enrollment.batchId as any)?._id ?? enrollment.batchId;
     const courseId = (enrollment.batchId as any)?.courseId?._id ?? (enrollment.batchId as any)?.courseId;
-    const modules = courseId ? await ModuleModel.find({ courseId }).sort({ orderIndex: 1 }) : [];
+    const modules = courseId ? await ModuleModel.find({ courseId, batchId: resolvedBatchId }).sort({ orderIndex: 1 }) : [];
 
     const totalModules = modules.length;
     const completedModules = moduleProgress.filter(
@@ -675,7 +730,6 @@ const enrollWithManualPayment = async (
 
         let enrollment = existingEnrollment;
 
-        // const batchNumber = batch.batchNumber?.toString() || '6';
         const batchNumber = batch.title?.split(' ')[1];
         const courseSlug = (batch.courseId as any)?.slug || '';
 
@@ -783,12 +837,187 @@ const enrollWithManualPayment = async (
     }
 };
 
+const grantAccessByEmail = async (email: string, courseId: string, batchId: string) => {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Student email is required');
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(courseId)) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid course ID');
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(batchId)) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid batch ID');
+    }
+
+    const session = await mongoose.startSession();
+
+    try {
+        session.startTransaction();
+
+        const user = await UserModel.findOne({ email: normalizedEmail }).session(session);
+
+        if (!user) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'User not found for this email');
+        }
+
+        if (user.status !== UserStatus.Active) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'User is not active');
+        }
+
+        const batch = await BatchModel.findById(batchId).populate('courseId').session(session);
+
+        if (!batch) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
+        }
+
+        const batchCourseId =
+            (batch.courseId as any)?._id?.toString() ??
+            (batch.courseId as any)?.toString();
+
+        if (batchCourseId && batchCourseId !== courseId) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'Selected batch does not belong to the selected course'
+            );
+        }
+
+        let enrollment = await EnrollmentModel.findOne({
+            userId: user._id,
+            batchId: batch._id,
+        }).session(session);
+
+        const isActiveOrCompleted = enrollment
+            ? [EnrollmentStatus.Active, EnrollmentStatus.Completed].includes(enrollment.status)
+            : false;
+
+        if (enrollment && isActiveOrCompleted) {
+            await assignStudentIdIfMissing(user._id.toString(), session);
+
+            if (enrollment.enrollmentId) {
+                await ProfileService.createOrUpdateProfileAfterEnrollment(
+                    user._id.toString(),
+                    enrollment.enrollmentId,
+                    session
+                );
+            }
+
+            await session.commitTransaction();
+
+            return {
+                enrollment,
+                user,
+                batch,
+                wasActive: true,
+            };
+        }
+
+        const wasActive = false;
+
+        if (!enrollment) {
+            const batchNumber = (batch as any).title?.split(' ')[1];
+            const courseSlug = (batch.courseId as any)?.slug || '';
+            const enrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+
+            const created = await EnrollmentModel.create(
+                [
+                    {
+                        userId: user._id,
+                        batchId: batch._id,
+                        status: EnrollmentStatus.Active,
+                        accessType: 'special',
+                        enrollmentId,
+                        enrolledAt: new Date(),
+                    },
+                ],
+                { session }
+            );
+
+            enrollment = created[0];
+        } else {
+            let shouldSave = false;
+
+            if (enrollment.accessType !== 'special') {
+                enrollment.accessType = 'special';
+                shouldSave = true;
+            }
+
+            if (!enrollment.enrollmentId) {
+                const batchNumber = (batch as any).title?.split(' ')[1];
+                const courseSlug = (batch.courseId as any)?.slug || '';
+                enrollment.enrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+                shouldSave = true;
+            }
+
+            if (!wasActive) {
+                enrollment.status = EnrollmentStatus.Active;
+                enrollment.enrolledAt = new Date();
+                shouldSave = true;
+            }
+
+            if (shouldSave) {
+                await enrollment.save({ session });
+            }
+        }
+
+        await assignStudentIdIfMissing(user._id.toString(), session);
+
+        if (!wasActive) {
+            await BatchModel.findByIdAndUpdate(
+                batch._id,
+                { $inc: { currentEnrollment: 1 } },
+                { session }
+            );
+        }
+
+        if (enrollment.enrollmentId) {
+            await ProfileService.createOrUpdateProfileAfterEnrollment(
+                user._id.toString(),
+                enrollment.enrollmentId,
+                session
+            );
+        }
+
+        await session.commitTransaction();
+
+        if (!wasActive) {
+            await initializeModuleProgress(enrollment._id.toString(), batch._id.toString());
+        }
+
+        return {
+            enrollment,
+            user,
+            batch,
+            wasActive,
+        };
+    } catch (error) {
+        if (session.inTransaction()) {
+            await session.abortTransaction();
+        }
+        throw error;
+    } finally {
+        session.endSession();
+    }
+};
+
+const ensureStudentIdForUser = async (
+    userId: string,
+    session: mongoose.ClientSession
+) => {
+    await assignStudentIdIfMissing(userId, session);
+};
+
 export const EnrollmentService = {
     initiateEnrollment,
     // confirmEnrollment,
     enrollWithManualPayment,
+    grantAccessByEmail,
+    getSpecialAccessEnrollments,
     getUserEnrollments,
     getEnrollmentDetails,
     initializeModuleProgress,
     generateEnrollmentId, // Export this function
+    ensureStudentIdForUser,
 };

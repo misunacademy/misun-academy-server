@@ -17,10 +17,24 @@ router.post(
     EnrollmentController.enrollWithManualPayment
 );
 
+router.post(
+    '/grant-access',
+    requireAuth,
+    requireAdmin,
+    EnrollmentController.grantAccessByEmail
+);
+
 router.get(
     '/me',
     requireAuth,
     EnrollmentController.getMyEnrollments
+);
+
+router.get(
+    '/special-access',
+    requireAuth,
+    requireAdmin,
+    EnrollmentController.getSpecialAccessEnrollments
 );
 
 router.get(
