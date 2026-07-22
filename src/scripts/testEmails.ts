@@ -4,14 +4,7 @@
  */
 
 import {
-    sendVerificationEmail,
     sendPasswordResetEmail,
-    sendPaymentSuccessEmail,
-    sendPaymentReviewEmail,
-    sendPaymentFailedEmail,
-    sendBatchStartReminderEmail,
-    sendCertificateIssuedEmail,
-    sendCertificateApprovedEmail,
     sendEnrollmentConfirmationEmail,
 } from '../services/misunAcademyEmails.js';
 import { connectDB } from '../config/database.js';

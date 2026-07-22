@@ -14,6 +14,14 @@ import { ProfileService } from '../Profile/profile.service.js';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import { StudentIdCounterModel } from '../User/studentIdCounter.model.js';
+import { NotificationService } from '../Notification/notification.service.js';
+import { sendCourseWaitingPaymentVerificationEmail } from '../../services/courseEmailRouter.js';
+import { logger } from '../../config/logger.js';
+import {
+    initializeModuleProgress,
+    getUserEnrollments,
+    getEnrollmentDetails,
+} from './enrollmentProgress.service.js';
 
 type MongoDuplicateKeyError = {
     code?: number;
@@ -300,6 +308,7 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
         // Check batch
         const batch = await BatchModel.findById(batchId)
             .populate('courseId')
+            .lean()
             .session(session);
 
         if (!batch) {
@@ -358,6 +367,29 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
         await assignStudentIdIfMissing(userId, session);
 
         await session.commitTransaction();
+
+        // Generate enrollment ID and fire notification for new enrollments
+        const batchNumber = batch.title?.split(' ')[1];
+        const courseSlug = (batch.courseId as any)?.slug || '';
+        enrollment.enrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+        await enrollment.save();
+
+        setImmediate(async () => {
+            try {
+                const user = await UserModel.findById(userId).lean();
+                if (user) {
+                    const courseTitle = (batch.courseId as any)?.title || batch.title;
+                    await NotificationService.createNotificationForAdmins({
+                        type: 'enrollment',
+                        title: 'New Enrollment',
+                        message: `${user.name} has enrolled in ${courseTitle} - ${batch.title}`,
+                        link: '/dashboard/admin/student',
+                    });
+                }
+            } catch (error) {
+                logger.error(error, 'Failed to send enrollment notification');
+            }
+        });
 
         return {
             enrollment,
@@ -476,89 +508,7 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
 //     }
 // };
 
-/**
- * Initialize module progress for an enrollment
- * Idempotent - checks if already initialized
- */
-const initializeModuleProgress = async (enrollmentId: string, batchId: string) => {
-    // Check if already initialized
-    const existingProgress = await ModuleProgressModel.findOne({ enrollmentId });
-    if (existingProgress) {
-        return; // Already initialized, skip
-    }
 
-    const batch = await BatchModel.findById(batchId).populate('courseId');
-
-    if (!batch) return;
-
-    // Get all modules for the batch
-    const modules = await ModuleModel.find({ courseId: batch.courseId, batchId }).sort({ orderIndex: 1 });
-
-    if (modules.length === 0) return;
-
-    // Create progress records for all modules
-    // First module is unlocked by default, others are locked
-    const progressRecords = modules.map((module, index) => ({
-        enrollmentId,
-        moduleId: module._id,
-        status: index === 0 ? ProgressStatus.Unlocked : ProgressStatus.Locked,
-        unlockedAt: index === 0 ? new Date() : undefined,
-        completionPercentage: 0,
-    }));
-
-    await ModuleProgressModel.insertMany(progressRecords, { ordered: false });
-};
-
-/**
- * Get user's enrollments
- */
-const getUserEnrollments = async (userId: string, status?: EnrollmentStatus) => {
-    const query: any = { userId };
-    if (status) query.status = status;
-
-    const enrollments = await EnrollmentModel.find(query)
-        .populate({
-            path: 'batchId',
-            populate: {
-                path: 'courseId',
-                select: 'title thumbnailImage category level isCertificateAvailable',
-            },
-        })
-        .sort({ createdAt: -1 })
-        .lean();
-
-    // Add progress for each enrollment
-    const enrollmentsWithProgress = await Promise.all(
-        enrollments.map(async (enrollment) => {
-            const moduleProgress = await ModuleProgressModel.find({ enrollmentId: enrollment._id });
-            const resolvedBatchId = (enrollment.batchId as any)?._id ?? enrollment.batchId;
-            const resolvedCourseId = (enrollment.batchId as any)?.courseId?._id ?? (enrollment.batchId as any)?.courseId;
-            const modules = await ModuleModel.find({ courseId: resolvedCourseId, batchId: resolvedBatchId });
-
-            const totalModules = modules.length;
-            const completedModules = moduleProgress.filter(
-                (p) => p.status === ProgressStatus.Completed
-            ).length;
-            const overallProgress =
-                totalModules > 0 ? Math.round((moduleProgress.reduce((sum, m) => sum + m.completionPercentage, 0) / totalModules)) : 0;
-
-            return {
-                ...enrollment,
-                isCertificateAvailable:
-                    (enrollment.batchId as any)?.courseId?.isCertificateAvailable !== undefined
-                        ? (enrollment.batchId as any).courseId.isCertificateAvailable
-                        : true,
-                progress: {
-                    totalModules,
-                    completedModules,
-                    overallProgress,
-                },
-            };
-        })
-    );
-
-    return enrollmentsWithProgress;
-};
 
 const getSpecialAccessEnrollments = async (params: {
     page?: number | string;
@@ -625,54 +575,7 @@ const getSpecialAccessEnrollments = async (params: {
     };
 };
 
-/**
- * Get enrollment details
- */
-const getEnrollmentDetails = async (enrollmentId: string, userId: string) => {
-    const enrollment = await EnrollmentModel.findOne({
-        _id: enrollmentId,
-        userId,
-    })
-        .populate({
-            path: 'batchId',
-            populate: [
-                {
-                    path: 'courseId',
-                },
-                {
-                    path: 'instructors',
-                    populate: 'userId',
-                },
-            ],
-        })
-        .lean();
 
-    if (!enrollment) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
-    }
-
-    // Get progress statistics
-    const moduleProgress = await ModuleProgressModel.find({ enrollmentId });
-    const resolvedBatchId = (enrollment.batchId as any)?._id ?? enrollment.batchId;
-    const courseId = (enrollment.batchId as any)?.courseId?._id ?? (enrollment.batchId as any)?.courseId;
-    const modules = courseId ? await ModuleModel.find({ courseId, batchId: resolvedBatchId }).sort({ orderIndex: 1 }) : [];
-
-    const totalModules = modules.length;
-    const completedModules = moduleProgress.filter(
-        (p) => p.status === ProgressStatus.Completed
-    ).length;
-    const overallProgress =
-        totalModules > 0 ? Math.round((moduleProgress.reduce((sum, m) => sum + m.completionPercentage, 0) / totalModules)) : 0;
-
-    return {
-        ...enrollment,
-        progress: {
-            totalModules,
-            completedModules,
-            overallProgress,
-        },
-    };
-};
 
 /**
  * Enroll student with manual payment
@@ -684,7 +587,7 @@ const enrollWithManualPayment = async (
     paymentData: { senderNumber: string; transactionId: string }
 ) => {
     // Check if user has any enrollment for this batch
-    let existingEnrollment = await EnrollmentModel.findOne({
+    const existingEnrollment = await EnrollmentModel.findOne({
         userId,
         batchId,
         status: { $in: [EnrollmentStatus.Pending, EnrollmentStatus.PaymentPending, EnrollmentStatus.PaymentFailed, EnrollmentStatus.Active] }
@@ -700,7 +603,7 @@ const enrollWithManualPayment = async (
         await existingEnrollment.save();
     }
 
-    const batch = await BatchModel.findById(batchId).populate('courseId');
+    const batch = await BatchModel.findById(batchId).populate('courseId').lean();
     if (!batch) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
     }
@@ -823,6 +726,37 @@ const enrollWithManualPayment = async (
 
         await session.commitTransaction();
 
+        setImmediate(async () => {
+            try {
+                const user = await UserModel.findById(userId).lean();
+                if (user) {
+                    const courseData = (batch.courseId as any);
+                    const courseTitle = typeof courseData === 'object' ? (courseData?.title || '') : '';
+                    await NotificationService.createNotificationForAdmins({
+                        type: 'payment_pending',
+                        title: 'Manual Payment Pending',
+                        message: `${user.name} submitted a manual payment for ${courseTitle || batch.title}`,
+                        link: '/dashboard/admin/payment',
+                    });
+
+                    const rawCourseName = courseTitle;
+                    const courseSlug = typeof courseData === 'object' ? (courseData?.slug || '') : '';
+                    const courseLabel = rawCourseName
+                        ? `${rawCourseName} - ${batch.title}`
+                        : batch.title;
+
+                    sendCourseWaitingPaymentVerificationEmail(
+                        { courseName: rawCourseName || batch.title, courseSlug },
+                        user,
+                        courseLabel,
+                        paymentTransactionId
+                    );
+                }
+            } catch (error) {
+                logger.error(error, 'Failed to send manual payment notification');
+            }
+        });
+
         return {
             enrollment,
             batch,
@@ -857,7 +791,7 @@ const grantAccessByEmail = async (email: string, courseId: string, batchId: stri
     try {
         session.startTransaction();
 
-        const user = await UserModel.findOne({ email: normalizedEmail }).session(session);
+        const user = await UserModel.findOne({ email: normalizedEmail }).lean().session(session);
 
         if (!user) {
             throw new ApiError(StatusCodes.NOT_FOUND, 'User not found for this email');
@@ -867,7 +801,7 @@ const grantAccessByEmail = async (email: string, courseId: string, batchId: stri
             throw new ApiError(StatusCodes.BAD_REQUEST, 'User is not active');
         }
 
-        const batch = await BatchModel.findById(batchId).populate('courseId').session(session);
+        const batch = await BatchModel.findById(batchId).populate('courseId').lean().session(session);
 
         if (!batch) {
             throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
@@ -983,7 +917,22 @@ const grantAccessByEmail = async (email: string, courseId: string, batchId: stri
         await session.commitTransaction();
 
         if (!wasActive) {
-            await initializeModuleProgress(enrollment._id.toString(), batch._id.toString());
+            await initializeModuleProgress(enrollment._id.toString());
+
+            const course = (batch.courseId as any) || {};
+            setImmediate(async () => {
+                try {
+                    await NotificationService.createNotification({
+                        userId: user._id.toString(),
+                        type: 'access_granted',
+                        title: 'Course Access Granted',
+                        message: `You have been granted access to ${course?.title || 'Course'} - ${batch?.title}`,
+                        link: '/my-classes',
+                    });
+                } catch (error) {
+                    logger.error(error, 'Failed to send access granted notification');
+                }
+            });
         }
 
         return {
@@ -1009,15 +958,233 @@ const ensureStudentIdForUser = async (
     await assignStudentIdIfMissing(userId, session);
 };
 
+const getAllEnrollments = async (params: {
+    batchId?: string;
+    courseId?: string;
+    status?: string;
+    page?: string | number;
+    limit?: string | number;
+    search?: string;
+}) => {
+    const { batchId, courseId, status: statusParam, page = 1, limit = 10, search } = params;
+    const pageNumber = Number(page);
+    const limitNumber = Number(limit);
+
+    const pipeline: any[] = [];
+
+    const matchStage: any = {};
+    matchStage.enrollmentId = { $exists: true, $ne: null };
+    const requestedStatus =
+        typeof statusParam === 'string' && Object.values(EnrollmentStatus).includes(statusParam as EnrollmentStatus)
+            ? (statusParam as EnrollmentStatus)
+            : EnrollmentStatus.Active;
+    matchStage.status = requestedStatus;
+    if (batchId) matchStage.batchId = new mongoose.Types.ObjectId(batchId as string);
+
+    if (Object.keys(matchStage).length > 0) {
+        pipeline.push({ $match: matchStage });
+    }
+
+    pipeline.push(
+        {
+            $lookup: {
+                from: 'users',
+                localField: 'userId',
+                foreignField: '_id',
+                as: 'id',
+            },
+        },
+        { $unwind: { path: '$id', preserveNullAndEmptyArrays: true } },
+        {
+            $lookup: {
+                from: 'profiles',
+                localField: 'id._id',
+                foreignField: 'user',
+                as: 'userProfile',
+            },
+        },
+        { $unwind: { path: '$userProfile', preserveNullAndEmptyArrays: true } },
+        {
+            $lookup: {
+                from: 'batches',
+                localField: 'batchId',
+                foreignField: '_id',
+                as: 'batchId',
+            },
+        },
+        { $unwind: { path: '$batchId', preserveNullAndEmptyArrays: true } },
+        {
+            $lookup: {
+                from: 'courses',
+                localField: 'batchId.courseId',
+                foreignField: '_id',
+                as: 'course',
+            },
+        },
+        { $unwind: { path: '$course', preserveNullAndEmptyArrays: true } }
+    );
+
+    if (courseId && typeof courseId === 'string' && mongoose.Types.ObjectId.isValid(courseId)) {
+        pipeline.push({
+            $match: { 'course._id': new mongoose.Types.ObjectId(courseId) },
+        });
+    }
+
+    if (search && typeof search === 'string' && search.trim() !== '') {
+        const escapedSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = { $regex: escapedSearch, $options: 'i' };
+        pipeline.push({
+            $match: {
+                $or: [
+                    { enrollmentId: searchRegex },
+                    { 'id.name': searchRegex },
+                    { 'id.email': searchRegex },
+                    { 'id.phone': searchRegex },
+                ],
+            },
+        });
+    }
+
+    pipeline.push({ $sort: { createdAt: -1 } });
+
+    const countPipeline = [...pipeline, { $count: 'total' }];
+    const countResult = await EnrollmentModel.aggregate(countPipeline);
+    const total = countResult.length > 0 ? countResult[0].total : 0;
+
+    pipeline.push({ $skip: (pageNumber - 1) * limitNumber });
+    pipeline.push({ $limit: limitNumber });
+
+    const enrollments = await EnrollmentModel.aggregate(pipeline);
+
+    const enrollmentIds = enrollments
+        .map((enrollment: any) => enrollment._id)
+        .filter(Boolean);
+
+    const uniqueCourseIds = Array.from(
+        new Set(
+            enrollments
+                .map((enrollment: any) => enrollment.course?._id?.toString())
+                .filter(Boolean)
+        )
+    ).map((id) => new mongoose.Types.ObjectId(id));
+
+    const [moduleProgressRecords, modulesPerCourse] = await Promise.all([
+        enrollmentIds.length
+            ? ModuleProgressModel.find(
+                  { enrollmentId: { $in: enrollmentIds } },
+                  { enrollmentId: 1, status: 1, completionPercentage: 1 }
+              ).lean()
+            : Promise.resolve([]),
+        uniqueCourseIds.length
+            ? ModuleModel.aggregate([
+                  { $match: { courseId: { $in: uniqueCourseIds } } },
+                  { $group: { _id: '$courseId', totalModules: { $sum: 1 } } },
+              ])
+            : Promise.resolve([]),
+    ]);
+
+    const progressByEnrollment: Record<
+        string,
+        { completedModules: number; trackedModules: number; completionSum: number }
+    > = {};
+
+    for (const progress of moduleProgressRecords as any[]) {
+        const enrollmentKey = progress.enrollmentId?.toString();
+        if (!enrollmentKey) continue;
+
+        if (!progressByEnrollment[enrollmentKey]) {
+            progressByEnrollment[enrollmentKey] = {
+                completedModules: 0,
+                trackedModules: 0,
+                completionSum: 0,
+            };
+        }
+
+        progressByEnrollment[enrollmentKey].trackedModules += 1;
+        progressByEnrollment[enrollmentKey].completionSum += progress.completionPercentage || 0;
+
+        if (progress.status === ProgressStatus.Completed) {
+            progressByEnrollment[enrollmentKey].completedModules += 1;
+        }
+    }
+
+    const modulesPerCourseMap = new Map<string, number>(
+        (modulesPerCourse as any[]).map((item) => [item._id?.toString(), item.totalModules || 0])
+    );
+
+    const data = enrollments.map((enrollment: any) => {
+        const enrollmentKey = enrollment._id?.toString();
+        const progressData = enrollmentKey
+            ? progressByEnrollment[enrollmentKey]
+            : undefined;
+        const courseKey = enrollment.course?._id?.toString();
+        const totalModules = courseKey
+            ? modulesPerCourseMap.get(courseKey) ?? progressData?.trackedModules ?? 0
+            : progressData?.trackedModules ?? 0;
+        const completedModules = Math.min(progressData?.completedModules || 0, totalModules);
+        let overallProgress = totalModules
+            ? Math.round((progressData?.completionSum || 0) / totalModules)
+            : 0;
+
+        if (enrollment.status === EnrollmentStatus.Completed) {
+            overallProgress = Math.max(overallProgress, 100);
+        }
+
+        return {
+            _id: enrollment._id,
+            studentId: enrollment.enrollmentId,
+            student: enrollment.id
+                ? {
+                      _id: enrollment.id._id,
+                      name: enrollment.id.name,
+                      email: enrollment.id.email,
+                      phone: enrollment.id.phone,
+                      address: enrollment.userProfile?.address || null,
+                  }
+                : null,
+            batch: enrollment.batchId
+                ? {
+                      _id: enrollment.batchId._id,
+                      title: enrollment.batchId.title,
+                  }
+                : null,
+            course: enrollment.course
+                ? {
+                      _id: enrollment.course._id,
+                      title: enrollment.course.title,
+                      slug: enrollment.course.slug,
+                  }
+                : null,
+            status: enrollment.status,
+            progress: {
+                totalModules,
+                completedModules,
+                overallProgress,
+            },
+            createdAt: enrollment.createdAt,
+        };
+    });
+
+    return {
+        data,
+        meta: {
+            page: pageNumber,
+            limit: limitNumber,
+            total,
+            totalPages: Math.ceil(total / limitNumber),
+        },
+    };
+};
+
 export const EnrollmentService = {
     initiateEnrollment,
-    // confirmEnrollment,
     enrollWithManualPayment,
     grantAccessByEmail,
     getSpecialAccessEnrollments,
     getUserEnrollments,
     getEnrollmentDetails,
+    getAllEnrollments,
     initializeModuleProgress,
-    generateEnrollmentId, // Export this function
+    generateEnrollmentId,
     ensureStudentIdForUser,
 };

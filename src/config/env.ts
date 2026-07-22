@@ -6,7 +6,7 @@ import ApiError from "../errors/ApiError.js";
 const EnvSchema = z.object({
     // General
     PORT: z.string().default("5000"),
-    NODE_ENV: z.enum(["development", "production", "stage"]),
+    NODE_ENV: z.enum(["development", "production", "stage", "test"]),
     LOG_LEVEL: z.string().default("info"),
     // Database
     MONGO_URI: z.string(),
@@ -30,7 +30,6 @@ const EnvSchema = z.object({
     SSL_STORE_ID: z.string(),
     SSL_STORE_PASSWORD: z.string(),
     SSL_IS_LIVE: z.string(),
-    SSL_PAYMENT_API: z.string(),
     SSL_VALIDATION_API: z.string(),
     SERVER_URL: z.string(),
     MA_FRONTEND_URL: z.string(),
@@ -68,8 +67,15 @@ const EnvSchema = z.object({
     // Admin Email for Employee Birthday Reminders
     ADMIN_EMAIL: z.string(),
 
+    // Redis (optional — for BullMQ email queue)
+    REDIS_URL: z.string().optional(),
+
     // Groq AI API Key
     GROQ_API_KEY: z.string().optional(),
+
+    // Sentry
+    SENTRY_DSN: z.string().optional(),
+    SENTRY_TRACES_SAMPLE_RATE: z.string().optional().default('0.1'),
 });
 
 // Validate and parse environment variables

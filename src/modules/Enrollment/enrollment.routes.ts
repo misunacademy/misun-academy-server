@@ -1,6 +1,8 @@
 import express from 'express';
 import { EnrollmentController } from './enrollment.controller.js';
 import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
+import validateRequest from '../../middlewares/validateRequest.js';
+import { initiateEnrollmentSchema, manualEnrollmentSchema, grantAccessSchema, updateEnrollmentStatusSchema } from '../../validations/enrollment.validation.js';
 
 const router = express.Router();
 
@@ -8,12 +10,14 @@ const router = express.Router();
 router.post(
     '/',
     requireAuth,
+    validateRequest(initiateEnrollmentSchema),
     EnrollmentController.initiateEnrollment
 );
 
 router.post(
     '/manual',
     requireAuth,
+    validateRequest(manualEnrollmentSchema),
     EnrollmentController.enrollWithManualPayment
 );
 
@@ -21,6 +25,7 @@ router.post(
     '/grant-access',
     requireAuth,
     requireAdmin,
+    validateRequest(grantAccessSchema),
     EnrollmentController.grantAccessByEmail
 );
 
@@ -37,13 +42,7 @@ router.get(
     EnrollmentController.getSpecialAccessEnrollments
 );
 
-router.get(
-    '/:enrollmentId',
-    requireAuth,
-    EnrollmentController.getEnrollmentDetails
-);
-
-// Admin routes
+// Admin routes — must be before parameterized routes
 router.get(
     '/',
     requireAuth,
@@ -51,10 +50,17 @@ router.get(
     EnrollmentController.getAllEnrollments
 );
 
+router.get(
+    '/:enrollmentId',
+    requireAuth,
+    EnrollmentController.getEnrollmentDetails
+);
+
 router.put(
     '/:enrollmentId/status',
     requireAuth,
     requireAdmin,
+    validateRequest(updateEnrollmentStatusSchema),
     EnrollmentController.updateEnrollmentStatus
 );
 

@@ -101,7 +101,7 @@ const processMultipleUploads = async (files: Express.Multer.File[]): Promise<IMu
             files: processedFiles,
             totalFiles: processedFiles.length,
         };
-    } catch (error) {
+    } catch {
         throw new ApiError(
             StatusCodes.INTERNAL_SERVER_ERROR,
             'Failed to process multiple image uploads'

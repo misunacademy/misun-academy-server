@@ -1,6 +1,5 @@
 import { StatusCodes } from "http-status-codes";
 import ApiError from "../../errors/ApiError.js";
-import { AdminModel } from "./admin.model.js";
 import { UserModel } from "../User/user.model.js";
 import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
 import { BatchModel } from "../Batch/batch.model.js";
@@ -9,34 +8,37 @@ import { ModuleModel } from "../Module/module.model.js";
 import { LessonProgressModel } from "../Progress/lessonProgress.model.js";
 import { ModuleProgressModel } from "../Progress/moduleProgress.model.js";
 import { BatchStatus, EnrollmentStatus, LessonProgressStatus, UserStatus } from "../../types/common.js";
-import { generateToken } from "../../utils/jwt.js";
 import { getAuth } from "../../config/betterAuth.js";
 import mongoose from "mongoose";
 import { sendEnrollmentReminderEmail, sendNewsUpdateEmail } from "../../services/misunAcademyEmails.js";
 import { sendCourseCompletedBatchIncompleteReminderEmail, sendCourseRunningBatchProgressReminderEmail } from "../../services/courseEmailRouter.js";
 
 const login = async (email: string, password: string) => {
-    const admin = await AdminModel.findOne({ email });
+    const auth = getAuth();
 
-    if (!admin) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Invalid credentials');
+    let session: any;
+    try {
+        session = await auth.api.signInEmail({
+            body: { email, password },
+            asResponse: false,
+        });
+    } catch (err: any) {
+        const msg = err?.body?.message || err?.message || 'Invalid credentials';
+        throw new ApiError(StatusCodes.UNAUTHORIZED, msg);
     }
 
-    const isPasswordMatch = await admin.comparePassword(password);
-
-    if (!isPasswordMatch) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Invalid credentials');
+    if (!session?.user) {
+        throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid credentials');
     }
 
-    const token = generateToken({
-        id: admin._id as mongoose.Types.ObjectId,
-        role: admin.role,
-    });
+    const user = await UserModel.findOne({ email }).select('name email role status').lean();
 
     return {
-        token,
+        token: session.session?.token || '',
         user: {
-            name: admin.name,
+            name: user?.name || session.user.name,
+            email: session.user.email,
+            role: user?.role,
         },
     };
 };
@@ -126,7 +128,7 @@ const getAllUsers = async (params: {
             const batchStr = String(batch).trim();
             const escaped = batchStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-            let matched = await BatchModel.find({ title: { $regex: escaped, $options: 'i' } })
+            const matched = await BatchModel.find({ title: { $regex: escaped, $options: 'i' } })
                 .select('_id')
                 .lean();
             let batchIds = (matched || []).map((b: any) => b._id);

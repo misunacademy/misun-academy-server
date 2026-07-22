@@ -6,6 +6,7 @@ import { UserStatus } from '../types/common.js';
 import { ProfileModel } from '../modules/Profile/profile.model.js';
 import { betterAuth } from 'better-auth';
 import { mongodbAdapter } from 'better-auth/adapters/mongodb';
+import { logger } from './logger.js';
 
 // Use the shared email service for auth emails (reuse SMTP config & retry logic)
 let authInstance: any = null;
@@ -27,9 +28,11 @@ export const initializeAuth = async () => {
       // Provide client so transactions stay enabled
       client: mongoose.connection.getClient(),
     }),
-    // 'http://localhost:5000/api/v1/auth'
-    baseURL: process.env.BETTER_AUTH_URL!,
+    baseURL: new URL(process.env.BETTER_AUTH_URL!).origin,
+    basePath: new URL(process.env.BETTER_AUTH_URL!).pathname,
     secret: process.env.BETTER_AUTH_SECRET!,
+
+    appName: 'Misun Academy',
 
     // Redirect to client after OAuth
     redirects: {
@@ -48,48 +51,25 @@ export const initializeAuth = async () => {
       requireEmailVerification: true,
       // Password reset configuration
       resetPasswordTokenExpiresIn: 60 * 60, // 1 hour
-      sendResetPassword: async ({ user, url }: { user: any; url: string }) => {
+      sendResetPassword: async ({ user, token }: { user: any; url: string; token: string }) => {
         try {
-          // Extract token from the Better Auth generated URL
-          // The token is in the path, not query params
-          const parsed = new URL(url);
-          const pathParts = parsed.pathname.split('/');
-          const token = pathParts[pathParts.length - 1]; // Get last part of path
-
-          if (!token || token.length < 10) {
-            console.error('[BetterAuth] No valid token found in reset password URL:', url);
-            console.error('[BetterAuth] Parsed pathname:', parsed.pathname);
-            console.error('[BetterAuth] Path parts:', pathParts);
-            return;
-          }
-
-
-
-          // Send email asynchronously but log any errors
-          sendPasswordResetEmail(user.email, user.name, token)
-            .then(() => {
-              console.log('[BetterAuth]  Password reset email queued/sent successfully');
-            })
-            .catch((error) => {
-              console.error('[BetterAuth]  Failed to send password reset email:', error);
-            });
+          await sendPasswordResetEmail(user.email, user.name, token);
+          logger.info('Password reset email sent successfully');
         } catch (error) {
-          console.error('[BetterAuth] Error in sendResetPassword callback:', error);
-          // Don't throw - just log the error
+          logger.error(error, 'Failed to send password reset email');
         }
       },
     },
 
     emailVerification: {
-      sendVerificationEmail: async ({ user, url }: { user: any; url: string }) => {
+      sendOnSignUp: true,
+      autoSignInAfterVerification: true,
+      sendVerificationEmail: async ({ user, token }: { user: any; url: string; token: string }) => {
         try {
-          const parsed = new URL(url);
-          const token = parsed.searchParams.get('token') || parsed.searchParams.get('t') || url;
-          // Don't await to prevent timing attacks - fire and forget
-          void sendVerificationEmail(user.email, user.name, token);
+          await sendVerificationEmail(user.email, user.name, token);
+          logger.info('Verification email sent successfully');
         } catch (error) {
-          console.error('[BetterAuth] Error sending verification email:', error);
-          // Don't throw - just log the error
+          logger.error(error, 'Failed to send verification email');
         }
       },
     },
@@ -161,17 +141,21 @@ export const initializeAuth = async () => {
       // Let MongoDB adapter handle ObjectId generation natively
 
       defaultCookieAttributes: {
-        sameSite: 'none',
-        secure: true,
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
       },
     },
 
+    onAPIError: {
+      errorURL: `${process.env.MA_FRONTEND_URL!}/auth?error=authentication_failed`,
+    },
+
     trustedOrigins: [
       process.env.MA_FRONTEND_URL!,
-      process.env.CLIENT_URL!,
+      process.env.CLIENT_URL,
       process.env.EP_FRONTEND_URL!,
-    ].filter(Boolean), // Filter out any undefined values
+    ].filter((s): s is string => Boolean(s)), // Filter out any undefined values
 
     // Database hooks for custom logic
     databaseHooks: {
@@ -191,7 +175,7 @@ export const initializeAuth = async () => {
                 enrollments: [],
               });
 
-              console.log(` Profile created for user: ${user.id}`);
+              logger.info(`Profile created for user: ${user.id}`);
             }
           },
         },

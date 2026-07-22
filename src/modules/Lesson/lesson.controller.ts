@@ -3,38 +3,12 @@ import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { LessonService } from './lesson.service.js';
-import { ModuleModel } from '../Module/module.model.js';
-import { NotificationService } from '../Notification/notification.service.js';
 
-/**
- * Create a new lesson for a module
- */
 const createLesson = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params as { moduleId: string };
     const lessonData = req.body;
 
     const lesson = await LessonService.createLesson(moduleId, lessonData);
-
-    if (lesson.isPublished) {
-        setImmediate(async () => {
-            try {
-                const module = await ModuleModel.findById(moduleId);
-                if (module?.batchId) {
-                    await NotificationService.createBatchNotification(
-                        module.batchId.toString(),
-                        {
-                            type: 'lesson_published',
-                            title: 'New Lesson Available',
-                            message: `New lesson "${lesson.title}" has been published`,
-                            link: '/my-classes',
-                        }
-                    );
-                }
-            } catch (error) {
-                console.error('Failed to send lesson notification:', error);
-            }
-        });
-    }
 
     sendResponse(res, {
         statusCode: StatusCodes.CREATED,
@@ -44,9 +18,6 @@ const createLesson = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-/**
- * Get all lessons for a module
- */
 const getModuleLessons = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params as { moduleId: string };
     const { type } = req.query as { type?: string };
@@ -61,9 +32,6 @@ const getModuleLessons = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-/**
- * Get lesson by ID
- */
 const getLessonById = catchAsync(async (req: Request, res: Response) => {
     const { lessonId } = req.params as { lessonId: string };
 
@@ -77,39 +45,11 @@ const getLessonById = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-/**
- * Update lesson
- */
 const updateLesson = catchAsync(async (req: Request, res: Response) => {
     const { lessonId } = req.params as { lessonId: string };
     const updateData = req.body;
 
-    const { LessonModel } = await import('./lesson.model.js');
-    const oldLesson = await LessonModel.findById(lessonId).lean();
-
     const lesson = await LessonService.updateLesson(lessonId, updateData);
-
-    const wasPublished = oldLesson?.isPublished;
-    if (!wasPublished && lesson.isPublished) {
-        setImmediate(async () => {
-            try {
-                const module = await ModuleModel.findById(lesson.moduleId);
-                if (module?.batchId) {
-                    await NotificationService.createBatchNotification(
-                        module.batchId.toString(),
-                        {
-                            type: 'lesson_published',
-                            title: 'New Lesson Available',
-                            message: `New lesson "${lesson.title}" has been published`,
-                            link: '/my-classes',
-                        }
-                    );
-                }
-            } catch (error) {
-                console.error('Failed to send lesson notification:', error);
-            }
-        });
-    }
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -119,9 +59,6 @@ const updateLesson = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-/**
- * Delete lesson
- */
 const deleteLesson = catchAsync(async (req: Request, res: Response) => {
     const { lessonId } = req.params as { lessonId: string };
 
@@ -135,9 +72,6 @@ const deleteLesson = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-/**
- * Reorder lessons in a module
- */
 const reorderLessons = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params as { moduleId: string };
     const { lessonOrders } = req.body;

@@ -3,9 +3,9 @@ import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { CertificateService } from './certificate.service.js';
-import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 
 /**
+
  * Get certificate for enrollment
  */
 const getCertificate = catchAsync(async (req: Request, res: Response) => {
@@ -192,13 +192,9 @@ const checkEligibility = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.user as any;
     const { enrollmentId } = req.params as { enrollmentId: string };
 
-    // Verify user owns this enrollment
-    const enrollment = await EnrollmentModel.findOne({
-        _id: enrollmentId,
-        userId: id,
-    });
+    const result = await CertificateService.checkEligibility(enrollmentId, id);
 
-    if (!enrollment) {
+    if (!result.enrollment) {
         sendResponse(res, {
             statusCode: StatusCodes.FORBIDDEN,
             success: false,
@@ -208,15 +204,13 @@ const checkEligibility = catchAsync(async (req: Request, res: Response) => {
         return;
     }
 
-    const isEligible = await CertificateService.checkEligibility(enrollmentId);
-
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
-        message: isEligible
+        message: result.isEligible
             ? 'Eligible for certificate'
             : 'Not eligible for certificate',
-        data: { isEligible },
+        data: { isEligible: result.isEligible },
     });
 });
 

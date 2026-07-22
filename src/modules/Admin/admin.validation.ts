@@ -2,10 +2,12 @@ import { z } from 'zod';
 import { Role } from '../../types/role.js';
 
 export const adminRegisterSchema = z.object({
-    name: z.string().min(1),
-    email: z.string().email(),
-    password: z.string().min(6),
-    role: z.enum([Role.ADMIN, Role.SUPERADMIN]).optional(),
+    body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+        password: z.string().min(6),
+        role: z.enum([Role.ADMIN, Role.SUPERADMIN]).optional(),
+    }),
 });
 
 export const loginValidationSchema = z.object({
@@ -33,5 +35,20 @@ export const sendBatchIncompleteReminderSchema = z.object({
     body: z.object({
         courseId: z.string().min(1, { message: 'Course ID is required' }),
         batchId: z.string().min(1, { message: 'Batch ID is required' }),
+    }),
+});
+
+export const updateUserSchema = z.object({
+    body: z.object({
+        name: z.string().min(1).optional(),
+        email: z.string().email().optional(),
+        role: z.enum([Role.ADMIN, Role.SUPERADMIN, Role.INSTRUCTOR, Role.LEARNER, Role.EMPLOYEE]).optional(),
+        phone: z.string().optional(),
+    }),
+});
+
+export const updateUserStatusSchema = z.object({
+    body: z.object({
+        status: z.enum(['Active', 'Suspended', 'Deleted']),
     }),
 });

@@ -2,23 +2,44 @@ import { StatusCodes } from 'http-status-codes';
 import { LessonModel } from './lesson.model.js';
 import { ModuleModel } from '../Module/module.model.js';
 import ApiError from '../../errors/ApiError.js';
+import { NotificationService } from '../Notification/notification.service.js';
+import { logger } from '../../config/logger.js';
+
+const sendPublishNotification = (lesson: any): void => {
+    setImmediate(async () => {
+        try {
+            const module = await ModuleModel.findById(lesson.moduleId).lean();
+            if (module?.batchId) {
+                await NotificationService.createBatchNotification(
+                    module.batchId.toString(),
+                    {
+                        type: 'lesson_published',
+                        title: 'New Lesson Available',
+                        message: `New lesson "${lesson.title}" has been published`,
+                        link: '/my-classes',
+                    }
+                );
+            }
+        } catch (error) {
+            logger.error(error, 'Failed to send lesson notification');
+        }
+    });
+};
 
 /**
  * Create a new lesson for a module
  */
 const createLesson = async (moduleId: string, lessonData: any) => {
-    // Verify module exists
-    const module = await ModuleModel.findById(moduleId);
+    const module = await ModuleModel.findById(moduleId).lean();
     if (!module) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
     }
 
-    // Check if order index exists
     if (lessonData.orderIndex !== undefined) {
         const existingLesson = await LessonModel.findOne({
             moduleId,
             orderIndex: lessonData.orderIndex,
-        });
+        }).lean();
 
         if (existingLesson) {
             throw new ApiError(
@@ -27,8 +48,7 @@ const createLesson = async (moduleId: string, lessonData: any) => {
             );
         }
     } else {
-        // Auto-assign order index
-        const maxOrder = await LessonModel.findOne({ moduleId }).sort({ orderIndex: -1 });
+        const maxOrder = await LessonModel.findOne({ moduleId }).sort({ orderIndex: -1 }).lean();
         lessonData.orderIndex = maxOrder ? maxOrder.orderIndex + 1 : 0;
     }
 
@@ -36,6 +56,10 @@ const createLesson = async (moduleId: string, lessonData: any) => {
         ...lessonData,
         moduleId,
     });
+
+    if (lesson.isPublished) {
+        sendPublishNotification(lesson);
+    }
 
     return lesson;
 };
@@ -47,7 +71,7 @@ const getModuleLessons = async (moduleId: string, type?: string) => {
     const query: any = { moduleId };
     if (type) query.type = type;
 
-    const lessons = await LessonModel.find(query).sort({ orderIndex: 1 });
+    const lessons = await LessonModel.find(query).sort({ orderIndex: 1 }).lean();
     return lessons;
 };
 
@@ -55,7 +79,7 @@ const getModuleLessons = async (moduleId: string, type?: string) => {
  * Get lesson by ID
  */
 const getLessonById = async (lessonId: string) => {
-    const lesson = await LessonModel.findById(lessonId).populate('moduleId');
+    const lesson = await LessonModel.findById(lessonId).populate('moduleId').lean();
 
     if (!lesson) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found');
@@ -68,19 +92,18 @@ const getLessonById = async (lessonId: string) => {
  * Update lesson
  */
 const updateLesson = async (lessonId: string, updateData: any) => {
-    const lesson = await LessonModel.findById(lessonId);
+    const oldLesson = await LessonModel.findById(lessonId).lean();
 
-    if (!lesson) {
+    if (!oldLesson) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found');
     }
 
-    // Check order index conflict
-    if (updateData.orderIndex !== undefined && updateData.orderIndex !== lesson.orderIndex) {
+    if (updateData.orderIndex !== undefined && updateData.orderIndex !== oldLesson.orderIndex) {
         const existingLesson = await LessonModel.findOne({
-            moduleId: lesson.moduleId,
+            moduleId: oldLesson.moduleId,
             orderIndex: updateData.orderIndex,
             _id: { $ne: lessonId },
-        });
+        }).lean();
 
         if (existingLesson) {
             throw new ApiError(
@@ -90,8 +113,19 @@ const updateLesson = async (lessonId: string, updateData: any) => {
         }
     }
 
-    Object.assign(lesson, updateData);
-    await lesson.save();
+    const lesson = await LessonModel.findByIdAndUpdate(
+        lessonId,
+        { $set: updateData },
+        { new: true, runValidators: true }
+    );
+
+    if (!lesson) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found');
+    }
+
+    if (!oldLesson.isPublished && lesson.isPublished) {
+        sendPublishNotification(lesson);
+    }
 
     return lesson;
 };
@@ -100,7 +134,7 @@ const updateLesson = async (lessonId: string, updateData: any) => {
  * Delete lesson
  */
 const deleteLesson = async (lessonId: string) => {
-    const lesson = await LessonModel.findById(lessonId);
+    const lesson = await LessonModel.findById(lessonId).lean();
 
     if (!lesson) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found');
@@ -125,7 +159,7 @@ const reorderLessons = async (moduleId: string, lessonOrders: { lessonId: string
         )
     );
 
-    const lessons = await LessonModel.find({ moduleId }).sort({ orderIndex: 1 });
+    const lessons = await LessonModel.find({ moduleId }).sort({ orderIndex: 1 }).lean();
     return lessons;
 };
 

@@ -18,9 +18,9 @@ export const autoTransitionBatches = async (): Promise<{
   toCompleted: number;
 }> => {
   const now = new Date();
-  let toUpcoming = 0;
-  let toRunning = 0;
-  let toCompleted = 0;
+  let toUpcoming: number;
+  let toRunning: number;
+  let toCompleted: number;
 
   try {
     // 1. Draft → Upcoming (when enrollment starts)

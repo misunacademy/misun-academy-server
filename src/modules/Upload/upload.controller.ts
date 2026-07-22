@@ -4,6 +4,7 @@ import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { UploadService } from './upload.service.js';
 import ApiError from '../../errors/ApiError.js';
+import { logger } from '../../config/logger.js';
 
 /**
  * Upload single image
@@ -25,7 +26,7 @@ const uploadSingle = catchAsync(async (req: Request, res: Response) => {
             data: result,
         });
     } catch (error: any) {
-        console.error('Single upload error:', error);
+        logger.error(error, 'Single upload error');
         const errorMessage = error?.message || 'Failed to upload image. Please check Cloudinary configuration.';
         throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, errorMessage);
     }
@@ -51,7 +52,7 @@ const uploadMultiple = catchAsync(async (req: Request, res: Response) => {
             data: result,
         });
     } catch (error: any) {
-        console.error('Multiple upload error:', error);
+        logger.error(error, 'Multiple upload error');
         throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Failed to upload multiple images');
     }
 });
@@ -78,8 +79,8 @@ const deleteImage = catchAsync(async (req: Request, res: Response) => {
             data: null,
         });
     } catch (error: any) {
-        console.error('Delete image error:', error);
-        throw error; // Re-throw the ApiError from service
+        logger.error(error, 'Delete image error');
+        throw error;
     }
 });
 
@@ -117,7 +118,7 @@ const uploadWithData = catchAsync(async (req: Request, res: Response) => {
             data: responseData,
         });
     } catch (error: any) {
-        console.error('Upload with data error:', error);
+        logger.error(error, 'Upload with data error');
         throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Failed to upload image with data');
     }
 });

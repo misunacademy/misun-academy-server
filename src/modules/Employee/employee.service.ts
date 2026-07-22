@@ -133,7 +133,6 @@ const getMyLeaveRequests = async (
     const limit = Math.max(1, Number(query.limit ?? 10));
     const skip  = (page - 1) * limit;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter: any = { employeeId: new mongoose.Types.ObjectId(employeeId) };
     if (query.status && ['Pending', 'Approved', 'Rejected'].includes(query.status)) {
         filter.status = query.status;
@@ -179,7 +178,6 @@ const getAllEmployees = async (query: {
     const limit = Math.max(1, Number(query.limit ?? 10));
     const skip  = (page - 1) * limit;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter: any = { role: Role.EMPLOYEE };
     if (query.search) {
         const re = new RegExp(query.search, 'i');
@@ -227,7 +225,6 @@ const getAllSalariesAdmin = async (query: {
     const limit = Math.max(1, Number(query.limit ?? 10));
     const skip  = (page - 1) * limit;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter: any = {};
     if (query.employeeId) filter.employeeId = new mongoose.Types.ObjectId(query.employeeId);
     if (query.status && ['Paid', 'Pending'].includes(query.status)) filter.status = query.status;
@@ -350,7 +347,6 @@ const getAllLeaveRequestsAdmin = async (query: {
     const limit = Math.max(1, Number(query.limit ?? 10));
     const skip  = (page - 1) * limit;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter: any = {};
     if (query.status && ['Pending', 'Approved', 'Rejected'].includes(query.status)) {
         filter.status = query.status;

@@ -7,7 +7,7 @@ export interface IUser {
     email: string;
     password?: string; // Optional for OAuth users
     role: Role;
-    emailVerified: Boolean; // Better Auth uses Date instead of Boolean
+    emailVerified: boolean; // Better Auth uses Date instead of Boolean
     image?: string;
     avatar?: string;
     studentId?: string;

@@ -17,7 +17,7 @@ const createModule = async (courseId: string, batchId: string, moduleData: any) 
             courseId,
             batchId,
             orderIndex: moduleData.orderIndex,
-        });
+        }).lean();
 
         if (existingModule) {
             throw new ApiError(
@@ -27,7 +27,7 @@ const createModule = async (courseId: string, batchId: string, moduleData: any) 
         }
     } else {
         // Auto-assign order index
-        const maxOrder = await ModuleModel.findOne({ courseId, batchId }).sort({ orderIndex: -1 });
+        const maxOrder = await ModuleModel.findOne({ courseId, batchId }).sort({ orderIndex: -1 }).lean();
         moduleData.orderIndex = maxOrder ? maxOrder.orderIndex + 1 : 0;
     }
 
@@ -47,18 +47,24 @@ const getCourseModules = async (courseId: string, batchId: string, status?: stri
     const query: any = { courseId, batchId };
     if (status) query.status = status;
 
-    const modules = await ModuleModel.find(query).sort({ orderIndex: 1 });
+    const modules = await ModuleModel.find(query).sort({ orderIndex: 1 }).lean();
 
-    // Get lesson count for each module
-    const modulesWithLessonCount = await Promise.all(
-        modules.map(async (module) => {
-            const lessonCount = await LessonModel.countDocuments({ moduleId: module._id });
-            return {
-                ...module.toObject(),
-                lessonCount,
-            };
-        })
-    );
+    // Batch lesson count lookup to avoid N+1
+    const moduleIds = modules.map((m) => m._id);
+    const counts = moduleIds.length > 0
+        ? await LessonModel.aggregate([
+            { $match: { moduleId: { $in: moduleIds } } },
+            { $group: { _id: '$moduleId', count: { $sum: 1 } } },
+          ])
+        : [];
+    const countByModuleId: Record<string, number> = {};
+    for (const entry of counts) {
+        countByModuleId[entry._id.toString()] = entry.count;
+    }
+    const modulesWithLessonCount = modules.map((module) => ({
+        ...module,
+        lessonCount: countByModuleId[module._id.toString()] || 0,
+    }));
 
     return modulesWithLessonCount;
 };
@@ -67,7 +73,7 @@ const getCourseModules = async (courseId: string, batchId: string, status?: stri
  * Get module by ID
  */
 const getModuleById = async (moduleId: string) => {
-    const module = await ModuleModel.findById(moduleId);
+    const module = await ModuleModel.findById(moduleId).lean();
 
     if (!module) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
@@ -76,7 +82,7 @@ const getModuleById = async (moduleId: string) => {
     const lessonCount = await LessonModel.countDocuments({ moduleId: module._id });
 
     return {
-        ...module.toObject(),
+        ...module,
         lessonCount,
     };
 };
@@ -102,7 +108,7 @@ const updateModule = async (moduleId: string, updateData: any) => {
             batchId: module.batchId,
             orderIndex: updateData.orderIndex,
             _id: { $ne: moduleId },
-        });
+        }).lean();
 
         if (existingModule) {
             throw new ApiError(
@@ -122,7 +128,7 @@ const updateModule = async (moduleId: string, updateData: any) => {
  * Delete module
  */
 const deleteModule = async (moduleId: string) => {
-    const module = await ModuleModel.findById(moduleId);
+    const module = await ModuleModel.findById(moduleId).lean();
 
     if (!module) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
@@ -161,7 +167,7 @@ const reorderModules = async (
         )
     );
 
-    const modules = await ModuleModel.find({ courseId, batchId }).sort({ orderIndex: 1 });
+    const modules = await ModuleModel.find({ courseId, batchId }).sort({ orderIndex: 1 }).lean();
     return modules;
 };
 
@@ -172,7 +178,7 @@ const getUnassignedCourseModules = async (courseId: string) => {
     const modules = await ModuleModel.find({
         courseId,
         $or: [{ batchId: { $exists: false } }, { batchId: null }],
-    }).sort({ orderIndex: 1 });
+    }).sort({ orderIndex: 1 }).lean();
 
     return modules;
 };

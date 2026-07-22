@@ -30,39 +30,40 @@ const generateCertificateId = (): string => {
 /**
  * Check if enrollment is eligible for certificate
  * Requirements: All modules must be at 100% completion
+ * Optionally verifies the enrollment belongs to the specified user.
  */
-const checkEligibility = async (enrollmentId: string): Promise<boolean> => {
-    const enrollment = await EnrollmentModel.findById(enrollmentId).populate({
+const checkEligibility = async (enrollmentId: string, userId?: string): Promise<{ isEligible: boolean; enrollment?: any }> => {
+    const query: any = { _id: enrollmentId };
+    if (userId) query.userId = userId;
+
+    const enrollment = await EnrollmentModel.findOne(query).populate({
         path: 'batchId',
         populate: { path: 'courseId' },
-    });
+    }).lean();
     if (!enrollment) {
-        return false;
+        return { isEligible: false };
     }
 
-    // Check if enrollment is active or completed
     if (enrollment.status !== EnrollmentStatus.Active && enrollment.status !== EnrollmentStatus.Completed) {
-        return false;
+        return { isEligible: false };
     }
 
-    // When certificate is not available for the course, not eligible
     const course = (enrollment.batchId as any)?.courseId;
     if (!course || course.isCertificateAvailable === false) {
-        return false;
+        return { isEligible: false };
     }
 
-    // Check if all modules are completed (100%)
-    const moduleProgress = await ModuleProgressModel.find({ enrollmentId });
+    const moduleProgress = await ModuleProgressModel.find({ enrollmentId }).lean();
 
     if (moduleProgress.length === 0) {
-        return false;  // No progress tracked
+        return { isEligible: false };
     }
 
     const allModulesCompleted = moduleProgress.every(
         (progress) => progress.completionPercentage === 100
     );
 
-    return allModulesCompleted;
+    return { isEligible: allModulesCompleted, enrollment };
 };
 
 /**
@@ -71,13 +72,13 @@ const checkEligibility = async (enrollmentId: string): Promise<boolean> => {
  */
 const requestCertificate = async (enrollmentId: string, userId: string) => {
     // Verify ownership
-    const enrollment = await EnrollmentModel.findOne({ _id: enrollmentId, userId });
+    const enrollment = await EnrollmentModel.findOne({ _id: enrollmentId, userId }).lean();
     if (!enrollment) {
         throw new ApiError(StatusCodes.FORBIDDEN, 'Access denied');
     }
 
     // Check if already has certificate (pending or active)
-    const existingCertificate = await CertificateModel.findOne({ enrollmentId });
+    const existingCertificate = await CertificateModel.findOne({ enrollmentId }).lean();
     if (existingCertificate) {
         if (existingCertificate.status === CertificateStatus.Pending) {
             throw new ApiError(StatusCodes.CONFLICT, 'Certificate request is pending admin approval');
@@ -85,8 +86,7 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
         throw new ApiError(StatusCodes.CONFLICT, 'Certificate already issued for this enrollment');
     }
 
-    // Check eligibility (100% completion)
-    const isEligible = await checkEligibility(enrollmentId);
+    const { isEligible } = await checkEligibility(enrollmentId);
     if (!isEligible) {
         throw new ApiError(
             StatusCodes.BAD_REQUEST,
@@ -95,7 +95,7 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
     }
 
     // Get batch and course details
-    const batch = await BatchModel.findById(enrollment.batchId).populate('courseId');
+    const batch = await BatchModel.findById(enrollment.batchId).populate('courseId').lean();
     if (!batch) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
     }
@@ -156,10 +156,10 @@ const approveCertificate = async (certificateId: string, approvedBy: string) => 
 
     // Send certificate approved email
     try {
-        const enrollment = await EnrollmentModel.findById(certificate.enrollmentId).populate('batchId');
+        const enrollment = await EnrollmentModel.findById(certificate.enrollmentId).populate('batchId').lean();
         if (enrollment) {
-            const user = await UserModel.findById(enrollment.userId);
-            const batch = await BatchModel.findById(enrollment.batchId).populate('courseId');
+            const user = await UserModel.findById(enrollment.userId).lean();
+            const batch = await BatchModel.findById(enrollment.batchId).populate('courseId').lean();
             if (user && batch && batch.courseId) {
                 sendCertificateApprovedEmail(
                     user.email,
@@ -182,13 +182,12 @@ const approveCertificate = async (certificateId: string, approvedBy: string) => 
  */
 const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
     // Check if already issued
-    const existingCertificate = await CertificateModel.findOne({ enrollmentId });
+    const existingCertificate = await CertificateModel.findOne({ enrollmentId }).lean();
     if (existingCertificate) {
         throw new ApiError(StatusCodes.CONFLICT, 'Certificate already exists for this enrollment');
     }
 
-    // Check eligibility
-    const isEligible = await checkEligibility(enrollmentId);
+    const { isEligible } = await checkEligibility(enrollmentId);
     if (!isEligible) {
         throw new ApiError(
             StatusCodes.BAD_REQUEST,
@@ -202,7 +201,7 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
         .populate({
             path: 'batchId',
             populate: { path: 'courseId', select: 'title' },
-        });
+        }).lean();
 
     if (!enrollment) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
@@ -238,7 +237,7 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
 
     // Send certificate issued email
     try {
-        const user = await UserModel.findById(enrollment.userId);
+        const user = await UserModel.findById(enrollment.userId).lean();
         if (user && batch && batch.courseId) {
             sendCertificateIssuedEmail(
                 user.email,
@@ -258,7 +257,7 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
  * Get certificate by enrollment
  */
 const getCertificateByEnrollment = async (enrollmentId: string, userId: string) => {
-    const enrollment = await EnrollmentModel.findOne({ _id: enrollmentId, userId });
+    const enrollment = await EnrollmentModel.findOne({ _id: enrollmentId, userId }).lean();
     if (!enrollment) {
         throw new ApiError(StatusCodes.FORBIDDEN, 'Access denied');
     }
@@ -268,7 +267,7 @@ const getCertificateByEnrollment = async (enrollmentId: string, userId: string) 
         .populate({
             path: 'batchId',
             populate: { path: 'courseId', select: 'title' },
-        });
+        }).lean();
 
     if (!certificate) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Certificate not found');
@@ -286,7 +285,7 @@ const verifyCertificate = async (certificateId: string) => {
         .populate({
             path: 'batchId',
             populate: { path: 'courseId', select: 'title' },
-        });
+        }).lean();
 
     if (!certificate) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Certificate not found');
@@ -354,12 +353,12 @@ const revokeCertificate = async (
  * Attach enrollment progress percentage to certificates
  */
 const enrichCertificateWithCompletion = async (certificate: any) => {
-    let completionPercentage = 0;
+    let completionPercentage: number;
 
     try {
         const progress = await ProgressService.getBatchProgress(certificate.enrollmentId.toString());
         completionPercentage = progress?.overallProgress ?? 0;
-    } catch (err) {
+    } catch {
         completionPercentage = 0;
     }
 
@@ -398,7 +397,8 @@ const getAllCertificates = async (params?: { status?: string; page?: number; lim
         })
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(safeLimit);
+        .limit(safeLimit)
+        .lean();
 
     const data = await Promise.all(certificates.map(enrichCertificateWithCompletion));
 
@@ -456,7 +456,8 @@ const getUserCertificates = async (userId: string) => {
             path: 'batchId',
             populate: { path: 'courseId', select: 'title thumbnail' },
         })
-        .sort({ issueDate: -1 });
+        .sort({ issueDate: -1 })
+        .lean();
 
     return Promise.all(certificates.map(enrichCertificateWithCompletion));
 };
@@ -471,7 +472,8 @@ const getPendingCertificates = async () => {
             path: 'batchId',
             populate: { path: 'courseId', select: 'title' },
         })
-        .sort({ issueDate: -1 });
+        .sort({ issueDate: -1 })
+        .lean();
 
     return Promise.all(certificates.map(enrichCertificateWithCompletion));
 };

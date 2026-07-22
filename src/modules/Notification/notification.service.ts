@@ -1,5 +1,5 @@
 import { NotificationModel } from './notification.model.js';
-import type { INotification, NotificationType } from './notification.interface.js';
+import type { NotificationType } from './notification.interface.js';
 import { getIO } from '../../services/socketService.js';
 
 interface CreateNotificationParams {
@@ -38,7 +38,7 @@ const createNotificationForAdmins = async (params: Omit<CreateNotificationParams
   const admins = await UserModel.find({
     role: { $in: [Role.ADMIN, Role.SUPERADMIN] },
     status: 'active',
-  }).select('_id');
+  }).select('_id').lean();
 
   const notifications = await NotificationModel.insertMany(
     admins.map((admin) => ({
@@ -79,7 +79,7 @@ const createBatchNotification = async (
   const enrollments = await EnrollmentModel.find({
     batchId,
     status: EnrollmentStatus.Active,
-  }).select('userId');
+  }).select('userId').lean();
 
   const userIds = [
     ...new Set(enrollments.map((e) => e.userId.toString())),

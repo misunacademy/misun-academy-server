@@ -13,7 +13,7 @@ import { BatchModel } from '../Batch/batch.model.js';
  */
 const getBatchModules = async (batchId: string, enrollmentId: string) => {
     // Get batch and course info
-    const batch = await BatchModel.findById(batchId).populate('courseId');
+    const batch = await BatchModel.findById(batchId).populate('courseId').lean();
 
     if (!batch) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
@@ -23,7 +23,7 @@ const getBatchModules = async (batchId: string, enrollmentId: string) => {
     const modules = await ModuleModel.find({ courseId: batch.courseId, batchId }).sort({ orderIndex: 1 });
 
     // Get progress for all modules
-    const moduleProgress = await ModuleProgressModel.find({ enrollmentId });
+    const moduleProgress = await ModuleProgressModel.find({ enrollmentId }).lean();
 
     // Map progress to modules
     const modulesWithProgress = modules.map((module) => {
@@ -58,7 +58,7 @@ const getModuleLessons = async (enrollmentId: string, moduleId: string) => {
     const moduleProgress = await ModuleProgressModel.findOne({
         enrollmentId,
         moduleId,
-    });
+    }).lean();
 
     if (!moduleProgress || moduleProgress.status === ProgressStatus.Locked) {
         throw new ApiError(StatusCodes.FORBIDDEN, 'This module is locked');
@@ -76,7 +76,7 @@ const getLessonDetails = async (enrollmentId: string, moduleId: string, lessonId
     const moduleProgress = await ModuleProgressModel.findOne({
         enrollmentId,
         moduleId,
-    });
+    }).lean();
 
     if (!moduleProgress || moduleProgress.status === ProgressStatus.Locked) {
         throw new ApiError(StatusCodes.FORBIDDEN, 'This module is locked');
@@ -90,7 +90,7 @@ const getLessonDetails = async (enrollmentId: string, moduleId: string, lessonId
     }
 
     // Get resources for this lesson
-    const resources = await ResourceModel.find({ lessonId }).sort({ orderIndex: 1 });
+    const resources = await ResourceModel.find({ lessonId }).sort({ orderIndex: 1 }).lean();
 
     return {
         lesson,
@@ -106,14 +106,14 @@ const getModuleResources = async (enrollmentId: string, moduleId: string) => {
     const moduleProgress = await ModuleProgressModel.findOne({
         enrollmentId,
         moduleId,
-    });
+    }).lean();
 
     if (!moduleProgress || moduleProgress.status === ProgressStatus.Locked) {
         throw new ApiError(StatusCodes.FORBIDDEN, 'This module is locked');
     }
 
     // Get resources
-    const resources = await ResourceModel.find({ moduleId }).sort({ orderIndex: 1 });
+    const resources = await ResourceModel.find({ moduleId }).sort({ orderIndex: 1 }).lean();
 
     return resources;
 };

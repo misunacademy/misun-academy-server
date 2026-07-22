@@ -30,7 +30,7 @@ const getAllBatches = catchAsync(async (req: Request, res: Response) => {
         success: true,
         message: 'Batches retrieved successfully',
         data: result.data,
-        meta: result.pagination
+        meta: result.meta
     });
 });
 

@@ -1,8 +1,9 @@
 import express from 'express';
 import { CourseController } from './course.controller.js';
-import { requireAuth, requireAdmin, requireSuperAdmin, requireInstructor, requireRole } from '../../middlewares/betterAuth.js';
+import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 import validateRequest from '../../middlewares/validateRequest.js';
 import { createCourseSchema, updateCourseSchema } from '../../validations/course.validation.js';
+import { assignInstructorSchema } from '../../validations/instructor.validation.js';
 
 const router = express.Router();
 
@@ -33,6 +34,7 @@ router.patch(
     '/:id/instructor',
     requireAuth,
     requireAdmin,
+    validateRequest(assignInstructorSchema),
     CourseController.assignInstructor
 );
 

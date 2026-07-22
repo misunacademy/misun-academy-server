@@ -5,6 +5,14 @@ import {
     requireAdmin,
     requireEmployee,
 } from '../../middlewares/betterAuth.js';
+import validateRequest from '../../middlewares/validateRequest.js';
+import {
+    createSalarySchema,
+    updateSalarySchema,
+    updateSalaryStatusSchema,
+    createLeaveRequestSchema,
+    updateLeaveStatusSchema,
+} from '../../validations/employee.validation.js';
 
 const router = express.Router();
 
@@ -17,14 +25,14 @@ router.get('/admin/employees',             requireAuth, requireAdmin, EmployeeCo
 
 // Salary management
 router.get('/admin/salaries',              requireAuth, requireAdmin, EmployeeController.getAllSalariesAdmin);
-router.post('/admin/salaries',             requireAuth, requireAdmin, EmployeeController.addSalary);
-router.patch('/admin/salaries/:id/status', requireAuth, requireAdmin, EmployeeController.updateSalaryStatus);
-router.put('/admin/salaries/:id',          requireAuth, requireAdmin, EmployeeController.updateSalary);
+router.post('/admin/salaries',             requireAuth, requireAdmin, validateRequest(createSalarySchema), EmployeeController.addSalary);
+router.patch('/admin/salaries/:id/status', requireAuth, requireAdmin, validateRequest(updateSalaryStatusSchema), EmployeeController.updateSalaryStatus);
+router.put('/admin/salaries/:id',          requireAuth, requireAdmin, validateRequest(updateSalarySchema), EmployeeController.updateSalary);
 router.delete('/admin/salaries/:id',       requireAuth, requireAdmin, EmployeeController.deleteSalary);
 
 // Leave management
 router.get('/admin/leave',                 requireAuth, requireAdmin, EmployeeController.getAllLeaveRequestsAdmin);
-router.patch('/admin/leave/:id/status',    requireAuth, requireAdmin, EmployeeController.updateLeaveStatus);
+router.patch('/admin/leave/:id/status',    requireAuth, requireAdmin, validateRequest(updateLeaveStatusSchema), EmployeeController.updateLeaveStatus);
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EMPLOYEE ROUTES
@@ -39,6 +47,6 @@ router.get('/salaries', requireAuth, requireEmployee, EmployeeController.getMySa
 
 // Leave requests
 router.get('/leave',  requireAuth, requireEmployee, EmployeeController.getMyLeaveRequests);
-router.post('/leave', requireAuth, requireEmployee, EmployeeController.addLeaveRequest);
+router.post('/leave', requireAuth, requireEmployee, validateRequest(createLeaveRequestSchema), EmployeeController.addLeaveRequest);
 
 export const EmployeeRoutes = router;

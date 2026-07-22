@@ -1,6 +1,10 @@
 import express from 'express';
 import { InstructorController } from './instructor.controller.js';
 import { requireAuth, requireInstructor } from '../../middlewares/betterAuth.js';
+import validateRequest from '../../middlewares/validateRequest.js';
+import { createModuleSchema, updateModuleSchema, reorderModulesSchema } from '../../validations/module.validation.js';
+import { createLessonSchema, updateLessonSchema } from '../../validations/lesson.validation.js';
+import { updateInstructorProfileSchema } from '../../validations/instructor.validation.js';
 
 const router = express.Router();
 
@@ -9,7 +13,7 @@ router.use(requireAuth, requireInstructor);
 
 // ── Profile ──────────────────────────────────────────────────────────────────
 router.get('/profile', InstructorController.getProfile);
-router.put('/profile', InstructorController.updateProfile);
+router.put('/profile', validateRequest(updateInstructorProfileSchema), InstructorController.updateProfile);
 
 
 // ── Batches ──────────────────────────────────────────────────────────────────
@@ -23,15 +27,15 @@ router.get('/courses', InstructorController.getAssignedCourses);
 
 // Module CRUD — only for assigned courses
 router.get('/courses/:courseId/modules', InstructorController.getCourseModules);
-router.post('/courses/:courseId/modules', InstructorController.createCourseModule);
-router.put('/courses/:courseId/modules/reorder', InstructorController.reorderCourseModules);
-router.put('/modules/:moduleId', InstructorController.updateCourseModule);
+router.post('/courses/:courseId/modules', validateRequest(createModuleSchema), InstructorController.createCourseModule);
+router.put('/courses/:courseId/modules/reorder', validateRequest(reorderModulesSchema), InstructorController.reorderCourseModules);
+router.put('/modules/:moduleId', validateRequest(updateModuleSchema), InstructorController.updateCourseModule);
 router.delete('/modules/:moduleId', InstructorController.deleteCourseModule);
 
 // Lesson CRUD — only for modules inside assigned courses
 router.get('/modules/:moduleId/lessons', InstructorController.getModuleLessons);
-router.post('/modules/:moduleId/lessons', InstructorController.createModuleLesson);
-router.put('/lessons/:lessonId', InstructorController.updateModuleLesson);
+router.post('/modules/:moduleId/lessons', validateRequest(createLessonSchema), InstructorController.createModuleLesson);
+router.put('/lessons/:lessonId', validateRequest(updateLessonSchema), InstructorController.updateModuleLesson);
 router.delete('/lessons/:lessonId', InstructorController.deleteModuleLesson);
 
 export const InstructorRoutes = router;

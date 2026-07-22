@@ -10,7 +10,8 @@ import { autoTransitionBatches } from "../../utils/batchScheduler.js";
 const getNextBatchNumber = async (courseId: string): Promise<number> => {
     const lastBatch = await BatchModel.findOne({ courseId })
         .sort({ batchNumber: -1 })
-        .select('batchNumber');
+        .select('batchNumber')
+        .lean();
     // Start from 1 for any new course; increment from the last batch number for existing ones
     return lastBatch ? lastBatch.batchNumber + 1 : 1;
 };
@@ -80,11 +81,12 @@ export const BatchService = {
             // .populate('instructors', 'name')
             .sort({ startDate: -1 })
             .skip(skip)
-            .limit(limit);
+            .limit(limit)
+            .lean();
 
         return {
             data,
-            pagination: {
+            meta: {
                 total,
                 page,
                 limit,
@@ -112,7 +114,8 @@ export const BatchService = {
         const batch = await BatchModel.findOne(query)
             .populate('courseId')
             // .populate('instructors', 'name')
-            .sort({ enrollmentStartDate: 1 });
+            .sort({ enrollmentStartDate: 1 })
+            .lean();
 
         return batch;
     },
@@ -130,7 +133,8 @@ export const BatchService = {
             enrollmentEndDate: { $gte: now },
         })
             .populate('courseId', 'title slug thumbnailImage shortDescription instructor')
-            .sort({ enrollmentStartDate: 1 });
+            .sort({ enrollmentStartDate: 1 })
+            .lean();
 
         return batches;
     },
@@ -141,6 +145,7 @@ export const BatchService = {
     getBatchById: async (id: string) => {
         const batch = await BatchModel.findById(id)
             .populate('courseId')
+            .lean()
         // .populate('instructors');
 
         if (!batch) {
@@ -156,7 +161,7 @@ export const BatchService = {
     updateBatch: async (id: string, data: Partial<IBatch>) => {
         console.log('BatchService.updateBatch called:', { id, data });
 
-        const batch = await BatchModel.findById(id);
+        const batch = await BatchModel.findById(id).lean();
         if (!batch) {
             throw new ApiError(StatusCodes.NOT_FOUND, "Batch not found");
         }
@@ -242,7 +247,7 @@ export const BatchService = {
      * Delete batch (only if no enrollments)
      */
     deleteBatch: async (id: string) => {
-        const batch = await BatchModel.findById(id);
+        const batch = await BatchModel.findById(id).lean();
         if (!batch) {
             throw new ApiError(StatusCodes.NOT_FOUND, "Batch not found");
         }
@@ -284,11 +289,12 @@ export const BatchService = {
             // .populate('instructors', 'name')
             .sort({ startDate: -1 })
             .skip(skip)
-            .limit(limit);
+            .limit(limit)
+            .lean();
 
         return {
             data,
-            pagination: {
+            meta: {
                 total,
                 page,
                 limit,

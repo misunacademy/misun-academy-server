@@ -17,8 +17,9 @@ import { BatchModel } from "../Batch/batch.model.js";
 import { ProfileService } from "../Profile/profile.service.js";
 import axios from 'axios';
 import env from '../../config/env.js';
-import { sslcommerzConfig } from '../../config/sslcommerz.js';
 import { EnrollmentService } from "../Enrollment/enrollment.service.js";
+import { logger } from "../../config/logger.js";
+import { IPayment } from "./payment.model.js";
 
 interface PaymentHistoryQuery {
     page?: number;
@@ -33,14 +34,18 @@ interface PaymentHistoryQuery {
     sortOrder?: "asc" | "desc";
 }
 
-/**
- * Generate a unique transaction ID for payments
- * Format: TXN-{timestamp}-{random}
- */
+interface ActivateEnrollmentParams {
+    payment: IPayment & mongoose.Document;
+    enrollmentId: string;
+    session: mongoose.ClientSession;
+    context: string;
+    initializeModules?: boolean;
+}
+
 const generateTransactionId = (): string => {
-    const timestamp = Date.now();
-    const random = crypto.randomBytes(4).toString('hex').toUpperCase();
-    return `TXN-${timestamp}-${random}`;
+    const timestamp = Date.now().toString(36).toUpperCase();
+    const random = crypto.randomBytes(3).toString('hex').toUpperCase();
+    return `MA${timestamp}${random}`;
 };
 
 const syncProfileEnrollmentReference = async (
@@ -50,13 +55,9 @@ const syncProfileEnrollmentReference = async (
     context: string
 ) => {
     try {
-        await ProfileService.createOrUpdateProfileAfterEnrollment(
-            userId,
-            enrollmentId,
-            session
-        );
+        await ProfileService.createOrUpdateProfileAfterEnrollment(userId, enrollmentId, session);
     } catch (profileError) {
-        console.error(`Failed to update student profile after ${context}:`, profileError);
+        logger.error(profileError, `Failed to update student profile after ${context}`);
     }
 };
 
@@ -81,6 +82,129 @@ const getCourseEmailContext = (batch: any): { courseName: string; courseSlug: st
     };
 };
 
+// ─── SHARED ACTIVATION LOGIC (replaces 3x duplicated code) ───
+
+const sendPaymentSuccessNotifications = async (
+    user: any,
+    batch: any,
+    payment: IPayment & mongoose.Document,
+    enrollmentId: string,
+) => {
+    const courseWithBatch = getCourseBatchLabel(batch);
+    const courseEmailContext = getCourseEmailContext(batch);
+
+    sendCoursePaymentSuccessEmail(
+        courseEmailContext,
+        user.email,
+        user.name,
+        payment.amount,
+        payment.currency || 'BDT',
+        courseWithBatch,
+        payment.transactionId,
+        payment.method
+    );
+
+    sendCourseEnrollmentConfirmationEmail(
+        courseEmailContext,
+        user,
+        courseWithBatch,
+        enrollmentId,
+        payment.amount,
+        payment.method
+    );
+};
+
+const sendPaymentFailedNotifications = async (
+    user: any,
+    batch: any,
+    failureReason: string,
+) => {
+    const courseWithBatch = getCourseBatchLabel(batch);
+    const courseEmailContext = getCourseEmailContext(batch);
+
+    sendCoursePaymentFailedEmail(
+        courseEmailContext,
+        user,
+        courseWithBatch,
+        failureReason
+    );
+};
+
+const activateEnrollmentForPayment = async (params: ActivateEnrollmentParams) => {
+    const { payment, enrollmentId, session, context, initializeModules } = params;
+
+    const enrollment = await EnrollmentModel.findOne({ enrollmentId }).session(session);
+    if (!enrollment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found for activation');
+    }
+
+    const wasAlreadyActive = enrollment.status === EnrollmentStatus.Active;
+
+    enrollment.status = EnrollmentStatus.Active;
+    enrollment.paymentId = payment._id as any;
+    enrollment.enrolledAt = enrollment.enrolledAt || new Date();
+    await enrollment.save({ session });
+
+    await EnrollmentService.ensureStudentIdForUser(enrollment.userId.toString(), session);
+
+    if (!wasAlreadyActive) {
+        await BatchModel.findByIdAndUpdate(
+            payment.batchId,
+            { $inc: { currentEnrollment: 1 } },
+            { session }
+        );
+    }
+
+    if (initializeModules) {
+        await EnrollmentService.initializeModuleProgress(enrollment._id.toString());
+    }
+
+    await syncProfileEnrollmentReference(
+        enrollment.userId.toString(),
+        enrollment.enrollmentId!,
+        session,
+        context
+    );
+
+    const user = await UserModel.findById(payment.userId).lean().session(session);
+    const batch = await BatchModel.findById(payment.batchId)
+        .populate('courseId', 'title slug')
+        .lean()
+        .session(session);
+
+    if (user && batch) {
+        await sendPaymentSuccessNotifications(user, batch, payment, enrollmentId);
+    }
+
+    return enrollment;
+};
+
+const failEnrollment = async (
+    payment: IPayment & mongoose.Document,
+    session: mongoose.ClientSession,
+    failureReason: string,
+) => {
+    if (payment.enrollmentId) {
+        await EnrollmentModel.findOneAndUpdate(
+            { enrollmentId: payment.enrollmentId },
+            { status: EnrollmentStatus.PaymentFailed },
+            { session }
+        );
+    }
+
+    const user = await UserModel.findById(payment.userId).lean().session(session);
+    const batch = await BatchModel.findById(payment.batchId)
+        .populate('courseId', 'title slug')
+        .lean()
+        .session(session);
+
+    if (user && batch) {
+        await sendPaymentFailedNotifications(user, batch, failureReason);
+    }
+};
+
+// ─── PAYMENT HISTORY ───
+
 const getPaymentHistory = async (query: PaymentHistoryQuery) => {
     const {
         page = 1,
@@ -95,19 +219,11 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
         sortOrder = "desc",
     } = query;
 
-    const filters: Record<string, any> = {};
+    const filters: Record<string, unknown> = {};
 
-    if (status) {
-        filters.status = status;
-    }
-
-    if (method) {
-        filters.method = method;
-    }
-
-    if (studentId) {
-        filters.userId = studentId;
-    }
+    if (status) filters.status = status;
+    if (method) filters.method = method;
+    if (studentId) filters.userId = studentId;
 
     let filteredBatchIds: mongoose.Types.ObjectId[] | null = null;
 
@@ -120,7 +236,7 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
             courseId: new mongoose.Types.ObjectId(courseId),
         }).distinct("_id");
 
-        filteredBatchIds = batchIds.map((id: any) => new mongoose.Types.ObjectId(id));
+        filteredBatchIds = batchIds.map((id) => new mongoose.Types.ObjectId(id));
     }
 
     if (batchId) {
@@ -141,7 +257,7 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
     }
 
     const pipeline: PipelineStage[] = [
-        { $match: filters },
+        { $match: filters as any },
         {
             $lookup: {
                 from: "users",
@@ -181,7 +297,6 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
         },
     ];
 
-    // Add search stage if search query exists
     if (search) {
         pipeline.push({
             $match: {
@@ -191,7 +306,7 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
                     { "user.email": { $regex: search, $options: "i" } },
                 ],
             },
-        });
+        } as any);
     }
 
     pipeline.push(
@@ -238,7 +353,6 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
     );
 
     const data = await PaymentModel.aggregate(pipeline);
-
     const totalDocuments = await PaymentModel.countDocuments(filters);
 
     return {
@@ -252,33 +366,29 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
     };
 };
 
+// ─── PAYMENT STATUS UPDATE WITH ENROLLMENT ───
 
-/**
- * Update payment status and enrollment with transaction support
- * Uses MongoDB transactions to ensure data integrity:
- * - Payment status update
- * - Enrollment status update
- * - Email notifications
- * All operations are rolled back if any step fails
- */
 const updatePaymentWithEnrollStatus = async (
     transactionId: string,
     paymentStatus: Status,
-    gatewayResponse?: any
+    gatewayResponse?: unknown
 ) => {
     const session = await mongoose.startSession();
 
     try {
         session.startTransaction();
 
-        // 1. Find and update payment by transaction ID
+        const updateFields: Record<string, unknown> = {
+            status: paymentStatus,
+            updatedAt: new Date(),
+        };
+        if (gatewayResponse) {
+            updateFields.gatewayResponse = gatewayResponse;
+        }
+
         const updatedPayment = await PaymentModel.findOneAndUpdate(
             { transactionId },
-            {
-                status: paymentStatus,
-                ...(gatewayResponse && { gatewayResponse }),
-                updatedAt: new Date()
-            },
+            updateFields,
             { new: true, session }
         ).populate({
             path: 'batchId',
@@ -289,107 +399,43 @@ const updatePaymentWithEnrollStatus = async (
             throw new ApiError(StatusCodes.NOT_FOUND, "Payment not found");
         }
 
-        // 2. If payment successful and enrollment exists, confirm enrollment
         if (paymentStatus === Status.Success && updatedPayment.enrollmentId) {
-            const enrollment = await EnrollmentModel.findOne({
-                enrollmentId: updatedPayment.enrollmentId
+            await activateEnrollmentForPayment({
+                payment: updatedPayment,
+                enrollmentId: updatedPayment.enrollmentId,
+                session,
+                context: 'payment status update',
+                initializeModules: false,
             });
-
-            if (enrollment) {
-                // Confirm enrollment (activates it)
-                await EnrollmentModel.findByIdAndUpdate(
-                    enrollment._id,
-                    {
-                        status: EnrollmentStatus.Active,
-                        paymentId: updatedPayment._id,
-                        enrolledAt: new Date()
-                    },
-                    { session }
-                );
-
-                await EnrollmentService.ensureStudentIdForUser(enrollment.userId.toString(), session);
-
-                // Increment batch enrollment count
-                await BatchModel.findByIdAndUpdate(
-                    updatedPayment.batchId,
-                    { $inc: { currentEnrollment: 1 } },
-                    { session }
-                );
-
-                await syncProfileEnrollmentReference(
-                    enrollment.userId.toString(),
-                    updatedPayment.enrollmentId!,
-                    session,
-                    'SSLCommerz payment'
-                );
-
-                // Send payment success email
-                const batch = updatedPayment.batchId as any;
-                const user = updatedPayment.userId as any;
-                if (user && batch) {
-                    const courseWithBatch = getCourseBatchLabel(batch);
-                    const courseEmailContext = getCourseEmailContext(batch);
-
-                    sendCoursePaymentSuccessEmail(
-                        courseEmailContext,
-                        user.email,
-                        user.name,
-                        updatedPayment.amount,
-                        updatedPayment.currency || 'BDT',
-                        courseWithBatch,
-                        updatedPayment.transactionId,
-                        updatedPayment.method
-                    );
-
-                    // Send enrollment confirmation email
-                    sendCourseEnrollmentConfirmationEmail(
-                        courseEmailContext,
-                        user,
-                        courseWithBatch,
-                        updatedPayment.enrollmentId!,
-                        updatedPayment.amount,
-                        updatedPayment.method
-                    );
-                }
-            }
         } else if (
             (paymentStatus === Status.Failed || paymentStatus === Status.Cancel) &&
             updatedPayment.enrollmentId
         ) {
-            // Update enrollment to failed if payment failed or cancelled
-            const enrollment = await EnrollmentModel.findOne({
-                enrollmentId: updatedPayment.enrollmentId
-            });
-
-            if (enrollment) {
-                await EnrollmentModel.findByIdAndUpdate(
-                    enrollment._id,
-                    { status: EnrollmentStatus.PaymentFailed },
-                    { session }
-                );
-            }
+            await failEnrollment(
+                updatedPayment,
+                session,
+                'Payment ' + paymentStatus
+            );
         }
 
-        // Commit transaction
         await session.commitTransaction();
         session.endSession();
 
         return {
             payment: updatedPayment,
-            enrollment: updatedPayment.enrollmentId ?
-                await EnrollmentModel.findOne({ enrollmentId: updatedPayment.enrollmentId }) : null,
+            enrollment: updatedPayment.enrollmentId
+                ? await EnrollmentModel.findOne({ enrollmentId: updatedPayment.enrollmentId }).lean()
+                : null,
         };
     } catch (error) {
-        // Rollback transaction
         await session.abortTransaction();
         session.endSession();
         throw error;
     }
 };
 
-/**
- * Update or create payment record
- */
+// ─── UPSERT PAYMENT ───
+
 const updatePayment = async (paymentData: {
     enrollmentId: string;
     transactionId: string;
@@ -397,9 +443,9 @@ const updatePayment = async (paymentData: {
     currency: string;
     status: string;
     method: string;
-    gatewayResponse?: any;
+    gatewayResponse?: unknown;
 }) => {
-    const enrollment = await EnrollmentModel.findOne({ enrollmentId: paymentData.enrollmentId });
+    const enrollment = await EnrollmentModel.findOne({ enrollmentId: paymentData.enrollmentId }).lean();
     if (!enrollment) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
     }
@@ -423,15 +469,17 @@ const updatePayment = async (paymentData: {
     return payment;
 };
 
+// ─── CHECK PAYMENT STATUS ───
+
 const checkPaymentStatus = async (transactionId: string) => {
-    // Find payment record by transaction ID
-    const payment = await PaymentModel.findOne({ transactionId }).populate({
+    const payment = await PaymentModel.findOne({ transactionId }).lean().populate({
         path: 'batchId',
         populate: {
             path: 'courseId',
             select: 'slug',
         },
     });
+
     if (!payment) {
         throw new ApiError(StatusCodes.NOT_FOUND, "Payment data not found!");
     }
@@ -442,8 +490,7 @@ const checkPaymentStatus = async (transactionId: string) => {
         (typeof rawCourse === 'string' ? rawCourse : '');
     const courseQuery = courseSlug ? `&course=${encodeURIComponent(courseSlug)}` : '';
 
-    // Determine frontend redirect URL based on status
-    let redirectUrl = "/";
+    let redirectUrl: string;
     switch (payment.status) {
         case Status.Success:
             redirectUrl = `/payment?status=success&t=${encodeURIComponent(transactionId)}${courseQuery}`;
@@ -472,23 +519,22 @@ const checkPaymentStatus = async (transactionId: string) => {
     };
 };
 
-const validateSSLCommerzPayment = async (valId: string) => {
-    const isLive = env.SSL_IS_LIVE === 'true';
-    const url = isLive
-        ? env.SSL_VALIDATION_API
-        : 'https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php';
+// ─── SSLCOMMERZ VALIDATION ───
 
-    const { data } = await axios.get(url, {
+const validateSSLCommerzPayment = async (valId: string) => {
+    const { data } = await axios.get(env.SSL_VALIDATION_API, {
         params: {
             val_id: valId,
-            store_id: sslcommerzConfig.store_id,
-            store_passwd: sslcommerzConfig.store_passwd,
+            store_id: env.SSL_STORE_ID,
+            store_passwd: env.SSL_STORE_PASSWORD,
             format: 'json',
         },
     });
 
     return data;
 };
+
+// ─── FINALIZE SSLCOMMERZ PAYMENT ───
 
 const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) => {
     const session = await mongoose.startSession();
@@ -517,6 +563,11 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
                 processedAt: new Date(),
             };
             await payment.save({ session });
+
+            if (payment.enrollmentId) {
+                await failEnrollment(payment, session, 'SSLCommerz validation failed');
+            }
+
             await session.commitTransaction();
             return payment;
         }
@@ -546,65 +597,13 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
         await payment.save({ session });
 
         if (payment.enrollmentId) {
-            const enrollment = await EnrollmentModel.findOne({
+            await activateEnrollmentForPayment({
+                payment,
                 enrollmentId: payment.enrollmentId,
-            }).session(session);
-
-            if (enrollment) {
-                const wasAlreadyActive = enrollment.status === EnrollmentStatus.Active;
-
-                enrollment.status = EnrollmentStatus.Active;
-                enrollment.paymentId = payment._id as any;
-                enrollment.enrolledAt = enrollment.enrolledAt || new Date();
-                await enrollment.save({ session });
-
-                await EnrollmentService.ensureStudentIdForUser(enrollment.userId.toString(), session);
-
-                if (!wasAlreadyActive) {
-                    await BatchModel.findByIdAndUpdate(
-                        payment.batchId,
-                        { $inc: { currentEnrollment: 1 } },
-                        { session }
-                    );
-                }
-
-                await syncProfileEnrollmentReference(
-                    enrollment.userId.toString(),
-                    enrollment.enrollmentId!,
-                    session,
-                    'SSLCommerz payment finalize'
-                );
-
-                const user = await UserModel.findById(payment.userId).session(session);
-                const batch = await BatchModel.findById(payment.batchId)
-                    .populate('courseId', 'title slug')
-                    .session(session);
-
-                if (user && batch) {
-                    const courseWithBatch = getCourseBatchLabel(batch);
-                    const courseEmailContext = getCourseEmailContext(batch);
-
-                    sendCoursePaymentSuccessEmail(
-                        courseEmailContext,
-                        user.email,
-                        user.name,
-                        payment.amount,
-                        payment.currency || 'BDT',
-                        courseWithBatch,
-                        payment.transactionId,
-                        payment.method
-                    );
-
-                    sendCourseEnrollmentConfirmationEmail(
-                        courseEmailContext,
-                        user,
-                        courseWithBatch,
-                        enrollment.enrollmentId!,
-                        payment.amount,
-                        payment.method
-                    );
-                }
-            }
+                session,
+                context: 'SSLCommerz payment finalize',
+                initializeModules: false,
+            });
         }
 
         await session.commitTransaction();
@@ -617,9 +616,8 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
     }
 };
 
-/**
- * Get current user's payments
- */
+// ─── GET MY PAYMENTS ───
+
 const getMyPayments = async (userId: string) => {
     const payments = await PaymentModel.find({ userId })
         .populate({
@@ -633,31 +631,29 @@ const getMyPayments = async (userId: string) => {
         .sort({ createdAt: -1 })
         .lean();
 
-    // Populate course info from batch
-    const populatedPayments = await Promise.all(
-        payments.map(async (payment) => {
-            const batch = payment.batchId as any;
-            let course = null;
-            if (batch?.courseId) {
-                course = await mongoose.model('Course').findById(batch.courseId).select('title slug').lean();
-            }
-            return {
-                ...payment,
-                batch,
-                course
-            };
-        })
-    );
+    const batchIds = payments
+        .map((p) => (p.batchId as any)?.courseId)
+        .filter(Boolean);
 
-    return populatedPayments;
+    const courses = await mongoose.model('Course').find({
+        _id: { $in: batchIds }
+    }).select('title slug').lean();
+
+    const courseMap = new Map(courses.map((c: any) => [c._id.toString(), c]));
+
+    return payments.map((payment) => {
+        const batch = payment.batchId as any;
+        const courseId = batch?.courseId?.toString();
+        const course = courseId ? courseMap.get(courseId) : null;
+        return { ...payment, batch, course };
+    });
 };
 
-/**
- * Initiate SSLCommerz payment
- */
-const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) => {
+// ─── INITIATE SSLCOMMERZ PAYMENT ───
 
+const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) => {
     const enrollment = await EnrollmentModel.findOne({ enrollmentId, userId })
+        .lean()
         .populate('batchId')
         .populate('userId');
 
@@ -673,13 +669,8 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment is not pending payment');
     }
 
-    const batch = enrollment.batchId as any;
-    const user = enrollment.userId as any;
-
-    // const customerPhone = (user?.phone || '').toString().trim();
-    // if (!customerPhone) {
-    //     throw new ApiError(StatusCodes.BAD_REQUEST, 'Phone number is required for SSLCommerz payments');
-    // }
+    const batch = enrollment.batchId;
+    const user = enrollment.userId;
 
     const store_id = config.SSL_STORE_ID;
     const store_passwd = config.SSL_STORE_PASSWORD;
@@ -690,14 +681,12 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
     }
 
     const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
-
-    // Generate unique transaction ID
     const transactionId = generateTransactionId();
 
     const paymentData = {
         store_id: config.SSL_STORE_ID,
         store_passwd: config.SSL_STORE_PASSWORD,
-        total_amount: Number(batch.price),
+        total_amount: Number((batch as any).price).toFixed(2),
         currency: "BDT",
         tran_id: transactionId,
         success_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}`,
@@ -705,10 +694,10 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         cancel_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=cancel`,
         ipn_url: `${config.SERVER_URL}/api/v1/payments/webhook`,
         product_name: getCourseBatchLabel(batch),
-        cus_name: user.name,
-        cus_email: user.email,
-        cus_add1: user.address || 'N/A',
-        cus_phone: user.phone || 'N/A',
+        cus_name: (user as any).name,
+        cus_email: (user as any).email,
+        cus_add1: (user as any).address || 'N/A',
+        cus_phone: (user as any).phone || 'N/A',
         shipping_method: 'N/A',
         product_category: 'Online Course',
         product_profile: 'general',
@@ -727,26 +716,22 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         ship_country: 'Bangladesh',
         value_a: enrollmentId,
         value_b: userId,
-        value_c: batch._id.toString(),
+        value_c: (batch as any)._id.toString(),
     };
 
-
-    // Reuse a single payment record per enrollment and rotate transaction ID per retry.
     await PaymentModel.findOneAndUpdate(
         { enrollmentId },
         {
             $set: {
                 userId,
-                batchId: batch._id,
+                batchId: (batch as any)._id,
                 enrollmentId,
                 transactionId,
-                amount: batch.price,
-                currency: batch.currency || 'BDT',
+                amount: (batch as any).price,
+                currency: (batch as any).currency || 'BDT',
                 status: Status.Pending,
                 method: 'SSLCommerz',
-                gatewayResponse: {
-                    retriedAt: new Date(),
-                },
+                gatewayResponse: { retriedAt: new Date() },
             },
             $unset: {
                 verifiedAt: '',
@@ -756,26 +741,23 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         { upsert: true, setDefaultsOnInsert: true }
     );
 
-
-
     try {
-
         const response = await sslcz.init(paymentData);
         if (response?.GatewayPageURL) {
             return {
                 paymentUrl: response.GatewayPageURL,
                 enrollmentId,
-                transactionId, // Return the generated transaction ID
+                transactionId,
             };
         } else {
-            console.error('SSLCommerz init failed. Response:', response);
+            logger.error({ response }, 'SSLCommerz init failed');
             throw new ApiError(
                 StatusCodes.INTERNAL_SERVER_ERROR,
                 response?.failedreason || 'Failed to initiate payment gateway. Please check SSLCommerz configuration.'
             );
         }
     } catch (error: any) {
-        console.error('SSLCommerz error:', error);
+        logger.error(error, 'SSLCommerz error');
         throw new ApiError(
             StatusCodes.INTERNAL_SERVER_ERROR,
             error?.message || 'Payment gateway initialization failed. Please contact support.'
@@ -783,19 +765,15 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
     }
 };
 
-/**
- * Admin: Verify and approve manual payment
- * After approval, generates and assigns enrollmentId atomically
- */
+// ─── VERIFY MANUAL PAYMENT ───
+
 const verifyManualPayment = async (transactionId: string, approved: boolean, adminId: string) => {
     const session = await mongoose.startSession();
 
     try {
         await session.startTransaction();
 
-        // Find payment by transaction ID
         const payment = await PaymentModel.findOne({ transactionId }).session(session);
-
         if (!payment) {
             throw new ApiError(StatusCodes.NOT_FOUND, 'Payment not found');
         }
@@ -805,20 +783,20 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
         }
 
         if (approved) {
-            // Get batch information for enrollment ID generation
-            const batch = await BatchModel.findById(payment.batchId).populate('courseId').session(session);
+            const batch = await BatchModel.findById(payment.batchId).populate('courseId').lean().session(session);
             if (!batch) {
                 throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
             }
 
-            // Generate enrollment ID for approved payment if not already assigned to this enrollment.
             const courseSlug = (batch.courseId as any)?.slug || '';
             let enrollmentId = payment.enrollmentId;
             if (!enrollmentId) {
-                enrollmentId = await EnrollmentService.generateEnrollmentId(batch.title?.split(' ')[1], courseSlug);
+                enrollmentId = await EnrollmentService.generateEnrollmentId(
+                    (batch as any).title?.split(' ')[1],
+                    courseSlug
+                );
             }
 
-            // Update payment to success and link enrollment
             payment.status = Status.Success;
             payment.enrollmentId = enrollmentId;
             payment.verifiedAt = new Date();
@@ -830,79 +808,14 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
             };
             await payment.save({ session });
 
-            // Find and update enrollment
-            const enrollment = await EnrollmentModel.findOne({
-                userId: payment.userId,
-                batchId: payment.batchId,
-                status: EnrollmentStatus.PaymentPending
-            }).session(session);
-
-            if (!enrollment) {
-                throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
-            }
-
-            // Assign enrollment ID if missing (existing may already have it), then activate
-            if (!enrollment.enrollmentId) {
-                enrollment.enrollmentId = enrollmentId;
-            }
-            enrollment.status = EnrollmentStatus.Active;
-            enrollment.paymentId = payment._id;
-            enrollment.enrolledAt = new Date();
-            await enrollment.save({ session });
-
-            // Backfill student ID for manual-payment users created before the enrollment-flow fix.
-            await EnrollmentService.ensureStudentIdForUser(enrollment.userId.toString(), session);
-
-            // Increment batch enrollment count
-            await BatchModel.findByIdAndUpdate(
-                payment.batchId,
-                { $inc: { currentEnrollment: 1 } },
-                { session }
-            );
-
-            // Initialize module progress
-            await EnrollmentService.initializeModuleProgress(enrollment._id.toString(), payment.batchId.toString());
-
-            // Send confirmation email
-            const user = await UserModel.findById(payment.userId).session(session);
-            const batchForEmail = await BatchModel.findById(payment.batchId)
-                .populate('courseId', 'title slug')
-                .session(session);
-
-            if (user && batchForEmail) {
-                const courseWithBatch = getCourseBatchLabel(batchForEmail);
-                const courseEmailContext = getCourseEmailContext(batchForEmail);
-
-                sendCoursePaymentSuccessEmail(
-                    courseEmailContext,
-                    user.email,
-                    user.name,
-                    payment.amount,
-                    payment.currency || 'BDT',
-                    courseWithBatch,
-                    payment.transactionId,
-                    payment.method
-                );
-
-                // Send enrollment confirmation email
-                sendCourseEnrollmentConfirmationEmail(
-                    courseEmailContext,
-                    user,
-                    courseWithBatch,
-                    enrollmentId,
-                    payment.amount,
-                    payment.method
-                );
-            }
-
-            await syncProfileEnrollmentReference(
-                enrollment.userId.toString(),
+            await activateEnrollmentForPayment({
+                payment,
                 enrollmentId,
                 session,
-                'manual payment approval'
-            );
+                context: 'manual payment approval',
+                initializeModules: true,
+            });
         } else {
-            // Reject payment
             payment.status = Status.Failed;
             payment.gatewayResponse = {
                 ...payment.gatewayResponse,
@@ -911,34 +824,7 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
             };
             await payment.save({ session });
 
-            // Update enrollment to PaymentFailed
-            await EnrollmentModel.findOneAndUpdate(
-                {
-                    userId: payment.userId,
-                    batchId: payment.batchId,
-                    status: EnrollmentStatus.PaymentPending
-                },
-                { status: EnrollmentStatus.PaymentFailed },
-                { session }
-            );
-
-            // Send payment failed email
-            const user = await UserModel.findById(payment.userId).session(session);
-            const batch = await BatchModel.findById(payment.batchId)
-                .populate('courseId', 'title slug')
-                .session(session);
-
-            if (user && batch) {
-                const courseWithBatch = getCourseBatchLabel(batch);
-                const courseEmailContext = getCourseEmailContext(batch);
-
-                sendCoursePaymentFailedEmail(
-                    courseEmailContext,
-                    user,
-                    courseWithBatch,
-                    'Payment verification failed by admin'
-                );
-            }
+            await failEnrollment(payment, session, 'Payment verification failed by admin');
         }
 
         await session.commitTransaction();
@@ -951,6 +837,86 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
     }
 };
 
+// ─── SSLCOMMERZ WEBHOOK SIGNATURE VERIFICATION ───
+
+const verifyWebhookSignature = (params: {
+    status: string;
+    val_id: string;
+    tran_id: string;
+    amount: string;
+    currency: string;
+    verify_key: string;
+    verify_sign: string;
+}): boolean => {
+    const keys = params.verify_key.split(',');
+    let concatString = env.SSL_STORE_PASSWORD;
+    for (const key of keys) {
+        concatString += (params as any)[key] || '';
+    }
+    const expectedSign = crypto
+        .createHash('md5')
+        .update(concatString)
+        .digest('hex');
+    return params.verify_sign === expectedSign;
+};
+
+// ─── SSLCOMMERZ GATEWAY STATUS MAPPER ───
+
+const mapSslGatewayStatus = (rawStatus?: string): Status | null => {
+    if (!rawStatus) return null;
+
+    const normalized = rawStatus.toString().trim().toUpperCase();
+
+    if (['FAILED', 'FAIL', 'FAILED_CARD', 'INVALID_TRANSACTION'].includes(normalized)) {
+        return Status.Failed;
+    }
+
+    if (['CANCELLED', 'CANCELED', 'CANCEL'].includes(normalized)) {
+        return Status.Cancel;
+    }
+
+    if (['PENDING', 'PROCESSING', 'INITIATED'].includes(normalized)) {
+        return Status.Pending;
+    }
+
+    return null;
+};
+
+// ─── VERIFY PAYMENT FOR CURRENT USER ───
+
+const verifyPaymentForCurrentUser = async (transactionId: string, userId: string) => {
+    const payment = await PaymentModel.findOne({
+        transactionId,
+        userId,
+    }).lean().populate({
+        path: 'batchId',
+        populate: {
+            path: 'courseId',
+            select: 'slug title',
+        },
+    });
+
+    if (!payment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Payment not found for this user');
+    }
+
+    let verified = false;
+    if (payment.status === Status.Success && payment.enrollmentId) {
+        const enrollment = await EnrollmentModel.findOne({ enrollmentId: payment.enrollmentId }).lean();
+        verified = !!enrollment && (
+            enrollment.status === EnrollmentStatus.Active ||
+            enrollment.status === EnrollmentStatus.Completed
+        );
+    }
+
+    return {
+        verified,
+        paymentStatus: payment.status,
+        courseSlug: (payment.batchId as any)?.courseId?.slug || '',
+        transactionId: payment.transactionId,
+    };
+};
+
 export const PaymentService = {
     getPaymentHistory,
     updatePaymentWithEnrollStatus,
@@ -960,4 +926,7 @@ export const PaymentService = {
     getMyPayments,
     initiateSSLCommerzPayment,
     verifyManualPayment,
-}
+    verifyWebhookSignature,
+    mapSslGatewayStatus,
+    verifyPaymentForCurrentUser,
+};

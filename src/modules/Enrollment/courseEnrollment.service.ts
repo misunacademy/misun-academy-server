@@ -19,10 +19,10 @@ const findEnrollmentForCourse = async (
             userId,
             status: { $in: statuses },
             batchId,
-        });
+        }).lean();
     }
 
-    const batches = await BatchModel.find({ courseId }).select('_id');
+    const batches = await BatchModel.find({ courseId }).select('_id').lean();
     const batchIds = batches.map((b) => b._id);
 
     if (batchIds.length === 0) {
@@ -33,7 +33,7 @@ const findEnrollmentForCourse = async (
         userId,
         status: { $in: statuses },
         batchId: { $in: batchIds },
-    });
+    }).lean();
 };
 
 /**
@@ -52,17 +52,17 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
     // Get module progress
     const moduleProgress = await ModuleProgressModel.find({
         enrollmentId: enrollment._id,
-    }).populate('moduleId', 'title orderIndex');
+    }).populate('moduleId', 'title orderIndex').lean();
 
     // Get lesson progress
     const lessonProgress = await LessonProgressModel.find({
         enrollmentId: enrollment._id,
-    });
+    }).lean();
 
     // Calculate overall progress from lesson completion (to match course-detail percentage approach)
-    const allCourseModules = await ModuleModel.find({ courseId, batchId: enrollment.batchId }).sort({ orderIndex: 1 });
+    const allCourseModules = await ModuleModel.find({ courseId, batchId: enrollment.batchId }).sort({ orderIndex: 1 }).lean();
     const allModuleIds = allCourseModules.map((m) => m._id);
-    const allLessons = await LessonModel.find({ moduleId: { $in: allModuleIds } });
+    const allLessons = await LessonModel.find({ moduleId: { $in: allModuleIds } }).lean();
 
     const totalLessons = allLessons.length;
     const completedLessonsCount = lessonProgress.filter(
@@ -78,7 +78,7 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
     for (const modProgress of sortedModules) {
         if (modProgress.status !== ProgressStatus.Completed) {
             // Find first incomplete lesson in this module
-            const moduleLessons = await LessonModel.find({ moduleId: modProgress.moduleId }).sort({ orderIndex: 1 });
+            const moduleLessons = await LessonModel.find({ moduleId: modProgress.moduleId }).sort({ orderIndex: 1 }).lean();
             for (const lesson of moduleLessons) {
                 const lessonProg = lessonProgress.find(lp => lp.lessonId.toString() === lesson._id.toString());
                 if (!lessonProg || lessonProg.status !== LessonProgressStatus.Completed) {
@@ -100,7 +100,7 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
 
     const completedLessonsWithModules = await LessonModel.find({
         _id: { $in: completedLessonIds }
-    });
+    }).lean();
 
     const completedLessons = completedLessonsWithModules.map(lesson => ({
         moduleId: lesson.moduleId.toString(),
@@ -119,7 +119,7 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
  * Complete a lesson for a user
  */
 const completeLesson = async (userId: string, courseId: string, moduleId: string, lessonId: string) => {
-    const module = await ModuleModel.findById(moduleId);
+    const module = await ModuleModel.findById(moduleId).lean();
     const batchId = module?.batchId?.toString();
 
     const enrollment = await findEnrollmentForCourse(userId, courseId, [
@@ -131,7 +131,7 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
     }
 
     // Verify lesson exists and belongs to the module
-    const lesson = await LessonModel.findById(lessonId);
+    const lesson = await LessonModel.findById(lessonId).lean();
     if (!lesson || lesson.moduleId.toString() !== moduleId) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found or does not belong to the specified module');
     }
@@ -140,7 +140,7 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
     const existingProgress = await LessonProgressModel.findOne({
         enrollmentId: enrollment._id,
         lessonId,
-    });
+    }).lean();
 
     if (existingProgress && existingProgress.status === LessonProgressStatus.Completed) {
         // Already completed, return success
@@ -181,7 +181,7 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
  */
 const recalculateModuleProgress = async (enrollmentId: string, moduleId: string) => {
     // Get all lessons in the module
-    const lessons = await LessonModel.find({ moduleId });
+    const lessons = await LessonModel.find({ moduleId }).lean();
     const totalLessons = lessons.length;
 
     if (totalLessons === 0) return;
@@ -190,7 +190,7 @@ const recalculateModuleProgress = async (enrollmentId: string, moduleId: string)
     const lessonProgress = await LessonProgressModel.find({
         enrollmentId,
         lessonId: { $in: lessons.map((l) => l._id) },
-    });
+    }).lean();
 
     const completedLessons = lessonProgress.filter(
         (p) => p.status === LessonProgressStatus.Completed
@@ -199,10 +199,10 @@ const recalculateModuleProgress = async (enrollmentId: string, moduleId: string)
     const completionPercentage = Math.round((completedLessons / totalLessons) * 100);
 
     // Update module progress
-    let existingModuleProgress = await ModuleProgressModel.findOne({
+    const existingModuleProgress = await ModuleProgressModel.findOne({
         enrollmentId,
         moduleId,
-    });
+    }).lean();
 
     const updateData: any = {
         completionPercentage,
@@ -239,7 +239,7 @@ const recalculateModuleProgress = async (enrollmentId: string, moduleId: string)
  * Unlock next module after current module completion
  */
 const unlockNextModule = async (enrollmentId: string, currentModuleId: string) => {
-    const currentModule = await ModuleModel.findById(currentModuleId);
+    const currentModule = await ModuleModel.findById(currentModuleId).lean();
 
     if (!currentModule) return;
 
@@ -247,7 +247,7 @@ const unlockNextModule = async (enrollmentId: string, currentModuleId: string) =
     const nextModule = await ModuleModel.findOne({
         courseId: currentModule.courseId,
         orderIndex: currentModule.orderIndex + 1,
-    });
+    }).lean();
 
     if (!nextModule) return; // No next module
 
