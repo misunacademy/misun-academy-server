@@ -1,4 +1,4 @@
-import { ErrorRequestHandler, Request, Response } from 'express';
+import { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 import env from '../config/env.js';
 import { logger } from '../config/logger.js';
@@ -25,6 +25,7 @@ const globalErrorHandler: ErrorRequestHandler = (
     error,
     req: Request,
     res: Response,
+    _next: NextFunction,
 ) => {
     const correlationId = req?.correlationId || 'unknown';
 

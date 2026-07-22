@@ -20,6 +20,11 @@ import { SettingsRoutes } from '../modules/Settings/settings.routes.js';
 import { EmployeeRoutes } from '../modules/Employee/employee.routes.js';
 import { ChatRoutes } from '../modules/Chat/chat.routes.js';
 import { NotificationRoutes } from '../modules/Notification/notification.routes.js';
+import { QuizRoutes } from '../modules/Quiz/quiz.routes.js';
+import { QuestionRoutes } from '../modules/Quiz/question.routes.js';
+import { AttemptRoutes } from '../modules/Quiz/attempt.routes.js';
+import { LeaderboardRoutes } from '../modules/Quiz/leaderboard.routes.js';
+import { MotivationalMessageRoutes } from '../modules/Quiz/motivationalMessage.routes.js';
 
 
 const router = express.Router();
@@ -105,6 +110,26 @@ const moduleRoutes = [
     {
         path: '/notifications',
         route: NotificationRoutes,
+    },
+    {
+        path: '/admin/quizzes',
+        route: QuizRoutes,
+    },
+    {
+        path: '/admin/quizzes',
+        route: QuestionRoutes,
+    },
+    {
+        path: '/quizzes',
+        route: AttemptRoutes,
+    },
+    {
+        path: '/gamification',
+        route: LeaderboardRoutes,
+    },
+    {
+        path: '/admin/gamification',
+        route: MotivationalMessageRoutes,
     },
 ];
 

@@ -111,6 +111,40 @@ const getBatchProgress = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+/**
+ * Get quizzes for a module with attempt progress
+ */
+const getModuleQuizzes = catchAsync(async (req: Request, res: Response) => {
+    const { moduleId } = req.params as { moduleId: string };
+    const enrollment = (req as any).enrollment;
+
+    const result = await ContentService.getModuleQuizzes(enrollment._id, moduleId);
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Quizzes retrieved successfully',
+        data: result,
+    });
+});
+
+/**
+ * Get unified curriculum (lessons + quizzes) for a module
+ */
+const getModuleCurriculum = catchAsync(async (req: Request, res: Response) => {
+    const { moduleId } = req.params as { moduleId: string };
+    const enrollment = (req as any).enrollment;
+
+    const result = await ContentService.getModuleCurriculum(enrollment._id, moduleId);
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Curriculum retrieved successfully',
+        data: result,
+    });
+});
+
 export const ContentController = {
     getBatchModules,
     getModuleLessons,
@@ -118,4 +152,6 @@ export const ContentController = {
     getModuleResources,
     updateLessonProgress,
     getBatchProgress,
+    getModuleQuizzes,
+    getModuleCurriculum,
 };

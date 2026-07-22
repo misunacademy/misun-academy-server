@@ -3,6 +3,7 @@ import { CourseModel } from './course.model.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { LessonModel } from '../Lesson/lesson.model.js';
+import { QuizModel } from '../Quiz/quiz.model.js';
 import { UserModel } from '../User/user.model.js';
 import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
@@ -64,12 +65,13 @@ export const CourseService = {
 
         const modules = await ModuleModel.find(moduleQuery).sort({ orderIndex: 1 }).lean();
         
-        // Fetch lessons for each module
+        // Fetch lessons and quizzes for each module
         const curriculum = await Promise.all(
             modules.map(async (module: any) => {
-                const lessons = await LessonModel.find({ moduleId: module._id })
-                    .sort({ orderIndex: 1 })
-                    .lean();
+                const [lessons, quizzes] = await Promise.all([
+                    LessonModel.find({ moduleId: module._id }).sort({ orderIndex: 1 }).lean(),
+                    QuizModel.find({ moduleId: module._id, status: 'published' }).sort({ orderIndex: 1 }).lean(),
+                ]);
                 
                 return {
                     moduleId: module._id.toString(),
@@ -105,6 +107,15 @@ export const CourseService = {
                             resources: lesson.resources || [],
                         };
                     }),
+                    quizzes: quizzes.map((quiz: any) => ({
+                        quizId: quiz._id.toString(),
+                        title: quiz.title,
+                        timeLimit: quiz.timeLimit,
+                        totalQuestions: quiz.totalQuestions,
+                        totalMarks: quiz.totalMarks,
+                        passingPercentage: quiz.passingPercentage,
+                        orderIndex: quiz.orderIndex,
+                    })),
                 };
             })
         );

@@ -1,5 +1,6 @@
 import { StatusCodes } from 'http-status-codes';
 import { Types } from 'mongoose';
+import slugify from '../../utils/slugify.js';
 import { UserModel } from '../User/user.model.js';
 import { CourseModel } from '../Course/course.model.js';
 import { BatchModel } from '../Batch/batch.model.js';
@@ -7,6 +8,9 @@ import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 import ApiError from '../../errors/ApiError.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { LessonModel } from '../Lesson/lesson.model.js';
+import { QuizModel } from '../Quiz/quiz.model.js';
+import { QuestionModel } from '../Quiz/question.model.js';
+import { QuestionService } from '../Quiz/question.service.js';
 
 /**
  * Resolve a userId string to a User doc with role=instructor.
@@ -304,6 +308,181 @@ const deleteLessonForInstructor = async (userId: string, lessonId: string) => {
 
 
 /**
+ * Get quizzes for a module — instructor access only
+ */
+const generateUniqueQuizSlug = async (title: string, existingId?: string): Promise<string> => {
+    let slug = slugify(title);
+    let counter = 0;
+    let uniqueSlug = slug;
+    while (true) {
+        const existing = await QuizModel.findOne({ slug: uniqueSlug }).lean();
+        if (!existing || (existingId && existing._id?.toString() === existingId)) {
+            return uniqueSlug;
+        }
+        counter++;
+        uniqueSlug = `${slug}-${counter}`;
+    }
+};
+
+const getQuizByIdForInstructor = async (userId: string, quizId: string) => {
+    await resolveInstructor(userId);
+    const quiz = await QuizModel.findById(quizId).lean();
+    if (!quiz) throw new ApiError(StatusCodes.NOT_FOUND, 'Quiz not found');
+
+    const mod = await ModuleModel.findById(quiz.moduleId).lean();
+    if (!mod) throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, mod.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    return quiz;
+};
+
+const getModuleQuizzesForInstructor = async (userId: string, moduleId: string) => {
+    await resolveInstructor(userId);
+    const mod = await ModuleModel.findById(moduleId).lean();
+    if (!mod) throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, mod.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    return QuizModel.find({ moduleId }).sort({ orderIndex: 1 }).lean();
+};
+
+const createQuizForInstructor = async (userId: string, moduleId: string, data: any) => {
+    await resolveInstructor(userId);
+    const mod = await ModuleModel.findById(moduleId).lean();
+    if (!mod) throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, mod.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    if (data.orderIndex !== undefined) {
+        const existing = await QuizModel.findOne({ moduleId, orderIndex: data.orderIndex }).lean();
+        if (existing) throw new ApiError(StatusCodes.CONFLICT, 'Quiz with this order index already exists');
+    } else {
+        const maxOrder = await QuizModel.findOne({ moduleId }).sort({ orderIndex: -1 }).lean();
+        data.orderIndex = maxOrder ? maxOrder.orderIndex + 1 : 0;
+    }
+
+    const slug = await generateUniqueQuizSlug(data.title);
+
+    return QuizModel.create({
+        ...data,
+        moduleId,
+        slug,
+        createdBy: userId,
+        totalMarks: 0,
+        totalQuestions: 0,
+    });
+};
+
+const updateQuizForInstructor = async (userId: string, quizId: string, data: any) => {
+    await resolveInstructor(userId);
+    const quiz = await QuizModel.findById(quizId).lean();
+    if (!quiz) throw new ApiError(StatusCodes.NOT_FOUND, 'Quiz not found');
+
+    const mod = await ModuleModel.findById(quiz.moduleId).lean();
+    if (!mod) throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, mod.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    if (data.title && data.title !== quiz.title) {
+        data.slug = await generateUniqueQuizSlug(data.title, quizId);
+    }
+
+    if (data.orderIndex !== undefined && data.orderIndex !== quiz.orderIndex) {
+        const existing = await QuizModel.findOne({
+            moduleId: quiz.moduleId,
+            orderIndex: data.orderIndex,
+            _id: { $ne: quizId },
+        }).lean();
+        if (existing) throw new ApiError(StatusCodes.CONFLICT, 'Quiz with this order index already exists');
+    }
+
+    const updated = await QuizModel.findByIdAndUpdate(
+        quizId,
+        { $set: data },
+        { new: true, runValidators: true }
+    );
+    if (!updated) throw new ApiError(StatusCodes.NOT_FOUND, 'Quiz not found');
+    return updated;
+};
+
+const deleteQuizForInstructor = async (userId: string, quizId: string) => {
+    await resolveInstructor(userId);
+    const quiz = await QuizModel.findById(quizId).lean();
+    if (!quiz) throw new ApiError(StatusCodes.NOT_FOUND, 'Quiz not found');
+
+    const mod = await ModuleModel.findById(quiz.moduleId).lean();
+    if (!mod) throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, mod.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    await QuestionModel.deleteMany({ quizId });
+    await QuizModel.findByIdAndDelete(quizId);
+    return null;
+};
+
+const verifyQuizAccess = async (userId: string, quizId: string) => {
+    const quiz = await QuizModel.findById(quizId).lean();
+    if (!quiz) throw new ApiError(StatusCodes.NOT_FOUND, 'Quiz not found');
+
+    const mod = await ModuleModel.findById(quiz.moduleId).lean();
+    if (!mod) throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, mod.courseId.toString());
+    if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
+
+    return quiz;
+};
+
+const getQuizQuestionsForInstructor = async (userId: string, quizId: string) => {
+    await verifyQuizAccess(userId, quizId);
+    return QuestionService.getQuizQuestions(quizId);
+};
+
+const getQuestionByIdForInstructor = async (userId: string, questionId: string) => {
+    const question = await QuestionModel.findById(questionId).lean();
+    if (!question) throw new ApiError(StatusCodes.NOT_FOUND, 'Question not found');
+    await verifyQuizAccess(userId, question.quizId.toString());
+    return QuestionService.getQuestionById(questionId);
+};
+
+const createQuestionForInstructor = async (userId: string, quizId: string, data: any) => {
+    await verifyQuizAccess(userId, quizId);
+    return QuestionService.createQuestion(quizId, data);
+};
+
+const updateQuestionForInstructor = async (userId: string, questionId: string, data: any) => {
+    const question = await QuestionModel.findById(questionId).lean();
+    if (!question) throw new ApiError(StatusCodes.NOT_FOUND, 'Question not found');
+    await verifyQuizAccess(userId, question.quizId.toString());
+    return QuestionService.updateQuestion(questionId, data);
+};
+
+const deleteQuestionForInstructor = async (userId: string, questionId: string) => {
+    const question = await QuestionModel.findById(questionId).lean();
+    if (!question) throw new ApiError(StatusCodes.NOT_FOUND, 'Question not found');
+    await verifyQuizAccess(userId, question.quizId.toString());
+    return QuestionService.deleteQuestion(questionId);
+};
+
+const duplicateQuestionForInstructor = async (userId: string, questionId: string) => {
+    const question = await QuestionModel.findById(questionId).lean();
+    if (!question) throw new ApiError(StatusCodes.NOT_FOUND, 'Question not found');
+    await verifyQuizAccess(userId, question.quizId.toString());
+    return QuestionService.duplicateQuestion(questionId);
+};
+
+const reorderQuestionsForInstructor = async (userId: string, quizId: string, questionOrders: { questionId: string; orderIndex: number }[]) => {
+    await verifyQuizAccess(userId, quizId);
+    return QuestionService.reorderQuestions(quizId, questionOrders);
+};
+
+/**
  * Get all enrolled students for the instructor with pagination and filtering
  */
 const getInstructorEnrolledStudents = async (userId: string, query: any) => {
@@ -401,5 +580,17 @@ export const InstructorService = {
     createLessonForInstructor,
     updateLessonForInstructor,
     deleteLessonForInstructor,
+    getModuleQuizzesForInstructor,
+    getQuizByIdForInstructor,
+    createQuizForInstructor,
+    updateQuizForInstructor,
+    deleteQuizForInstructor,
+    getQuizQuestionsForInstructor,
+    getQuestionByIdForInstructor,
+    createQuestionForInstructor,
+    updateQuestionForInstructor,
+    deleteQuestionForInstructor,
+    duplicateQuestionForInstructor,
+    reorderQuestionsForInstructor,
     getInstructorEnrolledStudents,
 };

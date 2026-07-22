@@ -53,4 +53,18 @@ router.get(
     ContentController.getBatchProgress
 );
 
+// Get quizzes for a module
+router.get(
+    '/batches/:batchId/modules/:moduleId/quizzes',
+    checkBatchEnrollment,
+    ContentController.getModuleQuizzes
+);
+
+// Get unified curriculum (lessons + quizzes) for a module
+router.get(
+    '/batches/:batchId/modules/:moduleId/curriculum',
+    checkBatchEnrollment,
+    ContentController.getModuleCurriculum
+);
+
 export const ContentRoutes = router;
