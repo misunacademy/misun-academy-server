@@ -1,13 +1,14 @@
 import express from 'express';
 import { AttemptController } from './attempt.controller.js';
-import { requireAuth, requireLearner } from '../../middlewares/betterAuth.js';
+import { requireAuth, requireRole } from '../../middlewares/betterAuth.js';
+import { Role } from '../../types/role.js';
 import validateRequest from '../../middlewares/validateRequest.js';
 import { submitQuizSchema } from '../../validations/attempt.validation.js';
 
 const router = express.Router();
 
 router.use(requireAuth);
-router.use(requireLearner);
+router.use(requireRole(Role.LEARNER, Role.ADMIN, Role.SUPERADMIN));
 
 router.get('/:quizId/info', AttemptController.getQuizInfo);
 router.post('/:quizId/attempts/start', AttemptController.startAttempt);
