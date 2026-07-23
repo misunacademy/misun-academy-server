@@ -108,6 +108,19 @@ const getAllQuizzes = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+const getQuizAnalytics = catchAsync(async (req: Request, res: Response) => {
+    const { quizId } = req.params as { quizId: string };
+
+    const analytics = await QuizService.getQuizAnalytics(quizId);
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Quiz analytics retrieved successfully',
+        data: analytics,
+    });
+});
+
 export const QuizController = {
     createQuiz,
     getModuleQuizzes,
@@ -116,4 +129,5 @@ export const QuizController = {
     deleteQuiz,
     reorderQuizzes,
     getAllQuizzes,
+    getQuizAnalytics,
 };

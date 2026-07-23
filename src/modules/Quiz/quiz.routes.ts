@@ -14,6 +14,7 @@ router.post('/modules/:moduleId/quizzes', validateRequest(createQuizSchema), Qui
 router.get('/modules/:moduleId/quizzes', QuizController.getModuleQuizzes);
 router.put('/modules/:moduleId/quizzes/reorder', validateRequest(reorderQuizzesSchema), QuizController.reorderQuizzes);
 router.get('/quizzes/:quizId', QuizController.getQuizById);
+router.get('/quizzes/:quizId/analytics', QuizController.getQuizAnalytics);
 router.put('/quizzes/:quizId', validateRequest(updateQuizSchema), QuizController.updateQuiz);
 router.delete('/quizzes/:quizId', QuizController.deleteQuiz);
 
