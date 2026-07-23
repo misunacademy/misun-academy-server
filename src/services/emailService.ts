@@ -128,12 +128,7 @@ let worker: EmailWorker | null = null;
 export const initializeEmailWorker = async () => {
     logger.info(`Email Worker: isServerless=${isServerless}, VERCEL=${process.env.VERCEL}, VERCEL_ENV=${process.env.VERCEL_ENV}`);
 
-    // Try BullMQ (Redis-based) first
-    const { initializeEmailQueue } = await import('./emailQueue.js');
-    await initializeEmailQueue();
-
-    // Fall back to MongoDB-polling worker if BullMQ not available
-    if (!isServerless && !worker && !env.REDIS_URL) {
+    if (!isServerless && !worker) {
         worker = new EmailWorker();
     }
 };
@@ -171,14 +166,7 @@ export const queueEmail = async (
         }
     }
 
-    // Use BullMQ if available
-    if (env.REDIS_URL) {
-        const { queueEmailBullMQ } = await import('./emailQueue.js');
-        await queueEmailBullMQ(to, subject, html, { attachments: options.attachments, eventId: options.eventId });
-        return;
-    }
-
-    // Fall back to MongoDB-based queue
+    // MongoDB-based queue
     try {
         // Idempotency Check
         if (options.eventId && options.eventType) {

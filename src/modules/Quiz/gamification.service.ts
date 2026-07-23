@@ -4,6 +4,7 @@ import { LeaderboardEntryModel } from './leaderboard.model.js';
 import { QuizModel } from './quiz.model.js';
 import { QuizAttemptModel } from './attempt.model.js';
 import { QuestionModel } from './question.model.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 import ApiError from '../../errors/ApiError.js';
 import { ZamesSource } from '../../types/common.js';
 
@@ -36,6 +37,18 @@ const awardZames = async (params: AwardZamesParams) => {
     const quiz = await QuizModel.findById(quizId).lean();
     const attempt = await QuizAttemptModel.findById(quizAttemptId).lean();
 
+    let courseId: string | undefined;
+    let batchId: string | undefined;
+    if (attempt?.enrollmentId) {
+        const enrollment = await EnrollmentModel.findById(attempt.enrollmentId)
+            .populate<{ batchId: { _id: any; courseId: any } }>('batchId')
+            .lean();
+        if (enrollment) {
+            batchId = enrollment.batchId?._id?.toString();
+            courseId = (enrollment.batchId as any)?.courseId?.toString();
+        }
+    }
+
     const tx = await ZamesTransactionModel.create({
         userId: userId as any,
         quizAttemptId: quizAttemptId as any,
@@ -51,7 +64,7 @@ const awardZames = async (params: AwardZamesParams) => {
         },
     });
 
-    await updateLeaderboardEntry(userId, quizId, points, attempt);
+    await updateLeaderboardEntry(userId, quizId, points, attempt, courseId, batchId);
 
     return { pointsEarned: points, newBalance: balanceAfter, transaction: tx };
 };
@@ -60,7 +73,9 @@ const updateLeaderboardEntry = async (
     userId: string,
     quizId: string,
     points: number,
-    attempt: any
+    attempt: any,
+    courseId?: string,
+    batchId?: string
 ) => {
     const now = new Date();
     const month = now.getMonth() + 1;
@@ -76,54 +91,44 @@ const updateLeaderboardEntry = async (
         $max: { averageScore: attempt?.percentage || 0 },
     };
 
+    const allTimeFilter: Record<string, any> = {
+        userId: userId as any,
+        period: 'all_time',
+    };
+    const monthlyFilter: Record<string, any> = {
+        userId: userId as any,
+        period: 'monthly',
+        month,
+        year,
+    };
+
+    if (batchId) {
+        allTimeFilter.batchId = batchId as any;
+        monthlyFilter.batchId = batchId as any;
+    }
+    if (courseId) {
+        allTimeFilter.courseId = courseId as any;
+        monthlyFilter.courseId = courseId as any;
+    }
+
     await LeaderboardEntryModel.findOneAndUpdate(
-        { userId: userId as any, period: 'all_time' },
-        { $setOnInsert: { userId: userId as any, period: 'all_time', month: null, year: null } },
+        allTimeFilter,
+        allTimeUpdate,
         { upsert: true }
     );
 
     await LeaderboardEntryModel.findOneAndUpdate(
-        { userId: userId as any, period: 'all_time' },
-        allTimeUpdate
-    );
-
-    await LeaderboardEntryModel.findOneAndUpdate(
-        {
-            userId: userId as any,
-            period: 'monthly',
-            month,
-            year,
-        },
-        {
-            $setOnInsert: {
-                userId: userId as any,
-                period: 'monthly',
-                month,
-                year,
-            },
-        },
+        monthlyFilter,
+        allTimeUpdate,
         { upsert: true }
-    );
-
-    await LeaderboardEntryModel.findOneAndUpdate(
-        {
-            userId: userId as any,
-            period: 'monthly',
-            month,
-            year,
-        },
-        allTimeUpdate
     );
 };
 
 const getStats = async (userId: string) => {
     const balance = await getCurrentBalance(userId);
-    const [leaderboardEntry, attempts] = await Promise.all([
-        LeaderboardEntryModel.findOne({ userId: userId as any, period: 'all_time' }).lean(),
-        QuizAttemptModel.find({ userId: userId as any, status: 'completed' })
-            .sort({ createdAt: -1 })
-            .lean(),
-    ]);
+    const attempts = await QuizAttemptModel.find({ userId: userId as any, status: 'completed' })
+        .sort({ createdAt: -1 })
+        .lean();
 
     const completedCount = attempts.length;
     const totalMarks = attempts.reduce((sum, a) => sum + a.earnedMarks, 0);
@@ -148,7 +153,6 @@ const getStats = async (userId: string) => {
         highestScore,
         totalMarks,
         recentAttempts,
-        currentRank: leaderboardEntry?.rank || null,
     };
 };
 

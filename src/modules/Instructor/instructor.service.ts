@@ -11,6 +11,8 @@ import { LessonModel } from '../Lesson/lesson.model.js';
 import { QuizModel } from '../Quiz/quiz.model.js';
 import { QuestionModel } from '../Quiz/question.model.js';
 import { QuestionService } from '../Quiz/question.service.js';
+import { QuizAttemptModel } from '../Quiz/attempt.model.js';
+import { AttemptStatus } from '../../types/common.js';
 
 /**
  * Resolve a userId string to a User doc with role=instructor.
@@ -482,6 +484,66 @@ const reorderQuestionsForInstructor = async (userId: string, quizId: string, que
     return QuestionService.reorderQuestions(quizId, questionOrders);
 };
 
+const getQuizAnalyticsForInstructor = async (userId: string, quizId: string) => {
+    await verifyQuizAccess(userId, quizId);
+
+    const [attemptStats, questionStats, questions] = await Promise.all([
+        QuizAttemptModel.aggregate([
+            { $match: { quizId: new Types.ObjectId(quizId), status: AttemptStatus.Completed } },
+            {
+                $group: {
+                    _id: null,
+                    totalAttempts: { $sum: 1 },
+                    averageScore: { $avg: '$percentage' },
+                    passCount: { $sum: { $cond: ['$passed', 1, 0] } },
+                    totalEarned: { $sum: '$earnedMarks' },
+                    totalMarksSum: { $sum: '$totalMarks' },
+                },
+            },
+        ]),
+        QuizAttemptModel.aggregate([
+            { $match: { quizId: new Types.ObjectId(quizId), status: AttemptStatus.Completed } },
+            { $unwind: '$answers' },
+            {
+                $group: {
+                    _id: '$answers.questionId',
+                    attemptCount: { $sum: 1 },
+                    correctCount: { $sum: { $cond: ['$answers.isCorrect', 1, 0] } },
+                },
+            },
+        ]),
+        QuestionModel.find({ quizId }).sort({ orderIndex: 1 }).lean(),
+    ]);
+
+    const stats = attemptStats[0] || { totalAttempts: 0, averageScore: 0, passCount: 0 };
+    const passRate = stats.totalAttempts > 0 ? Math.round((stats.passCount / stats.totalAttempts) * 100) : 0;
+
+    const questionStatsMap = new Map<string, { attemptCount: number; correctCount: number }>();
+    for (const qs of questionStats) {
+        questionStatsMap.set(qs._id.toString(), { attemptCount: qs.attemptCount, correctCount: qs.correctCount });
+    }
+
+    const perQuestion = questions.map(q => {
+        const qs = questionStatsMap.get(q._id.toString());
+        return {
+            _id: q._id,
+            content: q.content,
+            marks: q.marks,
+            orderIndex: q.orderIndex,
+            attemptCount: qs?.attemptCount || 0,
+            correctCount: qs?.correctCount || 0,
+            correctPercent: qs?.attemptCount ? Math.round((qs.correctCount / qs.attemptCount) * 100) : 0,
+        };
+    });
+
+    return {
+        totalAttempts: stats.totalAttempts,
+        averageScore: Math.round(stats.averageScore),
+        passRate,
+        perQuestion,
+    };
+};
+
 /**
  * Get all enrolled students for the instructor with pagination and filtering
  */
@@ -593,4 +655,5 @@ export const InstructorService = {
     duplicateQuestionForInstructor,
     reorderQuestionsForInstructor,
     getInstructorEnrolledStudents,
+    getQuizAnalyticsForInstructor,
 };

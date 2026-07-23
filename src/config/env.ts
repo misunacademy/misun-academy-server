@@ -67,9 +67,6 @@ const EnvSchema = z.object({
     // Admin Email for Employee Birthday Reminders
     ADMIN_EMAIL: z.string(),
 
-    // Redis (optional — for BullMQ email queue)
-    REDIS_URL: z.string().optional(),
-
     // Groq AI API Key
     GROQ_API_KEY: z.string().optional(),
 

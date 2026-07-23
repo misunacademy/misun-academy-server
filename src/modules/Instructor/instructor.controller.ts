@@ -243,6 +243,14 @@ const getQuizQuestions = catchAsync(async (req: Request, res: Response) => {
     sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Questions retrieved successfully', data: result });
 });
 
+/** Get quiz analytics */
+const getQuizAnalytics = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { quizId } = req.params as { quizId: string };
+    const result = await InstructorService.getQuizAnalyticsForInstructor(id, quizId);
+    sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Quiz analytics retrieved successfully', data: result });
+});
+
 /** Get a single question by ID */
 const getQuestionById = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.user as any;
@@ -329,6 +337,7 @@ export const InstructorController = {
     updateModuleQuiz,
     deleteModuleQuiz,
     getQuizQuestions,
+    getQuizAnalytics,
     getQuestionById,
     createQuestion,
     updateQuestion,

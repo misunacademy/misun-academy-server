@@ -46,6 +46,9 @@ router.post('/modules/:moduleId/quizzes', validateRequest(createQuizSchema), Ins
 router.put('/quizzes/:quizId', validateRequest(updateQuizSchema), InstructorController.updateModuleQuiz);
 router.delete('/quizzes/:quizId', InstructorController.deleteModuleQuiz);
 
+// Quiz analytics
+router.get('/quizzes/:quizId/analytics', InstructorController.getQuizAnalytics);
+
 // Question CRUD — only for quizzes inside assigned courses
 router.get('/quizzes/:quizId/questions', InstructorController.getQuizQuestions);
 router.get('/questions/:questionId', InstructorController.getQuestionById);

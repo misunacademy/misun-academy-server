@@ -98,7 +98,6 @@ const quizSchema = new Schema<IQuiz>(
 );
 
 quizSchema.index({ moduleId: 1, orderIndex: 1 });
-quizSchema.index({ slug: 1 });
 quizSchema.index({ status: 1 });
 
 export const QuizModel = model<IQuiz>('Quiz', quizSchema);
