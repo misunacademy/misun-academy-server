@@ -24,7 +24,6 @@ import { QuizRoutes } from '../modules/Quiz/quiz.routes.js';
 import { QuestionRoutes } from '../modules/Quiz/question.routes.js';
 import { AttemptRoutes } from '../modules/Quiz/attempt.routes.js';
 import { LeaderboardRoutes } from '../modules/Quiz/leaderboard.routes.js';
-import { MotivationalMessageRoutes } from '../modules/Quiz/motivationalMessage.routes.js';
 
 
 const router = express.Router();
@@ -126,10 +125,6 @@ const moduleRoutes = [
     {
         path: '/gamification',
         route: LeaderboardRoutes,
-    },
-    {
-        path: '/admin/gamification',
-        route: MotivationalMessageRoutes,
     },
 ];
 
