@@ -54,14 +54,14 @@ const getQuestionById = async (questionId: string) => {
 };
 
 const updateQuestion = async (questionId: string, updateData: any) => {
-    const question = await QuestionModel.findById(questionId).lean();
-    if (!question) {
+    const questionDoc = await QuestionModel.findById(questionId);
+    if (!questionDoc) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Question not found');
     }
 
-    if (updateData.orderIndex !== undefined && updateData.orderIndex !== question.orderIndex) {
+    if (updateData.orderIndex !== undefined && updateData.orderIndex !== questionDoc.orderIndex) {
         const existing = await QuestionModel.findOne({
-            quizId: question.quizId,
+            quizId: questionDoc.quizId,
             orderIndex: updateData.orderIndex,
             _id: { $ne: questionId },
         }).lean();
@@ -77,19 +77,12 @@ const updateQuestion = async (questionId: string, updateData: any) => {
         ];
     }
 
-    const updated = await QuestionModel.findByIdAndUpdate(
-        questionId,
-        { $set: updateData },
-        { new: true, runValidators: true }
-    );
+    Object.assign(questionDoc, updateData);
+    await questionDoc.save();
 
-    if (!updated) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Question not found');
-    }
+    await QuizService.recalcQuizTotals(questionDoc.quizId.toString());
 
-    await QuizService.recalcQuizTotals(question.quizId.toString());
-
-    return updated;
+    return questionDoc.toObject();
 };
 
 const deleteQuestion = async (questionId: string) => {

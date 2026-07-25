@@ -7,7 +7,7 @@ export const initiatePaymentSchema = z.object({
 
 export const verifyPaymentSchema = z.object({
     body: z.object({
-        transactionId: z.string(),
+        approved: z.boolean(),
     }),
 });
 
