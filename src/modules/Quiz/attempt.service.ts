@@ -4,6 +4,8 @@ import { QuestionModel } from './question.model.js';
 import { QuizAttemptModel } from './attempt.model.js';
 import { ScoringEngine, QuizAnswerInput } from './scoring.service.js';
 import { GamificationService } from './gamification.service.js';
+import { QuizProgressModel } from '../Progress/quizProgress.model.js';
+import { ProgressService } from '../Progress/progress.service.js';
 import ApiError from '../../errors/ApiError.js';
 import { AttemptStatus } from '../../types/common.js';
 
@@ -210,7 +212,31 @@ const submitAttempt = async (attemptId: string, userId: string, answers: QuizAns
         });
     }
 
-    return updatedAttempt;
+    if (updatedAttempt) {
+        await QuizProgressModel.findOneAndUpdate(
+            {
+                enrollmentId: attempt.enrollmentId,
+                quizId: attempt.quizId,
+            },
+            {
+                status: 'completed',
+                passed: result.passed,
+                score: result.earnedMarks,
+                attemptId: updatedAttempt._id,
+                completedAt: new Date(),
+            },
+            { upsert: true, new: true }
+        );
+
+        if (quiz.moduleId) {
+            await ProgressService.recalculateModuleProgress(
+                attempt.enrollmentId.toString(),
+                quiz.moduleId.toString()
+            );
+        }
+    }
+
+    return updatedAttempt || attempt;
 };
 
 const getAttemptResult = async (attemptId: string, userId: string) => {

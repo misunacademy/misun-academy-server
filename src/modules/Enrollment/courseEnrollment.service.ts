@@ -4,9 +4,11 @@ import { EnrollmentModel } from './enrollment.model.js';
 import { BatchModel } from '../Batch/batch.model.js';
 import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
 import { LessonProgressModel } from '../Progress/lessonProgress.model.js';
+import { QuizProgressModel } from '../Progress/quizProgress.model.js';
 import { ProgressStatus, LessonProgressStatus, EnrollmentStatus } from '../../types/common.js';
 import { LessonModel } from '../Lesson/lesson.model.js';
 import { ModuleModel } from '../Module/module.model.js';
+import { QuizModel } from '../Quiz/quiz.model.js';
 
 const findEnrollmentForCourse = async (
     userId: string,
@@ -59,26 +61,41 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
         enrollmentId: enrollment._id,
     }).lean();
 
-    // Calculate overall progress from lesson completion (to match course-detail percentage approach)
+    // Get quiz progress
+    const quizProgress = await QuizProgressModel.find({
+        enrollmentId: enrollment._id,
+    }).lean();
+
+    // Calculate overall progress from lesson + quiz completion
     const allCourseModules = await ModuleModel.find({ courseId, batchId: enrollment.batchId }).sort({ orderIndex: 1 }).lean();
     const allModuleIds = allCourseModules.map((m) => m._id);
-    const allLessons = await LessonModel.find({ moduleId: { $in: allModuleIds } }).lean();
+    const [allLessons, allQuizzes] = await Promise.all([
+        LessonModel.find({ moduleId: { $in: allModuleIds } }).lean(),
+        QuizModel.find({ moduleId: { $in: allModuleIds }, status: 'published' }).lean(),
+    ]);
 
-    const totalLessons = allLessons.length;
+    const totalItems = allLessons.length + allQuizzes.length;
     const completedLessonsCount = lessonProgress.filter(
         (lp) => lp.status === LessonProgressStatus.Completed
     ).length;
+    const completedQuizzesCount = quizProgress.filter(
+        (qp) => qp.status === 'completed'
+    ).length;
+    const completedItemsCount = completedLessonsCount + completedQuizzesCount;
 
-    const overallProgress = totalLessons > 0 ? Math.round((completedLessonsCount / totalLessons) * 100) : 0;
+    const overallProgress = totalItems > 0 ? Math.round((completedItemsCount / totalItems) * 100) : 0;
 
-    // Find current lesson (first incomplete lesson in first incomplete module)
+    // Find current lesson (first incomplete lesson or quiz in first incomplete module)
     let currentLesson = null;
     const sortedModules = moduleProgress.sort((a, b) => (a.moduleId as any).orderIndex - (b.moduleId as any).orderIndex);
 
     for (const modProgress of sortedModules) {
         if (modProgress.status !== ProgressStatus.Completed) {
-            // Find first incomplete lesson in this module
-            const moduleLessons = await LessonModel.find({ moduleId: modProgress.moduleId }).sort({ orderIndex: 1 }).lean();
+            const [moduleLessons, moduleQuizzes] = await Promise.all([
+                LessonModel.find({ moduleId: modProgress.moduleId }).sort({ orderIndex: 1 }).lean(),
+                QuizModel.find({ moduleId: modProgress.moduleId, status: 'published' }).sort({ orderIndex: 1 }).lean(),
+            ]);
+
             for (const lesson of moduleLessons) {
                 const lessonProg = lessonProgress.find(lp => lp.lessonId.toString() === lesson._id.toString());
                 if (!lessonProg || lessonProg.status !== LessonProgressStatus.Completed) {
@@ -89,6 +106,20 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
                     break;
                 }
             }
+
+            if (!currentLesson) {
+                for (const quiz of moduleQuizzes) {
+                    const quizProg = quizProgress.find(qp => qp.quizId.toString() === quiz._id.toString());
+                    if (!quizProg || quizProg.status !== 'completed') {
+                        currentLesson = {
+                            moduleId: modProgress.moduleId,
+                            lessonId: quiz._id,
+                        };
+                        break;
+                    }
+                }
+            }
+
             if (currentLesson) break;
         }
     }
@@ -108,9 +139,25 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
         completedAt: lessonProgress.find(lp => lp.lessonId.toString() === lesson._id.toString())?.completedAt,
     }));
 
+    // Get completed quizzes with module info
+    const completedQuizIds = quizProgress
+        .filter(qp => qp.status === 'completed')
+        .map(qp => qp.quizId);
+
+    const completedQuizzesWithModules = await QuizModel.find({
+        _id: { $in: completedQuizIds }
+    }).lean();
+
+    const completedQuizzes = completedQuizzesWithModules.map(quiz => ({
+        moduleId: quiz.moduleId.toString(),
+        quizId: quiz._id.toString(),
+        completedAt: quizProgress.find(qp => qp.quizId.toString() === quiz._id.toString())?.completedAt,
+    }));
+
     return {
         percentage: overallProgress,
         completedLessons,
+        completedQuizzes,
         currentLesson,
     };
 };
@@ -180,23 +227,35 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
  * Recalculate module progress based on lesson completions
  */
 const recalculateModuleProgress = async (enrollmentId: string, moduleId: string) => {
-    // Get all lessons in the module
-    const lessons = await LessonModel.find({ moduleId }).lean();
-    const totalLessons = lessons.length;
+    const [lessons, quizzes] = await Promise.all([
+        LessonModel.find({ moduleId }).lean(),
+        QuizModel.find({ moduleId, status: 'published' }).lean(),
+    ]);
 
-    if (totalLessons === 0) return;
+    const totalItems = lessons.length + quizzes.length;
+    if (totalItems === 0) return;
 
-    // Get lesson progress
-    const lessonProgress = await LessonProgressModel.find({
-        enrollmentId,
-        lessonId: { $in: lessons.map((l) => l._id) },
-    }).lean();
+    const [lessonProgress, quizProgress] = await Promise.all([
+        LessonProgressModel.find({
+            enrollmentId,
+            lessonId: { $in: lessons.map((l) => l._id) },
+        }).lean(),
+        QuizProgressModel.find({
+            enrollmentId,
+            quizId: { $in: quizzes.map((q) => q._id) },
+        }).lean(),
+    ]);
 
     const completedLessons = lessonProgress.filter(
         (p) => p.status === LessonProgressStatus.Completed
     ).length;
 
-    const completionPercentage = Math.round((completedLessons / totalLessons) * 100);
+    const completedQuizzes = quizProgress.filter(
+        (p) => p.status === 'completed'
+    ).length;
+
+    const completedItems = completedLessons + completedQuizzes;
+    const completionPercentage = Math.round((completedItems / totalItems) * 100);
 
     // Update module progress
     const existingModuleProgress = await ModuleProgressModel.findOne({

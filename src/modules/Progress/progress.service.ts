@@ -2,8 +2,10 @@ import { StatusCodes } from 'http-status-codes';
 import ApiError from '../../errors/ApiError.js';
 import { LessonProgressModel } from './lessonProgress.model.js';
 import { ModuleProgressModel } from './moduleProgress.model.js';
+import { QuizProgressModel } from './quizProgress.model.js';
 import { LessonModel } from '../Lesson/lesson.model.js';
 import { ModuleModel } from '../Module/module.model.js';
+import { QuizModel } from '../Quiz/quiz.model.js';
 import { ProgressStatus, LessonProgressStatus } from '../../types/common.js';
 
 /**
@@ -61,23 +63,35 @@ const updateLessonProgress = async (
  * Recalculate module progress based on lesson completions
  */
 const recalculateModuleProgress = async (enrollmentId: string, moduleId: string) => {
-    // Get all lessons in the module
-    const lessons = await LessonModel.find({ moduleId }).lean();
-    const totalLessons = lessons.length;
+    const [lessons, quizzes] = await Promise.all([
+        LessonModel.find({ moduleId }).lean(),
+        QuizModel.find({ moduleId, status: 'published' }).lean(),
+    ]);
 
-    if (totalLessons === 0) return;
+    const totalItems = lessons.length + quizzes.length;
+    if (totalItems === 0) return;
 
-    // Get lesson progress
-    const lessonProgress = await LessonProgressModel.find({
-        enrollmentId,
-        lessonId: { $in: lessons.map((l) => l._id) },
-    }).lean();
+    const [lessonProgress, quizProgress] = await Promise.all([
+        LessonProgressModel.find({
+            enrollmentId,
+            lessonId: { $in: lessons.map((l) => l._id) },
+        }).lean(),
+        QuizProgressModel.find({
+            enrollmentId,
+            quizId: { $in: quizzes.map((q) => q._id) },
+        }).lean(),
+    ]);
 
     const completedLessons = lessonProgress.filter(
         (p) => p.status === LessonProgressStatus.Completed
     ).length;
 
-    const completionPercentage = Math.round((completedLessons / totalLessons) * 100);
+    const completedQuizzes = quizProgress.filter(
+        (p) => p.status === 'completed'
+    ).length;
+
+    const completedItems = completedLessons + completedQuizzes;
+    const completionPercentage = Math.round((completedItems / totalItems) * 100);
 
     // Update module progress
     const moduleProgress = await ModuleProgressModel.findOne({
