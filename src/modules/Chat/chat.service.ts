@@ -44,7 +44,7 @@ interface ChatError extends Error {
 // ─────────────────────────────────────────────
 
 const CONFIG = {
-  MODEL: 'llama-3.3-70b-versatile',
+  MODEL: 'groq/compound-mini',
   MAX_TOKENS: 1024,
   TEMPERATURE: 0.7,
   TOP_P: 0.95,
