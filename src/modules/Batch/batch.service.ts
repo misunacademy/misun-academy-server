@@ -129,7 +129,7 @@ export const BatchService = {
     getCurrentEnrollmentBatchesForCourses: async () => {
         const now = new Date();
         const batches = await BatchModel.find({
-            status: { $in: ['upcoming', 'running'] },
+            status: BatchStatus.Upcoming,
             enrollmentEndDate: { $gte: now },
         })
             .populate('courseId', 'title slug thumbnailImage shortDescription instructor')
