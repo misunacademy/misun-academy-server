@@ -150,20 +150,27 @@ const getLeaderboard = async (query: LeaderboardQuery) => {
     };
 };
 
-const getUserRank = async (userId: string, period: 'all_time' | 'monthly' = 'all_time') => {
-    const entry = await LeaderboardEntryModel.findOne({
-        userId: userId as any,
-        period,
-    }).lean();
+const getUserRank = async (
+    userId: string,
+    period: 'all_time' | 'monthly' = 'all_time',
+    courseId?: string,
+    batchId?: string
+) => {
+    const filter: Record<string, any> = { userId: userId as any, period };
+    if (courseId) filter.courseId = courseId as any;
+    if (batchId) filter.batchId = batchId as any;
+
+    const entry = await LeaderboardEntryModel.findOne(filter).lean();
 
     if (!entry) {
         return null;
     }
 
-    const rank = await LeaderboardEntryModel.countDocuments({
-        period,
-        totalZames: { $gt: entry.totalZames },
-    });
+    const countFilter: Record<string, any> = { period, totalZames: { $gt: entry.totalZames } };
+    if (courseId) countFilter.courseId = courseId as any;
+    if (batchId) countFilter.batchId = batchId as any;
+
+    const rank = await LeaderboardEntryModel.countDocuments(countFilter);
 
     return {
         rank: rank + 1,

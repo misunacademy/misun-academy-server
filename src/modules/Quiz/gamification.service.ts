@@ -7,6 +7,7 @@ import { QuestionModel } from './question.model.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 import ApiError from '../../errors/ApiError.js';
 import { ZamesSource } from '../../types/common.js';
+import { LeaderboardService } from './leaderboard.service.js';
 
 interface AwardZamesParams {
     userId: string;
@@ -17,8 +18,12 @@ interface AwardZamesParams {
     metadata?: Record<string, any>;
 }
 
-const getCurrentBalance = async (userId: string): Promise<number> => {
-    const lastTx = await ZamesTransactionModel.findOne({ userId })
+const getCurrentBalance = async (userId: string, courseId?: string, batchId?: string): Promise<number> => {
+    const filter: Record<string, any> = { userId: userId as any };
+    if (courseId) filter.courseId = courseId as any;
+    if (batchId) filter.batchId = batchId as any;
+
+    const lastTx = await ZamesTransactionModel.findOne(filter)
         .sort({ createdAt: -1 })
         .lean();
     return lastTx?.balanceAfter || 0;
@@ -30,9 +35,6 @@ const awardZames = async (params: AwardZamesParams) => {
     if (points <= 0) {
         return { pointsEarned: 0, newBalance: await getCurrentBalance(userId) };
     }
-
-    const balanceBefore = await getCurrentBalance(userId);
-    const balanceAfter = balanceBefore + points;
 
     const quiz = await QuizModel.findById(quizId).lean();
     const attempt = await QuizAttemptModel.findById(quizAttemptId).lean();
@@ -49,8 +51,13 @@ const awardZames = async (params: AwardZamesParams) => {
         }
     }
 
+    const balanceBefore = await getCurrentBalance(userId, courseId, batchId);
+    const balanceAfter = balanceBefore + points;
+
     const tx = await ZamesTransactionModel.create({
         userId: userId as any,
+        courseId: courseId as any,
+        batchId: batchId as any,
         quizAttemptId: quizAttemptId as any,
         quizId: quizId as any,
         source: source || ZamesSource.Quiz,
@@ -124,19 +131,37 @@ const updateLeaderboardEntry = async (
     );
 };
 
-const getStats = async (userId: string) => {
-    const balance = await getCurrentBalance(userId);
-    const attempts = await QuizAttemptModel.find({ userId: userId as any, status: 'completed' })
-        .sort({ createdAt: -1 })
-        .lean();
+const getStats = async (userId: string, courseId?: string, batchId?: string) => {
+    let completedAttempts: any[] = [];
 
-    const completedCount = attempts.length;
-    const totalMarks = attempts.reduce((sum, a) => sum + a.earnedMarks, 0);
-    const totalPossible = attempts.reduce((sum, a) => sum + a.totalMarks, 0);
+    if (courseId && batchId) {
+        const enrollment = await EnrollmentModel.findOne({
+            userId: userId as any,
+            batchId: batchId as any,
+        }).lean();
+
+        if (enrollment) {
+            completedAttempts = await QuizAttemptModel.find({
+                enrollmentId: enrollment._id,
+                status: 'completed',
+            })
+                .sort({ createdAt: -1 })
+                .lean();
+        }
+    } else {
+        completedAttempts = await QuizAttemptModel.find({ userId: userId as any, status: 'completed' })
+            .sort({ createdAt: -1 })
+            .lean();
+    }
+
+    const totalZames = completedAttempts.reduce((sum, a) => sum + (a.zamesEarned || 0), 0);
+    const completedCount = completedAttempts.length;
+    const totalMarks = completedAttempts.reduce((sum, a) => sum + a.earnedMarks, 0);
+    const totalPossible = completedAttempts.reduce((sum, a) => sum + a.totalMarks, 0);
     const averageScore = completedCount > 0 ? Math.round(totalMarks / completedCount) : 0;
-    const highestScore = completedCount > 0 ? Math.max(...attempts.map(a => a.percentage)) : 0;
+    const highestScore = completedCount > 0 ? Math.max(...completedAttempts.map(a => a.percentage)) : 0;
 
-    const recentAttempts = attempts.slice(0, 5).map(a => ({
+    const recentAttempts = completedAttempts.slice(0, 5).map(a => ({
         attemptId: a._id,
         quizId: a.quizId,
         percentage: a.percentage,
@@ -146,26 +171,39 @@ const getStats = async (userId: string) => {
         submittedAt: a.submittedAt,
     }));
 
+    let currentRank = null;
+    try {
+        const rankResult = await LeaderboardService.getUserRank(userId, 'all_time', courseId, batchId);
+        currentRank = rankResult?.rank || null;
+    } catch {
+        currentRank = null;
+    }
+
     return {
-        totalZames: balance,
+        totalZames,
         quizzesCompleted: completedCount,
         averageScore,
         highestScore,
         totalMarks,
         recentAttempts,
+        currentRank,
     };
 };
 
-const getTransactionHistory = async (userId: string, page = 1, limit = 20) => {
+const getTransactionHistory = async (userId: string, courseId?: string, batchId?: string, page = 1, limit = 20) => {
     const skip = (page - 1) * limit;
 
+    const filter: Record<string, any> = { userId: userId as any };
+    if (courseId) filter.courseId = courseId as any;
+    if (batchId) filter.batchId = batchId as any;
+
     const [data, total] = await Promise.all([
-        ZamesTransactionModel.find({ userId: userId as any })
+        ZamesTransactionModel.find(filter)
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
             .lean(),
-        ZamesTransactionModel.countDocuments({ userId: userId as any }),
+        ZamesTransactionModel.countDocuments(filter),
     ]);
 
     return {

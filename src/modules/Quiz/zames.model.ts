@@ -4,6 +4,8 @@ import { ZamesSource } from '../../types/common.js';
 export interface IZamesTransaction {
     _id?: Types.ObjectId;
     userId: Types.ObjectId;
+    courseId?: Types.ObjectId;
+    batchId?: Types.ObjectId;
     quizAttemptId?: Types.ObjectId;
     quizId?: Types.ObjectId;
     source: ZamesSource;
@@ -20,6 +22,14 @@ const zamesTransactionSchema = new Schema<IZamesTransaction>(
             type: Schema.Types.ObjectId,
             ref: 'User',
             required: true,
+        },
+        courseId: {
+            type: Schema.Types.ObjectId,
+            ref: 'Course',
+        },
+        batchId: {
+            type: Schema.Types.ObjectId,
+            ref: 'Batch',
         },
         quizAttemptId: {
             type: Schema.Types.ObjectId,
@@ -55,7 +65,8 @@ const zamesTransactionSchema = new Schema<IZamesTransaction>(
     }
 );
 
-zamesTransactionSchema.index({ userId: 1, createdAt: -1 });
+zamesTransactionSchema.index({ userId: 1, courseId: 1, batchId: 1, createdAt: -1 });
+zamesTransactionSchema.index({ courseId: 1, batchId: 1, createdAt: -1 });
 zamesTransactionSchema.index({ source: 1 });
 
 export const ZamesTransactionModel = model<IZamesTransaction>('ZamesTransaction', zamesTransactionSchema);
