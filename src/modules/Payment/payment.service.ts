@@ -19,7 +19,10 @@ import axios from 'axios';
 import env from '../../config/env.js';
 import { EnrollmentService } from "../Enrollment/enrollment.service.js";
 import { logger } from "../../config/logger.js";
+import { deriveCourseBrand } from "../../utils/courseBrand.js";
+import { recordAudit } from "../../models/auditLog.model.js";
 import { IPayment } from "./payment.model.js";
+import { NotificationService } from '../Notification/notification.service.js';
 
 interface PaymentHistoryQuery {
     page?: number;
@@ -44,9 +47,16 @@ interface ActivateEnrollmentParams {
 
 const generateTransactionId = (): string => {
     const timestamp = Date.now().toString(36).toUpperCase();
-    const random = crypto.randomBytes(3).toString('hex').toUpperCase();
+    const random = crypto.randomBytes(12).toString('hex').toUpperCase();
     return `MA${timestamp}${random}`;
 };
+
+const getStatusCallbackKey = (transactionId: string): string =>
+    crypto
+        .createHmac('sha256', env.SSL_STORE_PASSWORD || env.BETTER_AUTH_SECRET)
+        .update(transactionId)
+        .digest('hex')
+        .slice(0, 32);
 
 const syncProfileEnrollmentReference = async (
     userId: string,
@@ -74,9 +84,10 @@ const getCourseBatchLabel = (batch: any): string => {
     return courseTitle || batchTitle || 'Course';
 };
 
-const getCourseEmailContext = (batch: any): { courseName: string; courseSlug: string } => {
+const getCourseEmailContext = (batch: any): { brand?: string; courseName: string; courseSlug: string } => {
     const rawCourse = typeof batch?.courseId === 'object' ? batch.courseId : null;
     return {
+        brand: rawCourse?.brand,
         courseName: (rawCourse?.title || getCourseBatchLabel(batch)).toString(),
         courseSlug: (rawCourse?.slug || '').toString(),
     };
@@ -93,25 +104,29 @@ const sendPaymentSuccessNotifications = async (
     const courseWithBatch = getCourseBatchLabel(batch);
     const courseEmailContext = getCourseEmailContext(batch);
 
-    sendCoursePaymentSuccessEmail(
-        courseEmailContext,
-        user.email,
-        user.name,
-        payment.amount,
-        payment.currency || 'BDT',
-        courseWithBatch,
-        payment.transactionId,
-        payment.method
-    );
+    try {
+        await sendCoursePaymentSuccessEmail(
+            courseEmailContext,
+            user.email,
+            user.name,
+            payment.amount,
+            payment.currency || 'BDT',
+            courseWithBatch,
+            payment.transactionId,
+            payment.method
+        );
 
-    sendCourseEnrollmentConfirmationEmail(
-        courseEmailContext,
-        user,
-        courseWithBatch,
-        enrollmentId,
-        payment.amount,
-        payment.method
-    );
+        await sendCourseEnrollmentConfirmationEmail(
+            courseEmailContext,
+            user,
+            courseWithBatch,
+            enrollmentId,
+            payment.amount,
+            payment.method
+        );
+    } catch (error) {
+        logger.error(error, 'Failed to queue payment success emails (non-blocking)');
+    }
 };
 
 const sendPaymentFailedNotifications = async (
@@ -122,12 +137,16 @@ const sendPaymentFailedNotifications = async (
     const courseWithBatch = getCourseBatchLabel(batch);
     const courseEmailContext = getCourseEmailContext(batch);
 
-    sendCoursePaymentFailedEmail(
-        courseEmailContext,
-        user,
-        courseWithBatch,
-        failureReason
-    );
+    try {
+        await sendCoursePaymentFailedEmail(
+            courseEmailContext,
+            user,
+            courseWithBatch,
+            failureReason
+        );
+    } catch (error) {
+        logger.error(error, 'Failed to queue payment failed email (non-blocking)');
+    }
 };
 
 const activateEnrollmentForPayment = async (params: ActivateEnrollmentParams) => {
@@ -174,6 +193,21 @@ const activateEnrollmentForPayment = async (params: ActivateEnrollmentParams) =>
 
     if (user && batch) {
         await sendPaymentSuccessNotifications(user, batch, payment, enrollmentId);
+
+        setImmediate(async () => {
+            try {
+                await NotificationService.createNotification({
+                    userId: user._id.toString(),
+                    type: 'payment_success',
+                    title: 'Payment Successful',
+                    message: `Your payment of ${payment.amount} ${payment.currency || 'BDT'} has been confirmed. Welcome to ${getCourseBatchLabel(batch)}!`,
+                    link: '/my-classes',
+                    relatedTo: { model: 'Payment', id: payment._id.toString() },
+                });
+            } catch (error) {
+                logger.error(error, 'Failed to send payment success notification');
+            }
+        });
     }
 
     return enrollment;
@@ -200,6 +234,21 @@ const failEnrollment = async (
 
     if (user && batch) {
         await sendPaymentFailedNotifications(user, batch, failureReason);
+
+        setImmediate(async () => {
+            try {
+                await NotificationService.createNotification({
+                    userId: user._id.toString(),
+                    type: 'payment_failed',
+                    title: 'Payment Failed',
+                    message: `Your payment for ${getCourseBatchLabel(batch)} was not completed. Reason: ${failureReason}`,
+                    link: '/payment',
+                    relatedTo: { model: 'Payment', id: payment._id.toString() },
+                });
+            } catch (error) {
+                logger.error(error, 'Failed to send payment failed notification');
+            }
+        });
     }
 };
 
@@ -555,6 +604,15 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
         const validation = await validateSSLCommerzPayment(valId);
 
         if (validation.status !== 'VALID' && validation.status !== 'VALIDATED') {
+            logger.warn(
+                {
+                    event: 'payment.validation_failed',
+                    tran_id: payment.transactionId,
+                    val_id: valId,
+                    gatewayStatus: validation.status,
+                },
+                'SSLCommerz validation API returned non-VALID status; marking payment failed'
+            );
             payment.status = Status.Failed;
             payment.gatewayResponse = {
                 ...payment.gatewayResponse,
@@ -577,6 +635,15 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
             Number(validation.amount) !== Number(payment.amount) ||
             validation.currency !== payment.currency
         ) {
+            logger.error(
+                {
+                    event: 'payment.data_mismatch',
+                    tran_id: payment.transactionId,
+                    expected: { amount: payment.amount, currency: payment.currency },
+                    received: { tran_id: validation.tran_id, amount: validation.amount, currency: validation.currency },
+                },
+                'Payment anti-tamper mismatch between stored record and gateway validation'
+            );
             throw new ApiError(StatusCodes.BAD_REQUEST, 'Payment data mismatch detected');
         }
 
@@ -605,6 +672,19 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
                 initializeModules: false,
             });
         }
+
+        logger.info(
+            {
+                event: 'payment.finalized',
+                tran_id: payment.transactionId,
+                enrollmentId: payment.enrollmentId,
+                amount: payment.amount,
+                currency: payment.currency,
+                method: payment.method,
+                status: Status.Success,
+            },
+            'Payment finalized via SSLCommerz'
+        );
 
         await session.commitTransaction();
         return payment;
@@ -682,6 +762,7 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
 
     const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
     const transactionId = generateTransactionId();
+    const callbackKey = getStatusCallbackKey(transactionId);
 
     const paymentData = {
         store_id: config.SSL_STORE_ID,
@@ -689,9 +770,9 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         total_amount: Number((batch as any).price).toFixed(2),
         currency: "BDT",
         tran_id: transactionId,
-        success_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}`,
-        fail_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=failed`,
-        cancel_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=cancel`,
+        success_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&k=${callbackKey}`,
+        fail_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=failed&k=${callbackKey}`,
+        cancel_url: `${config.SERVER_URL}/api/v1/payments/status?t=${transactionId}&status=cancel&k=${callbackKey}`,
         ipn_url: `${config.SERVER_URL}/api/v1/payments/webhook`,
         product_name: getCourseBatchLabel(batch),
         cus_name: (user as any).name,
@@ -788,12 +869,11 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
                 throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
             }
 
-            const courseSlug = (batch.courseId as any)?.slug || '';
             let enrollmentId = payment.enrollmentId;
             if (!enrollmentId) {
                 enrollmentId = await EnrollmentService.generateEnrollmentId(
                     (batch as any).title?.split(' ')[1],
-                    courseSlug
+                    deriveCourseBrand(batch.courseId as any)
                 );
             }
 
@@ -815,6 +895,27 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
                 context: 'manual payment approval',
                 initializeModules: true,
             });
+
+            logger.info(
+                {
+                    event: 'payment.manual_approved',
+                    tran_id: transactionId,
+                    enrollmentId,
+                    adminId,
+                    amount: payment.amount,
+                    method: payment.method,
+                    status: Status.Success,
+                },
+                'Manual payment approved by admin'
+            );
+
+            await recordAudit({
+                actor: adminId,
+                action: 'payment.manual_approve',
+                targetType: 'Payment',
+                targetId: payment._id?.toString(),
+                metadata: { tran_id: transactionId, enrollmentId, amount: payment.amount, method: payment.method },
+            });
         } else {
             payment.status = Status.Failed;
             payment.gatewayResponse = {
@@ -825,6 +926,26 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
             await payment.save({ session });
 
             await failEnrollment(payment, session, 'Payment verification failed by admin');
+
+            logger.info(
+                {
+                    event: 'payment.manual_rejected',
+                    tran_id: transactionId,
+                    adminId,
+                    amount: payment.amount,
+                    method: payment.method,
+                    status: Status.Failed,
+                },
+                'Manual payment rejected by admin'
+            );
+
+            await recordAudit({
+                actor: adminId,
+                action: 'payment.manual_reject',
+                targetType: 'Payment',
+                targetId: payment._id?.toString(),
+                metadata: { tran_id: transactionId, amount: payment.amount, method: payment.method },
+            });
         }
 
         await session.commitTransaction();
@@ -927,6 +1048,7 @@ export const PaymentService = {
     initiateSSLCommerzPayment,
     verifyManualPayment,
     verifyWebhookSignature,
+    getStatusCallbackKey,
     mapSslGatewayStatus,
     verifyPaymentForCurrentUser,
 };

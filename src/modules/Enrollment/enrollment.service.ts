@@ -17,6 +17,8 @@ import { StudentIdCounterModel } from '../User/studentIdCounter.model.js';
 import { NotificationService } from '../Notification/notification.service.js';
 import { sendCourseWaitingPaymentVerificationEmail } from '../../services/courseEmailRouter.js';
 import { logger } from '../../config/logger.js';
+import { CourseBrand, deriveCourseBrand } from '../../utils/courseBrand.js';
+import { recordAudit } from '../../models/auditLog.model.js';
 import {
     initializeModuleProgress,
     getUserEnrollments,
@@ -132,11 +134,13 @@ const assignStudentIdIfMissing = async (
 //     const paddedCount = String(count + 1).padStart(5, '0');
 //     return `MA-${batch}${year}${paddedCount}`;
 // };
-const generateEnrollmentId = async (batch: string = '', courseSlug: string = ''): Promise<string> => {
+const generateEnrollmentId = async (
+    batch: string = '',
+    brand: CourseBrand = CourseBrand.MA
+): Promise<string> => {
     const year = new Date().getFullYear();
 
-    const isEnglishCourse = courseSlug.toLowerCase().includes('english');
-    const prefix = isEnglishCourse ? 'EP' : 'MA';
+    const prefix = brand === CourseBrand.EP ? 'EP' : 'MA';
     const counterId = `${prefix}-${batch}`;
 
     // Use findByIdAndUpdate for atomic increment per batch
@@ -279,7 +283,7 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
                 ]
             }
         })
-        .populate('batchId')
+        .populate({ path: 'batchId', populate: { path: 'courseId', select: 'title slug brand' } })
         .session(session);
 
         if (existingPendingEnrollment) {
@@ -287,8 +291,10 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
             if (!existingPendingEnrollment.enrollmentId) {
                 const batchObj = existingPendingEnrollment.batchId as any;
                 const batchNumber = batchObj?.title.split(' ')[1];
-                const courseSlug = (batchObj?.courseId as any)?.slug || '';
-                const generatedEnrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+                const generatedEnrollmentId = await generateEnrollmentId(
+                    batchNumber,
+                    deriveCourseBrand(batchObj?.courseId)
+                );
                 existingPendingEnrollment.enrollmentId = generatedEnrollmentId;
                 await existingPendingEnrollment.save({ session });
             }
@@ -370,8 +376,10 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
 
         // Generate enrollment ID and fire notification for new enrollments
         const batchNumber = batch.title?.split(' ')[1];
-        const courseSlug = (batch.courseId as any)?.slug || '';
-        enrollment.enrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+        enrollment.enrollmentId = await generateEnrollmentId(
+            batchNumber,
+            deriveCourseBrand(batch.courseId as any)
+        );
         await enrollment.save();
 
         setImmediate(async () => {
@@ -617,8 +625,23 @@ const enrollWithManualPayment = async (
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment period is not active');
     }
 
-    const courseSlug = (batch.courseId as any)?.slug || '';
-    const isEnglishCourse = /english/i.test(courseSlug);
+    const submittedUtr = paymentData.transactionId.trim();
+    const duplicateUtrPayment = await PaymentModel.findOne({
+        'gatewayResponse.phonePeTransactionId': submittedUtr,
+    }).lean();
+
+    if (
+        duplicateUtrPayment &&
+        (!existingEnrollment || duplicateUtrPayment.enrollmentId !== existingEnrollment.enrollmentId)
+    ) {
+        throw new ApiError(
+            StatusCodes.CONFLICT,
+            'This transaction ID has already been submitted. Please use your original submission or contact support.'
+        );
+    }
+
+    const brand = deriveCourseBrand(batch.courseId as any);
+    const isEnglishCourse = brand === CourseBrand.EP;
     const manualPaymentAmount =
         typeof (batch as any).manualPaymentPrice === 'number'
             ? (batch as any).manualPaymentPrice
@@ -634,13 +657,13 @@ const enrollWithManualPayment = async (
         let enrollment = existingEnrollment;
 
         const batchNumber = batch.title?.split(' ')[1];
-        const courseSlug = (batch.courseId as any)?.slug || '';
+        const courseBrand = deriveCourseBrand(batch.courseId as any);
 
         // Create or reuse enrollment with a robust enrollmentId assignment.
         if (!enrollment) {
             let attempt = 0;
             while (!enrollment) {
-                const candidateEnrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+                const candidateEnrollmentId = await generateEnrollmentId(batchNumber, courseBrand);
                 try {
                     const created = await EnrollmentModel.create([
                         {
@@ -676,7 +699,7 @@ const enrollWithManualPayment = async (
             if (!enrollment.enrollmentId) {
                 let attempt = 0;
                 while (!enrollment.enrollmentId) {
-                    const candidateEnrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+                    const candidateEnrollmentId = await generateEnrollmentId(batchNumber, courseBrand);
                     try {
                         enrollment.enrollmentId = candidateEnrollmentId;
                         await enrollment.save({ session });
@@ -699,30 +722,40 @@ const enrollWithManualPayment = async (
 
         const paymentTransactionId = generateTransactionId();
 
-        await PaymentModel.findOneAndUpdate(
-            { enrollmentId: enrollment.enrollmentId },
-            {
-                userId,
-                batchId,
-                transactionId: paymentTransactionId,
-                amount: manualPaymentAmount,
-                currency: 'BDT',
-                status: Status.Review,
-                method: 'PhonePay',
-                gatewayResponse: {
-                    senderNumber: paymentData.senderNumber,
-                    phonePeTransactionId: paymentData.transactionId,
-                    submittedAt: new Date(),
+        try {
+            await PaymentModel.findOneAndUpdate(
+                { enrollmentId: enrollment.enrollmentId },
+                {
+                    userId,
+                    batchId,
+                    transactionId: paymentTransactionId,
+                    amount: manualPaymentAmount,
+                    currency: 'BDT',
+                    status: Status.Review,
+                    method: 'PhonePay',
+                    gatewayResponse: {
+                        senderNumber: paymentData.senderNumber,
+                        phonePeTransactionId: submittedUtr,
+                        submittedAt: new Date(),
+                    },
+                    enrollmentId: enrollment.enrollmentId,
                 },
-                enrollmentId: enrollment.enrollmentId,
-            },
-            {
-                session,
-                upsert: true,
-                new: true,
-                setDefaultsOnInsert: true,
+                {
+                    session,
+                    upsert: true,
+                    new: true,
+                    setDefaultsOnInsert: true,
+                }
+            );
+        } catch (error: any) {
+            if (error?.code === 11000) {
+                throw new ApiError(
+                    StatusCodes.CONFLICT,
+                    'This transaction ID has already been submitted. Please contact support.'
+                );
             }
-        );
+            throw error;
+        }
 
         await session.commitTransaction();
 
@@ -852,8 +885,10 @@ const grantAccessByEmail = async (email: string, courseId: string, batchId: stri
 
         if (!enrollment) {
             const batchNumber = (batch as any).title?.split(' ')[1];
-            const courseSlug = (batch.courseId as any)?.slug || '';
-            const enrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+            const enrollmentId = await generateEnrollmentId(
+                batchNumber,
+                deriveCourseBrand(batch.courseId as any)
+            );
 
             const created = await EnrollmentModel.create(
                 [
@@ -880,8 +915,10 @@ const grantAccessByEmail = async (email: string, courseId: string, batchId: stri
 
             if (!enrollment.enrollmentId) {
                 const batchNumber = (batch as any).title?.split(' ')[1];
-                const courseSlug = (batch.courseId as any)?.slug || '';
-                enrollment.enrollmentId = await generateEnrollmentId(batchNumber, courseSlug);
+                enrollment.enrollmentId = await generateEnrollmentId(
+                    batchNumber,
+                    deriveCourseBrand(batch.courseId as any)
+                );
                 shouldSave = true;
             }
 
@@ -915,6 +952,19 @@ const grantAccessByEmail = async (email: string, courseId: string, batchId: stri
         }
 
         await session.commitTransaction();
+
+        await recordAudit({
+            action: 'enrollment.grant_access',
+            targetType: 'Enrollment',
+            targetId: enrollment._id?.toString(),
+            metadata: {
+                email: normalizedEmail,
+                courseId,
+                batchId,
+                enrollmentId: enrollment.enrollmentId,
+                wasActive,
+            },
+        });
 
         if (!wasActive) {
             await initializeModuleProgress(enrollment._id.toString());

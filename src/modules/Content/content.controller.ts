@@ -73,45 +73,6 @@ const getModuleResources = catchAsync(async (req: Request, res: Response) => {
 });
 
 /**
- * Update lesson progress
- */
-const updateLessonProgress = catchAsync(async (req: Request, res: Response) => {
-    const { lessonId } = req.params as { lessonId: string };
-    const enrollment = (req as any).enrollment;
-    const { watchTime, lastWatchedPosition } = req.body;
-
-    const result = await ContentService.updateLessonProgress(
-        enrollment._id,
-        lessonId,
-        watchTime,
-        lastWatchedPosition
-    );
-
-    sendResponse(res, {
-        statusCode: StatusCodes.OK,
-        success: true,
-        message: 'Progress updated successfully',
-        data: result,
-    });
-});
-
-/**
- * Get batch overall progress
- */
-const getBatchProgress = catchAsync(async (req: Request, res: Response) => {
-    const enrollment = (req as any).enrollment;
-
-    const result = await ContentService.getBatchProgress(enrollment._id);
-
-    sendResponse(res, {
-        statusCode: StatusCodes.OK,
-        success: true,
-        message: 'Progress retrieved successfully',
-        data: result,
-    });
-});
-
-/**
  * Get quizzes for a module with attempt progress
  */
 const getModuleQuizzes = catchAsync(async (req: Request, res: Response) => {
@@ -150,8 +111,6 @@ export const ContentController = {
     getModuleLessons,
     getLessonDetails,
     getModuleResources,
-    updateLessonProgress,
-    getBatchProgress,
     getModuleQuizzes,
     getModuleCurriculum,
 };

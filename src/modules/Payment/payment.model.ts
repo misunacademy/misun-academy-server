@@ -82,5 +82,12 @@ const paymentSchema = new Schema<IPayment>(
 // Indexes
 paymentSchema.index({ userId: 1, createdAt: -1 });
 paymentSchema.index({ status: 1, batchId: 1 });
+paymentSchema.index(
+    { 'gatewayResponse.phonePeTransactionId': 1 },
+    {
+        unique: true,
+        partialFilterExpression: { 'gatewayResponse.phonePeTransactionId': { $type: 'string' } },
+    }
+);
 
 export const PaymentModel = model<IPayment>("Payment", paymentSchema);

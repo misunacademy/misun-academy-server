@@ -8,14 +8,21 @@ import { QuizProgressModel } from '../Progress/quizProgress.model.js';
 import { ProgressService } from '../Progress/progress.service.js';
 import ApiError from '../../errors/ApiError.js';
 import { AttemptStatus } from '../../types/common.js';
+import { NotificationService } from '../Notification/notification.service.js';
+import { logger } from '../../config/logger.js';
 
 const shuffleArray = <T>(arr: T[]): T[] => {
     const shuffled = [...arr];
     for (let i = shuffled.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        shuffled[i] = shuffled[j] = arr[Math.floor(Math.random() * arr.length)];
     }
     return shuffled;
+};
+
+const getExpiredAttemptDeadline = (startedAt: Date | string | undefined, timeLimit?: number | null): number | null => {
+    if (!timeLimit || !startedAt) return null;
+    return new Date(startedAt).getTime() + timeLimit * 60_000;
 };
 
 const startAttempt = async (quizId: string, userId: string, enrollmentId: string) => {
@@ -35,6 +42,20 @@ const startAttempt = async (quizId: string, userId: string, enrollmentId: string
     }).lean();
 
     if (existingInProgress) {
+        const deadline = getExpiredAttemptDeadline(existingInProgress.startedAt, quiz.timeLimit);
+        if (deadline !== null && Date.now() > deadline) {
+            await QuizAttemptModel.updateOne(
+                { _id: existingInProgress._id, status: AttemptStatus.InProgress },
+                {
+                    $set: {
+                        status: AttemptStatus.Completed,
+                        submittedAt: new Date(),
+                        timeTaken: null,
+                        expired: true,
+                    },
+                }
+            );
+        } else {
         let existingQuestions = await QuestionModel.find({ quizId })
             .sort({ orderIndex: 1 })
             .lean();
@@ -76,6 +97,7 @@ const startAttempt = async (quizId: string, userId: string, enrollmentId: string
                 orderIndex: q.orderIndex,
             })),
         };
+        }
     }
 
     const completedAttempts = await QuizAttemptModel.countDocuments({
@@ -174,6 +196,14 @@ const submitAttempt = async (attemptId: string, userId: string, answers: QuizAns
         throw new ApiError(StatusCodes.NOT_FOUND, 'Quiz not found');
     }
 
+    const deadline = getExpiredAttemptDeadline(attempt.startedAt, quiz.timeLimit);
+    if (deadline !== null && Date.now() > deadline) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'This attempt has expired. The time limit for this quiz has passed.'
+        );
+    }
+
     const questions = await QuestionModel.find({ quizId: attempt.quizId }).lean();
 
     const result = ScoringEngine.evaluate(questions, answers, quiz.passingPercentage);
@@ -183,8 +213,11 @@ const submitAttempt = async (attemptId: string, userId: string, answers: QuizAns
         timeTaken = elapsed;
     }
 
-    const updatedAttempt = await QuizAttemptModel.findByIdAndUpdate(
-        attemptId,
+    const updatedAttempt = await QuizAttemptModel.findOneAndUpdate(
+        {
+            _id: attemptId,
+            status: { $ne: AttemptStatus.Completed },
+        },
         {
             $set: {
                 answers: result.answers,
@@ -202,6 +235,10 @@ const submitAttempt = async (attemptId: string, userId: string, answers: QuizAns
         },
         { new: true }
     );
+
+    if (!updatedAttempt) {
+        throw new ApiError(StatusCodes.CONFLICT, 'This attempt has already been submitted');
+    }
 
     if (result.zamesEarned > 0) {
         await GamificationService.awardZames({
@@ -234,6 +271,23 @@ const submitAttempt = async (attemptId: string, userId: string, answers: QuizAns
                 quiz.moduleId.toString()
             );
         }
+
+        setImmediate(async () => {
+            try {
+                await NotificationService.createNotification({
+                    userId,
+                    type: 'quiz_result',
+                    title: result.passed ? 'Quiz Passed' : 'Quiz Completed',
+                    message: result.passed
+                        ? `You scored ${result.percentage}% on "${quiz.title}" and earned ${result.zamesEarned} Zames!`
+                        : `You scored ${result.percentage}% on "${quiz.title}". Keep practicing!`,
+                    link: '/my-classes',
+                    relatedTo: { model: 'Quiz', id: quiz._id.toString() },
+                });
+            } catch (error) {
+                logger.error(error, 'Failed to send quiz result notification');
+            }
+        });
     }
 
     return updatedAttempt || attempt;

@@ -3,6 +3,10 @@ import ApiError from "../../errors/ApiError.js";
 import { BatchModel, IBatch } from "./batch.model.js";
 import { BatchStatus } from "../../types/common.js";
 import { autoTransitionBatches } from "../../utils/batchScheduler.js";
+import { NotificationService } from '../Notification/notification.service.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { EnrollmentStatus } from '../../types/common.js';
+import { logger } from '../../config/logger.js';
 
 /**
  * Generate next batch number for a course
@@ -202,7 +206,32 @@ export const BatchService = {
             runValidators: true
         });
 
-        console.log('BatchService.updateBatch success:', updated?._id);
+        if (updated) {
+            setImmediate(async () => {
+                try {
+                    const enrollments = await EnrollmentModel.find({
+                        batchId: id,
+                        status: EnrollmentStatus.Active,
+                    }).select('userId').lean();
+
+                    const userIds = [...new Set(enrollments.map(e => e.userId.toString()))];
+
+                    for (const userId of userIds) {
+                        await NotificationService.createNotification({
+                            userId,
+                            type: 'batch_updated',
+                            title: 'Batch Updated',
+                            message: `Batch "${updated.title}" details have been updated. Check for new dates or changes.`,
+                            link: '/my-classes',
+                            relatedTo: { model: 'Batch', id: updated._id.toString() },
+                        });
+                    }
+                } catch (error) {
+                    logger.error(error, 'Failed to send batch update notification');
+                }
+            });
+        }
+
         return updated;
     },
 
@@ -230,10 +259,44 @@ export const BatchService = {
         //     );
         // }
 
-        batch.status = newStatus;
-        await batch.save();
+    const oldStatus = batch.status;
+    batch.status = newStatus;
+    await batch.save();
 
-        return batch;
+    if (oldStatus !== newStatus) {
+        const statusLabels: Record<string, string> = {
+            draft: 'Draft',
+            upcoming: 'Upcoming',
+            running: 'Running',
+            completed: 'Completed',
+        };
+
+        setImmediate(async () => {
+            try {
+                const enrollments = await EnrollmentModel.find({
+                    batchId: id,
+                    status: EnrollmentStatus.Active,
+                }).select('userId').lean();
+
+                const userIds = [...new Set(enrollments.map(e => e.userId.toString()))];
+
+                for (const userId of userIds) {
+                    await NotificationService.createNotification({
+                        userId,
+                        type: 'batch_status_changed',
+                        title: 'Batch Status Updated',
+                        message: `Batch "${batch.title}" status changed from ${statusLabels[oldStatus] || oldStatus} to ${statusLabels[newStatus] || newStatus}`,
+                        link: '/my-classes',
+                        relatedTo: { model: 'Batch', id: batch._id.toString() },
+                    });
+                }
+            } catch (error) {
+                logger.error(error, 'Failed to send batch status notification');
+            }
+        });
+    }
+
+    return batch;
     },
 
     /**

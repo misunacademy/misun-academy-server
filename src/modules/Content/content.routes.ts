@@ -2,8 +2,6 @@ import express from 'express';
 import { ContentController } from './content.controller.js';
 import { requireAuth } from '../../middlewares/betterAuth.js';
 import { checkBatchEnrollment } from '../../middlewares/batchAccess.js';
-import validateRequest from '../../middlewares/validateRequest.js';
-import { updateProgressSchema } from '../../validations/content.validation.js';
 
 const router = express.Router();
 
@@ -36,21 +34,6 @@ router.get(
     '/batches/:batchId/modules/:moduleId/resources',
     checkBatchEnrollment,
     ContentController.getModuleResources
-);
-
-// Update lesson progress
-router.post(
-    '/progress/lessons/:lessonId',
-    checkBatchEnrollment,
-    validateRequest(updateProgressSchema),
-    ContentController.updateLessonProgress
-);
-
-// Get batch progress
-router.get(
-    '/progress/batches/:batchId',
-    checkBatchEnrollment,
-    ContentController.getBatchProgress
 );
 
 // Get quizzes for a module

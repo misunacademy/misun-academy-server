@@ -6,6 +6,8 @@ import { UserStatus } from '../types/common.js';
 import { ProfileModel } from '../modules/Profile/profile.model.js';
 import { betterAuth } from 'better-auth';
 import { mongodbAdapter } from 'better-auth/adapters/mongodb';
+import { createAuthMiddleware, APIError } from 'better-auth/api';
+import { deleteSessionCookie } from 'better-auth/cookies';
 import { logger } from './logger.js';
 
 // Use the shared email service for auth emails (reuse SMTP config & retry logic)
@@ -33,13 +35,6 @@ export const initializeAuth = async () => {
     secret: process.env.BETTER_AUTH_SECRET!,
 
     appName: 'Misun Academy',
-
-    // Redirect to client after OAuth
-    redirects: {
-      // After successful OAuth, redirect to client's callback page
-      afterSignIn: `${process.env.MA_FRONTEND_URL!}/auth/callback`,
-      afterSignUp: `${process.env.MA_FRONTEND_URL!}/auth/callback`,
-    },
 
     // Enable experimental features for better performance
     experimental: {
@@ -156,6 +151,50 @@ export const initializeAuth = async () => {
       process.env.CLIENT_URL,
       process.env.EP_FRONTEND_URL!,
     ].filter((s): s is string => Boolean(s)), // Filter out any undefined values
+
+    hooks: {
+      // Block session establishment for suspended users. Runs after credential
+      // verification so it never reveals whether an email exists to unauthenticated
+      // probes. Covers email sign-in, OAuth callback, and post-verification auto sign-in.
+      after: createAuthMiddleware(async (ctx) => {
+        const sessionCreatingPaths = ['/sign-in/email', '/oauth2/callback', '/callback/google', '/verify-email'];
+        if (!sessionCreatingPaths.some((p) => ctx.path.startsWith(p))) {
+          return;
+        }
+
+        const newSession = ctx.context.newSession;
+        if (!newSession?.user?.id) {
+          return;
+        }
+
+        const db = mongoose.connection.db;
+        if (!db) {
+          return;
+        }
+
+        const user = await db.collection('users').findOne(
+          { _id: new mongoose.Types.ObjectId(newSession.user.id) },
+          { projection: { status: 1 } }
+        );
+
+        if (user?.status === UserStatus.Suspended) {
+          await db.collection('sessions').deleteMany({
+            userId: { $in: [newSession.user.id, new mongoose.Types.ObjectId(newSession.user.id)] },
+          });
+          // Expire the freshly written session + cookie-cache cookies so no
+          // usable session survives this response (cookieCache JWE included).
+          try {
+            deleteSessionCookie(ctx);
+          } catch (e) {
+            logger.warn(`Failed to expire session cookies after suspended sign-in: ${String(e)}`);
+          }
+          logger.warn(`Blocked sign-in for suspended user ${newSession.user.email}`);
+          throw new APIError('FORBIDDEN', {
+            message: 'Your account has been suspended. Please contact support.',
+          });
+        }
+      }),
+    },
 
     // Database hooks for custom logic
     databaseHooks: {

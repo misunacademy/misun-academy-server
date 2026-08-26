@@ -24,6 +24,8 @@ import { QuizRoutes } from '../modules/Quiz/quiz.routes.js';
 import { QuestionRoutes } from '../modules/Quiz/question.routes.js';
 import { AttemptRoutes } from '../modules/Quiz/attempt.routes.js';
 import { LeaderboardRoutes } from '../modules/Quiz/leaderboard.routes.js';
+import { AuditLogRoutes } from '../modules/AuditLog/auditLog.routes.js';
+import { BootcampRoutes } from '../modules/Bootcamp/bootcamp.routes.js';
 
 
 const router = express.Router();
@@ -125,6 +127,14 @@ const moduleRoutes = [
     {
         path: '/gamification',
         route: LeaderboardRoutes,
+    },
+    {
+        path: '/audit-logs',
+        route: AuditLogRoutes,
+    },
+    {
+        path: '/bootcamp',
+        route: BootcampRoutes,
     },
 ];
 

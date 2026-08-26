@@ -1,5 +1,6 @@
 import Groq from 'groq-sdk';
 import env from '../../config/env.js';
+import { logger as pinoLogger } from '../../config/logger.js';
 import { ChatMessage } from './chat.interface.js';
 import { BatchModel } from '../Batch/batch.model.js';
 import { BatchStatus } from '../../types/common.js';
@@ -161,27 +162,26 @@ function createChatError(message: string, code: string, statusCode: number): Cha
 }
 
 // ─────────────────────────────────────────────
-// Minimal structured logger (swap with winston/pino in prod)
+// Structured logger (pino-backed, msg-first signature)
 // ─────────────────────────────────────────────
 
-const logger = {
-  info: (msg: string, meta?: unknown) =>
-    console.log(JSON.stringify({ level: 'info', msg, ...flatten(meta), ts: new Date().toISOString() })),
-  warn: (msg: string, meta?: unknown) =>
-    console.warn(JSON.stringify({ level: 'warn', msg, ...flatten(meta), ts: new Date().toISOString() })),
-  error: (msg: string, err?: unknown, meta?: unknown) =>
-    console.error(JSON.stringify({
-      level: 'error', msg,
-      error: err instanceof Error ? { message: err.message, stack: err.stack } : err,
-      ...flatten(meta),
-      ts: new Date().toISOString(),
-    })),
-};
+const flatten = (meta: unknown): Record<string, unknown> =>
+    meta && typeof meta === 'object' ? { ...(meta as Record<string, unknown>) } : {};
 
-function flatten(meta: unknown): Record<string, unknown> {
-  if (!meta || typeof meta !== 'object') return {};
-  return meta as Record<string, unknown>;
-}
+const logger = {
+    info: (msg: string, meta?: unknown) => pinoLogger.info(flatten(meta), msg),
+    warn: (msg: string, meta?: unknown) => pinoLogger.warn(flatten(meta), msg),
+    error: (msg: string, err?: unknown, meta?: unknown) =>
+        pinoLogger.error(
+            {
+                ...(err instanceof Error
+                    ? { err: { message: err.message, stack: err.stack } }
+                    : err ? { err } : {}),
+                ...flatten(meta),
+            },
+            msg
+        ),
+};
 
 // ─────────────────────────────────────────────
 // Input validation
@@ -278,7 +278,7 @@ function buildSystemPrompt(context: SystemContext, userName?: string): string {
 ## আমাদের কোর্সসমূহ
 আমাদের বর্তমানে দুটি প্রধান কোর্স রয়েছে:
 
-### ১. কমপ্লিট গ্রাফিক ডিজাইন উইথ ফ্রিল্যান্সিং
+### ১. AI Powered কমপ্লিট গ্রাফিক ডিজাইন উইথ ফ্রিল্যান্সিং
 - মেয়াদ: ৪ মাস (লাইভ অনলাইন)
 - ৩টি সাব-কোর্স: 🎨 Photoshop Hero, ✏️ Illustrator Wizard, 🎯 Guardian in Client Hunting
 - মূল্য: আসন্ন ব্যাচের মূল্য নিচে "আসন্ন ব্যাচ সমূহ" অংশে দেখুন
@@ -369,7 +369,7 @@ misunacademybd@gmail.com-এ ইমেইল করুন এবং নিচে
 2. **প্রশ্ন:** আমি কি Misun Academy-এর সব কোর্সে এনরোল করতে পারি?
    **উত্তর:** হ্যাঁ, আপনি যেকোনো কোর্সে এনরোল করতে পারেন। তবে প্রতিটি কোর্সের জন্য আলাদাভাবে এনরোল করতে হবে।
 3. **প্রশ্ন:** Misun Academy-এ আমি কি কি কোর্স পাব?
-   **উত্তর:** বর্তমানে আমাদের দুটি প্রধান কোর্স রয়েছে: (১) কমপ্লিট গ্রাফিক ডিজাইন উইথ ফ্রিল্যান্সিং এবং (২) ইংলিশ ফর প্রফেশনাল কমিউনিকেশন।
+   **উত্তর:** বর্তমানে আমাদের দুটি প্রধান কোর্স রয়েছে: (১) AI Powered কমপ্লিট গ্রাফিক ডিজাইন উইথ ফ্রিল্যান্সিং এবং (২) ইংলিশ ফর প্রফেশনাল কমিউনিকেশন।
 4. **প্রশ্ন:** আমি কিভাবে Misun Academy-এ এনরোল করব?
    **উত্তর:** পছন্দের কোর্স ও ব্যাচ নির্বাচন করুন, তারপর SSLCommerz-এর মাধ্যমে পেমেন্ট সম্পন্ন করুন।
 5. **প্রশ্ন:** Misun Academy-এর সাথে কিভাবে যোগাযোগ করব?

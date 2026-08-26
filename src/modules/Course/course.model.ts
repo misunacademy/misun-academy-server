@@ -1,6 +1,7 @@
 import { Schema, model } from 'mongoose';
 import { CourseStatus, CourseLevel } from '../../types/common.js';
 import { ICourse } from './course.interface.js';
+import { CourseBrand, deriveCourseBrand } from '../../utils/courseBrand.js';
 
 const courseSchema = new Schema<ICourse>(
     {
@@ -13,6 +14,11 @@ const courseSchema = new Schema<ICourse>(
             type: String,
             required: true,
             lowercase: true,
+        },
+        brand: {
+            type: String,
+            enum: Object.values(CourseBrand),
+            default: CourseBrand.MA,
         },
         shortDescription: {
             type: String,
@@ -100,5 +106,13 @@ courseSchema.index({ status: 1 });
 courseSchema.index({ category: 1, level: 1 });
 courseSchema.index({ featured: 1, status: 1 });
 courseSchema.index({ tags: 1 });
+
+courseSchema.pre('validate', function (next) {
+    const titleOrSlugChanged = this.isModified('title') || this.isModified('slug');
+    if (!this.brand || titleOrSlugChanged) {
+        this.brand = deriveCourseBrand({ title: this.title, slug: this.slug });
+    }
+    next();
+});
 
 export const CourseModel = model<ICourse>('Course', courseSchema);

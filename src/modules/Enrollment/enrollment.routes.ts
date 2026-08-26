@@ -2,9 +2,18 @@ import express from 'express';
 import { EnrollmentController } from './enrollment.controller.js';
 import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 import validateRequest from '../../middlewares/validateRequest.js';
+import { createRateLimiter } from '../../middlewares/rateLimit.js';
 import { initiateEnrollmentSchema, manualEnrollmentSchema, grantAccessSchema, updateEnrollmentStatusSchema } from '../../validations/enrollment.validation.js';
 
 const router = express.Router();
+
+const manualEnrollmentLimiter = createRateLimiter({
+    prefix: 'enroll-manual',
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    keyByUser: true,
+    message: 'Too many manual payment submissions. Please try again later.',
+});
 
 // Learner routes
 router.post(
@@ -17,6 +26,7 @@ router.post(
 router.post(
     '/manual',
     requireAuth,
+    manualEnrollmentLimiter,
     validateRequest(manualEnrollmentSchema),
     EnrollmentController.enrollWithManualPayment
 );

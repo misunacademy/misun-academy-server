@@ -2,7 +2,7 @@ import express from 'express';
 import validateRequest from '../../middlewares/validateRequest.js';
 import { loginValidationSchema, adminRegisterSchema, updateUserSchema, updateUserStatusSchema, sendNewsUpdateSchema, sendBatchProgressReminderSchema, sendBatchIncompleteReminderSchema } from './admin.validation.js';
 import { AdminAuthController } from './admin.controller.js';
-import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
+import { requireAuth, requireAdmin, requireSuperAdmin } from '../../middlewares/betterAuth.js';
 
 
 const router = express.Router();
@@ -56,7 +56,7 @@ router.patch(
 router.delete(
     '/users/:id',
     requireAuth,
-    requireAdmin,  // Only SuperAdmin can delete
+    requireSuperAdmin,
     AdminAuthController.deleteUser
 );
 

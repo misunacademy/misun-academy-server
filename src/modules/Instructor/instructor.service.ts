@@ -313,7 +313,7 @@ const deleteLessonForInstructor = async (userId: string, lessonId: string) => {
  * Get quizzes for a module — instructor access only
  */
 const generateUniqueQuizSlug = async (title: string, existingId?: string): Promise<string> => {
-    let slug = slugify(title);
+    const slug = slugify(title);
     let counter = 0;
     let uniqueSlug = slug;
     while (true) {

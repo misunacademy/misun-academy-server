@@ -18,16 +18,24 @@ import {
     sendRunningBatchProgressReminderEmail as sendEsunRunningBatchProgressReminderEmail,
     sendWaitingPaymentVerificationEmail as sendEsunWaitingPaymentVerificationEmail,
 } from './esunPointEmails.js';
+import { CourseBrand, isEnglishText } from '../utils/courseBrand.js';
 
 interface CourseEmailContext {
+    brand?: string | null;
     courseName?: string | null;
     courseSlug?: string | null;
 }
 
-const isEnglishCourse = (context: CourseEmailContext): boolean => {
-    const searchable = `${context.courseName || ''} ${context.courseSlug || ''}`.toLowerCase();
-    return /\benglish\b/.test(searchable);
+const resolveBrand = (context: CourseEmailContext): CourseBrand => {
+    if (context.brand === CourseBrand.EP) return CourseBrand.EP;
+    if (context.brand === CourseBrand.MA) return CourseBrand.MA;
+    return isEnglishText(`${context.courseName || ''} ${context.courseSlug || ''}`)
+        ? CourseBrand.EP
+        : CourseBrand.MA;
 };
+
+const isEnglishCourse = (context: CourseEmailContext): boolean =>
+    resolveBrand(context) === CourseBrand.EP;
 
 export const sendCoursePaymentSuccessEmail = async (
     context: CourseEmailContext,

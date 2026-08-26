@@ -4,13 +4,14 @@ import { Types } from 'mongoose';
 import { QuizModel } from './quiz.model.js';
 import { QuestionModel } from './question.model.js';
 import { ModuleModel } from '../Module/module.model.js';
-import { CourseModel } from '../Course/course.model.js';
 import { QuizAttemptModel } from './attempt.model.js';
 import ApiError from '../../errors/ApiError.js';
 import { AttemptStatus } from '../../types/common.js';
+import { NotificationService } from '../Notification/notification.service.js';
+import { logger } from '../../config/logger.js';
 
 const generateUniqueSlug = async (title: string, existingId?: string): Promise<string> => {
-    let slug = slugify(title);
+    const slug = slugify(title);
     let counter = 0;
     let uniqueSlug = slug;
 
@@ -120,6 +121,28 @@ const updateQuiz = async (quizId: string, updateData: any) => {
 
     if (!updated) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Quiz not found');
+    }
+
+    if (!quiz.status || (quiz.status !== 'published' && updated.status === 'published')) {
+        setImmediate(async () => {
+            try {
+                const module = await ModuleModel.findById(updated.moduleId).lean();
+                if (module?.batchId) {
+                    await NotificationService.createBatchNotification(
+                        module.batchId.toString(),
+                        {
+                            type: 'quiz_published',
+                            title: 'New Quiz Available',
+                            message: `Quiz "${updated.title}" has been published`,
+                            link: '/my-classes',
+                            relatedTo: { model: 'Quiz', id: updated._id.toString() },
+                        }
+                    );
+                }
+            } catch (error) {
+                logger.error(error, 'Failed to send quiz published notification');
+            }
+        });
     }
 
     return updated;

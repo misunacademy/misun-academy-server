@@ -26,6 +26,7 @@ export interface IQuizAttempt {
     startedAt: Date;
     submittedAt?: Date;
     timeTaken?: number;
+    expired?: boolean;
     status: AttemptStatus;
     createdAt?: Date;
     updatedAt?: Date;

@@ -42,6 +42,9 @@ router.patch('/admin/leave/:id/status',    requireAuth, requireAdmin, validateRe
 router.get('/profile',   requireAuth, requireEmployee, EmployeeController.getMyProfile);
 router.patch('/profile', requireAuth, requireEmployee, EmployeeController.updateMyProfile);
 
+// Restricted NID document delivery (employee: own assets; admin/superadmin: any)
+router.get('/nid-photo', requireAuth, EmployeeController.getNidPhotoUrl);
+
 // Salaries
 router.get('/salaries', requireAuth, requireEmployee, EmployeeController.getMySalaries);
 

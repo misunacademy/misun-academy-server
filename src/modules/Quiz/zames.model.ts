@@ -68,5 +68,9 @@ const zamesTransactionSchema = new Schema<IZamesTransaction>(
 zamesTransactionSchema.index({ userId: 1, courseId: 1, batchId: 1, createdAt: -1 });
 zamesTransactionSchema.index({ courseId: 1, batchId: 1, createdAt: -1 });
 zamesTransactionSchema.index({ source: 1 });
+zamesTransactionSchema.index(
+    { userId: 1, quizAttemptId: 1 },
+    { unique: true, partialFilterExpression: { quizAttemptId: { $type: 'objectId' } } }
+);
 
 export const ZamesTransactionModel = model<IZamesTransaction>('ZamesTransaction', zamesTransactionSchema);

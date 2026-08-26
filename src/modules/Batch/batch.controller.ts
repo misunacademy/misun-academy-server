@@ -3,9 +3,19 @@ import catchAsync from "../../utils/catchAsync.js";
 import sendResponse from "../../utils/sendResponse.js";
 import { BatchService } from "./batch.service.js";
 import { StatusCodes } from "http-status-codes";
+import { recordAudit } from "../../models/auditLog.model.js";
 
 const createBatch = catchAsync(async (req: Request, res: Response) => {
     const result = await BatchService.createBatch(req.body);
+    const { id: actorId } = req.user as any;
+
+    await recordAudit({
+        actor: actorId,
+        action: 'batch.create',
+        targetType: 'Batch',
+        targetId: (result as any)?._id?.toString(),
+        metadata: { title: (result as any)?.title, courseId: (result as any)?.courseId?.toString?.() },
+    });
 
     sendResponse(res, {
         statusCode: StatusCodes.CREATED,
@@ -87,8 +97,27 @@ const getBatchById = catchAsync(async (req: Request, res: Response) => {
 const updateBatch = catchAsync(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const data = req.body;
+    const { id: actorId } = req.user as any;
 
     const result = await BatchService.updateBatch(id, data);
+
+    if (data.status && (result as any)?.status && data.status !== (result as any).status) {
+        await recordAudit({
+            actor: actorId,
+            action: 'batch.status_change',
+            targetType: 'Batch',
+            targetId: id,
+            metadata: { requestedStatus: data.status },
+        });
+    } else {
+        await recordAudit({
+            actor: actorId,
+            action: 'batch.update',
+            targetType: 'Batch',
+            targetId: id,
+            metadata: { fields: Object.keys(data ?? {}) },
+        });
+    }
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -101,7 +130,16 @@ const updateBatch = catchAsync(async (req: Request, res: Response) => {
 const transitionBatchStatus = catchAsync(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const { status } = req.body;
+    const { id: actorId } = req.user as any;
     const result = await BatchService.transitionBatchStatus(id, status);
+
+    await recordAudit({
+        actor: actorId,
+        action: 'batch.status_change',
+        targetType: 'Batch',
+        targetId: id,
+        metadata: { to: status },
+    });
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,

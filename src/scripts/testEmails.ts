@@ -85,9 +85,9 @@ async function testAllEmails() {
         console.log('📧 Sending enrollment confirmation email...');
         await sendEnrollmentConfirmationEmail(
             { name: 'John Doe', email: TEST_EMAIL },
-            'Complete Graphic Design Course',
+            'AI Powered Complete Graphic Design Course',
             'ENROLL-TEST-78759',
-            4000
+            4500
         );
 
         console.log('✅ All test emails queued successfully!');

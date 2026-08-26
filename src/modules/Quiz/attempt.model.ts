@@ -52,6 +52,7 @@ const attemptSchema = new Schema<IQuizAttempt>(
         startedAt: { type: Date, required: true },
         submittedAt: { type: Date },
         timeTaken: { type: Number },
+        expired: { type: Boolean, default: false },
         status: {
             type: String,
             enum: Object.values(AttemptStatus),

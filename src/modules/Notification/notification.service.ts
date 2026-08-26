@@ -1,5 +1,9 @@
 import { NotificationModel } from './notification.model.js';
 import type { NotificationType } from './notification.interface.js';
+import { UserModel } from '../User/user.model.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { Role } from '../../types/role.js';
+import { EnrollmentStatus } from '../../types/common.js';
 import { getIO } from '../../services/socketService.js';
 
 interface CreateNotificationParams {
@@ -11,16 +15,20 @@ interface CreateNotificationParams {
   relatedTo?: { model: string; id: string };
 }
 
+const buildNotifData = (params: CreateNotificationParams | Omit<CreateNotificationParams, 'userId'> & { userId?: string }) => ({
+  type: params.type,
+  title: params.title,
+  message: params.message,
+  link: params.link,
+  relatedTo: params.relatedTo
+    ? { model: params.relatedTo.model, id: params.relatedTo.id }
+    : undefined,
+});
+
 const createNotification = async (params: CreateNotificationParams) => {
   const notification = await NotificationModel.create({
     userId: params.userId,
-    type: params.type,
-    title: params.title,
-    message: params.message,
-    link: params.link,
-    relatedTo: params.relatedTo
-      ? { model: params.relatedTo.model, id: params.relatedTo.id }
-      : undefined,
+    ...buildNotifData(params),
   });
 
   const io = getIO();
@@ -32,35 +40,29 @@ const createNotification = async (params: CreateNotificationParams) => {
 };
 
 const createNotificationForAdmins = async (params: Omit<CreateNotificationParams, 'userId'>) => {
-  const { UserModel } = await import('../User/user.model.js');
-  const { Role } = await import('../../types/role.js');
-
   const admins = await UserModel.find({
     role: { $in: [Role.ADMIN, Role.SUPERADMIN] },
     status: 'active',
   }).select('_id').lean();
 
+  if (admins.length === 0) return [];
+
   const notifications = await NotificationModel.insertMany(
     admins.map((admin) => ({
       userId: admin._id,
-      type: params.type,
-      title: params.title,
-      message: params.message,
-      link: params.link,
-      relatedTo: params.relatedTo
-        ? { model: params.relatedTo.model, id: params.relatedTo.id }
-        : undefined,
+      ...buildNotifData(params),
     }))
   );
 
   const io = getIO();
   if (io) {
+    const notifByUser = new Map(
+      notifications.map((n) => [n.userId.toString(), n])
+    );
     for (const admin of admins) {
-      const adminNotification = notifications.find(
-        (n) => n.userId.toString() === admin._id.toString()
-      );
-      if (adminNotification) {
-        io.to(`user:${admin._id}`).emit('notification', adminNotification.toObject());
+      const notif = notifByUser.get(admin._id.toString());
+      if (notif) {
+        io.to(`user:${admin._id}`).emit('notification', notif.toObject());
       }
     }
   }
@@ -73,9 +75,6 @@ const createBatchNotification = async (
   params: Omit<CreateNotificationParams, 'userId'>,
   excludeUserId?: string
 ) => {
-  const { EnrollmentModel } = await import('../Enrollment/enrollment.model.js');
-  const { EnrollmentStatus } = await import('../../types/common.js');
-
   const enrollments = await EnrollmentModel.find({
     batchId,
     status: EnrollmentStatus.Active,
@@ -90,23 +89,17 @@ const createBatchNotification = async (
   const notifications = await NotificationModel.insertMany(
     userIds.map((userId) => ({
       userId,
-      type: params.type,
-      title: params.title,
-      message: params.message,
-      link: params.link,
-      relatedTo: params.relatedTo
-        ? { model: params.relatedTo.model, id: params.relatedTo.id }
-        : undefined,
+      ...buildNotifData(params),
     }))
   );
 
   const io = getIO();
   if (io) {
-    const notificationByUser = new Map(
+    const notifByUser = new Map(
       notifications.map((n) => [n.userId.toString(), n])
     );
     for (const userId of userIds) {
-      const notif = notificationByUser.get(userId);
+      const notif = notifByUser.get(userId);
       if (notif) {
         io.to(`user:${userId}`).emit('notification', notif.toObject());
       }
@@ -122,7 +115,7 @@ const getUserNotifications = async (
 ) => {
   const page = query.page || 1;
   const limit = query.limit || 10;
-  const filter: any = { userId };
+  const filter: any = { userId, isDeleted: { $ne: true } };
   if (query.read !== undefined) filter.read = query.read;
 
   const [data, total] = await Promise.all([
@@ -146,7 +139,7 @@ const getUserNotifications = async (
 };
 
 const getUnreadCount = async (userId: string) => {
-  return NotificationModel.countDocuments({ userId, read: false });
+  return NotificationModel.countDocuments({ userId, read: false, isDeleted: { $ne: true } });
 };
 
 const markAsRead = async (userId: string, notificationId: string) => {
@@ -160,8 +153,25 @@ const markAsRead = async (userId: string, notificationId: string) => {
 
 const markAllAsRead = async (userId: string) => {
   const result = await NotificationModel.updateMany(
-    { userId, read: false },
+    { userId, read: false, isDeleted: { $ne: true } },
     { read: true }
+  );
+  return result;
+};
+
+const deleteNotification = async (userId: string, notificationId: string) => {
+  const notification = await NotificationModel.findOneAndUpdate(
+    { _id: notificationId, userId },
+    { isDeleted: true, deletedAt: new Date() },
+    { new: true }
+  );
+  return notification;
+};
+
+const deleteAllNotifications = async (userId: string) => {
+  const result = await NotificationModel.updateMany(
+    { userId, isDeleted: { $ne: true } },
+    { isDeleted: true, deletedAt: new Date() }
   );
   return result;
 };
@@ -174,4 +184,6 @@ export const NotificationService = {
   getUnreadCount,
   markAsRead,
   markAllAsRead,
+  deleteNotification,
+  deleteAllNotifications,
 };

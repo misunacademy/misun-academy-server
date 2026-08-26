@@ -39,6 +39,45 @@ const findEnrollmentForCourse = async (
 };
 
 /**
+ * Ensure a ModuleProgress row exists for every module of the enrollment's batch.
+ * Modules added after enrollment are backfilled: unlocked when every previous
+ * module is completed, locked otherwise.
+ */
+const ensureModuleProgress = async (enrollmentId: string, courseId: string, batchId?: string) => {
+    const modules = await ModuleModel.find({ courseId, ...(batchId ? { batchId } : {}) })
+        .sort({ orderIndex: 1 })
+        .lean();
+
+    if (modules.length === 0) return;
+
+    const existing = await ModuleProgressModel.find({ enrollmentId }).lean();
+    const byModuleId = new Map(existing.map((row) => [row.moduleId.toString(), row]));
+
+    let allPreviousCompleted = true;
+
+    for (const mod of modules) {
+        const key = mod._id.toString();
+        const row = byModuleId.get(key);
+
+        if (!row) {
+            const created = await ModuleProgressModel.create({
+                enrollmentId,
+                moduleId: mod._id,
+                status: allPreviousCompleted ? ProgressStatus.Unlocked : ProgressStatus.Locked,
+                ...(allPreviousCompleted ? { unlockedAt: new Date() } : {}),
+                completionPercentage: 0,
+            });
+            byModuleId.set(key, created.toObject());
+        }
+
+        const current = byModuleId.get(key)!;
+        if (current.status !== ProgressStatus.Completed) {
+            allPreviousCompleted = false;
+        }
+    }
+};
+
+/**
  * Get course progress for a user
  */
 const getCourseProgress = async (userId: string, courseId: string, batchId?: string) => {
@@ -50,6 +89,8 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
     if (!enrollment) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'No enrollment found for this course');
     }
+
+    await ensureModuleProgress(enrollment._id.toString(), courseId, batchId ?? enrollment.batchId?.toString());
 
     // Get module progress
     const moduleProgress = await ModuleProgressModel.find({
@@ -87,7 +128,10 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
 
     // Find current lesson (first incomplete lesson or quiz in first incomplete module)
     let currentLesson = null;
-    const sortedModules = moduleProgress.sort((a, b) => (a.moduleId as any).orderIndex - (b.moduleId as any).orderIndex);
+    // Skip orphaned rows whose module was deleted; null-safe ordering
+    const sortedModules = moduleProgress
+        .filter((row) => row.moduleId && (row.moduleId as any)._id !== undefined)
+        .sort((a, b) => ((a.moduleId as any)?.orderIndex ?? 0) - ((b.moduleId as any)?.orderIndex ?? 0));
 
     for (const modProgress of sortedModules) {
         if (modProgress.status !== ProgressStatus.Completed) {
@@ -181,6 +225,21 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
     const lesson = await LessonModel.findById(lessonId).lean();
     if (!lesson || lesson.moduleId.toString() !== moduleId) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found or does not belong to the specified module');
+    }
+
+    // Backfill progress rows for modules added after enrollment, then re-check
+    await ensureModuleProgress(enrollment._id.toString(), courseId, enrollment.batchId?.toString());
+
+    const moduleProgress = await ModuleProgressModel.findOne({
+        enrollmentId: enrollment._id,
+        moduleId,
+    }).lean();
+
+    if (!moduleProgress || moduleProgress.status === ProgressStatus.Locked) {
+        throw new ApiError(
+            StatusCodes.FORBIDDEN,
+            'This module is locked. Complete previous modules before attempting its lessons.'
+        );
     }
 
     // Check if lesson is already completed

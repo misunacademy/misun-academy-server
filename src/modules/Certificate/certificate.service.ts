@@ -8,7 +8,11 @@ import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
 import { sendCertificateApprovedEmail, sendCertificateIssuedEmail } from '../../services/misunAcademyEmails.js';
 import { UserModel } from '../User/user.model.js';
+import { recordAudit } from '../../models/auditLog.model.js';
 import mongoose from 'mongoose';
+import crypto from 'crypto';
+import { NotificationService } from '../Notification/notification.service.js';
+import { logger } from '../../config/logger.js';
 
 const findCertificateByIdentifier = async (identifier: string) => {
     if (mongoose.Types.ObjectId.isValid(identifier)) {
@@ -21,11 +25,8 @@ const findCertificateByIdentifier = async (identifier: string) => {
 /**
  * Generate unique certificate ID
  */
-const generateCertificateId = (): string => {
-    const timestamp = Date.now().toString(36).toUpperCase();
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-    return `CERT-${timestamp}-${random}`;
-};
+const generateCertificateId = (): string =>
+    `CERT-${crypto.randomUUID()}`;
 
 /**
  * Check if enrollment is eligible for certificate
@@ -124,6 +125,24 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
         issuedBy: userId,  // Requested by student
     });
 
+    const courseName = (course as any)?.title || 'Course';
+    setImmediate(async () => {
+        try {
+            const user = await UserModel.findById(userId).lean();
+            if (user) {
+                await NotificationService.createNotificationForAdmins({
+                    type: 'certificate_requested',
+                    title: 'Certificate Request',
+                    message: `${user.name} requested a certificate for ${courseName} - ${batch.title}`,
+                    link: '/dashboard/admin/certificates',
+                    relatedTo: { model: 'Certificate', id: certificate._id.toString() },
+                });
+            }
+        } catch (error) {
+            logger.error(error, 'Failed to send certificate request notification');
+        }
+    });
+
     return certificate;
 };
 
@@ -146,6 +165,14 @@ const approveCertificate = async (certificateId: string, approvedBy: string) => 
     (certificate as any).approvedBy = approvedBy;
     (certificate as any).approvedAt = new Date();
     await certificate.save();
+
+    await recordAudit({
+        actor: approvedBy,
+        action: 'certificate.approve',
+        targetType: 'Certificate',
+        targetId: certificate._id?.toString(),
+        metadata: { certificateId: certificate.certificateId, enrollmentId: certificate.enrollmentId?.toString() },
+    });
 
     // Update enrollment
     await EnrollmentModel.findByIdAndUpdate(certificate.enrollmentId, {
@@ -172,6 +199,27 @@ const approveCertificate = async (certificateId: string, approvedBy: string) => 
     } catch (emailError) {
         console.error('Failed to send certificate approved email:', emailError);
     }
+
+    setImmediate(async () => {
+        try {
+            const enrollment = await EnrollmentModel.findById(certificate.enrollmentId).lean();
+            if (enrollment) {
+                const batch = await BatchModel.findById(certificate.batchId).populate('courseId').lean();
+                const courseName = (batch?.courseId as any)?.title || 'Course';
+                const studentUserId = enrollment.userId.toString();
+                await NotificationService.createNotification({
+                    userId: studentUserId,
+                    type: 'certificate_approved',
+                    title: 'Certificate Approved',
+                    message: `Your certificate for ${courseName} has been approved!`,
+                    link: '/my-classes',
+                    relatedTo: { model: 'Certificate', id: certificate._id.toString() },
+                });
+            }
+        } catch (error) {
+            logger.error(error, 'Failed to send certificate approved notification');
+        }
+    });
 
     return certificate;
 };
@@ -208,6 +256,10 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
     }
 
     const batch = enrollment.batchId as any;
+    const learnerId =
+        typeof enrollment.userId === 'object' && enrollment.userId !== null
+            ? (enrollment.userId as any)._id.toString()
+            : String(enrollment.userId);
 
     // Generate certificate
     const certificateId = generateCertificateId();
@@ -235,9 +287,17 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
         status: EnrollmentStatus.Completed
     });
 
+    await recordAudit({
+        actor: issuedBy,
+        action: 'certificate.issue',
+        targetType: 'Certificate',
+        targetId: certificate._id?.toString(),
+        metadata: { certificateId: certificate.certificateId, enrollmentId },
+    });
+
     // Send certificate issued email
     try {
-        const user = await UserModel.findById(enrollment.userId).lean();
+        const user = await UserModel.findById(learnerId).lean();
         if (user && batch && batch.courseId) {
             sendCertificateIssuedEmail(
                 user.email,
@@ -249,6 +309,22 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
     } catch (emailError) {
         console.error('Failed to send certificate issued email:', emailError);
     }
+
+    setImmediate(async () => {
+        try {
+            const courseName = batch?.courseId?.title || 'Course';
+            await NotificationService.createNotification({
+                userId: learnerId,
+                type: 'certificate_issued',
+                title: 'Certificate Issued',
+                message: `Your certificate for ${courseName} has been issued!`,
+                link: '/my-classes',
+                relatedTo: { model: 'Certificate', id: certificate._id.toString() },
+            });
+        } catch (error) {
+            logger.error(error, 'Failed to send certificate issued notification');
+        }
+    });
 
     return certificate;
 };
@@ -345,6 +421,34 @@ const revokeCertificate = async (
     certificate.revokedReason = reason;
     (certificate as any).revokedBy = revokedBy;
     await certificate.save();
+
+    await recordAudit({
+        actor: revokedBy,
+        action: 'certificate.revoke',
+        targetType: 'Certificate',
+        targetId: certificate._id?.toString(),
+        metadata: { certificateId: certificate.certificateId, reason },
+    });
+
+    setImmediate(async () => {
+        try {
+            const enrollment = await EnrollmentModel.findById(certificate.enrollmentId).lean();
+            if (enrollment) {
+                const batch = await BatchModel.findById(certificate.batchId).populate('courseId').lean();
+                const courseName = (batch?.courseId as any)?.title || 'Course';
+                await NotificationService.createNotification({
+                    userId: enrollment.userId.toString(),
+                    type: 'certificate_rejected',
+                    title: 'Certificate Request Not Approved',
+                    message: `Your certificate request for ${courseName} was not approved. Reason: ${reason}`,
+                    link: '/my-classes',
+                    relatedTo: { model: 'Certificate', id: certificate._id.toString() },
+                });
+            }
+        } catch (error) {
+            logger.error(error, 'Failed to send certificate rejected notification');
+        }
+    });
 
     return certificate;
 };

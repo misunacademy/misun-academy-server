@@ -7,6 +7,8 @@ import { QuizModel } from '../Quiz/quiz.model.js';
 import { UserModel } from '../User/user.model.js';
 import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
+import { NotificationService } from '../Notification/notification.service.js';
+import { logger } from '../../config/logger.js';
 
 export const CourseService = {
     async createCourse(data: any) {
@@ -131,7 +133,42 @@ export const CourseService = {
     },
 
     async updateCourse(id: string, data: any) {
-        return await CourseModel.findByIdAndUpdate(id, data, { new: true });
+        const oldCourse = await CourseModel.findById(id).lean();
+        const updated = await CourseModel.findByIdAndUpdate(id, data, { new: true });
+
+        if (updated && oldCourse && oldCourse.status !== 'published' && updated.status === 'published') {
+            setImmediate(async () => {
+                try {
+                    await NotificationService.createNotificationForAdmins({
+                        type: 'course_published',
+                        title: 'Course Published',
+                        message: `Course "${updated.title}" has been published`,
+                        link: '/dashboard/admin/courses',
+                        relatedTo: { model: 'Course', id: updated._id.toString() },
+                    });
+
+                    const instructors = await UserModel.find({
+                        role: 'instructor',
+                        status: 'active',
+                    }).select('_id').lean();
+
+                    for (const instructor of instructors) {
+                        await NotificationService.createNotification({
+                            userId: instructor._id.toString(),
+                            type: 'course_published',
+                            title: 'New Course Published',
+                            message: `Course "${updated.title}" is now available for teaching`,
+                            link: '/dashboard/instructor/courses',
+                            relatedTo: { model: 'Course', id: updated._id.toString() },
+                        });
+                    }
+                } catch (error) {
+                    logger.error(error, 'Failed to send course published notification');
+                }
+            });
+        }
+
+        return updated;
     },
 
     async deleteCourse(id: string) {
@@ -163,6 +200,7 @@ export const CourseService = {
             }
         }
 
+        const oldCourse = await CourseModel.findById(courseId).lean();
         const course = await CourseModel.findByIdAndUpdate(
             courseId,
             { instructorId: instructorId ? new Types.ObjectId(instructorId) : null },
@@ -170,6 +208,24 @@ export const CourseService = {
         ).populate('instructorId', 'name email image');
 
         if (!course) throw new ApiError(StatusCodes.NOT_FOUND, 'Course not found');
+
+        if (instructorId && (!oldCourse?.instructorId || oldCourse.instructorId.toString() !== instructorId)) {
+            setImmediate(async () => {
+                try {
+                    await NotificationService.createNotification({
+                        userId: instructorId,
+                        type: 'instructor_assigned',
+                        title: 'Course Assignment',
+                        message: `You have been assigned as instructor for "${course.title}"`,
+                        link: `/dashboard/instructor/courses/${course._id}`,
+                        relatedTo: { model: 'Course', id: course._id.toString() },
+                    });
+                } catch (error) {
+                    logger.error(error, 'Failed to send instructor assigned notification');
+                }
+            });
+        }
+
         return course;
     },
 };

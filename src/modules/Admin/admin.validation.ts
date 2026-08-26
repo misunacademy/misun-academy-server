@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Role } from '../../types/role.js';
+import { UserStatus } from '../../types/common.js';
 
 export const adminRegisterSchema = z.object({
     body: z.object({
@@ -49,6 +50,6 @@ export const updateUserSchema = z.object({
 
 export const updateUserStatusSchema = z.object({
     body: z.object({
-        status: z.enum(['Active', 'Suspended', 'Deleted']),
+        status: z.enum([UserStatus.Active, UserStatus.Suspended, UserStatus.Deleted]),
     }),
 });

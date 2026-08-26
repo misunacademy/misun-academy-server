@@ -6,7 +6,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import rateLimit from 'express-rate-limit';
+import { createRateLimiter } from './middlewares/rateLimit.js';
 import mongoose from 'mongoose';
 import { apiReference } from '@scalar/express-api-reference';
 import router from './routes/index.js';
@@ -96,20 +96,18 @@ app.use(cookieParser());
 
 import BetterAuthRoutes, { betterAuthCatchAll } from './routes/betterAuth.routes.js';
 
-const strictAuthLimiter = rateLimit({
+const strictAuthLimiter = createRateLimiter({
+    prefix: 'auth-strict',
     windowMs: 15 * 60 * 1000,
     max: 20,
     message: 'Too many login/signup attempts, please try again after 15 minutes',
-    standardHeaders: true,
-    legacyHeaders: false,
 });
 
-const generalAuthLimiter = rateLimit({
+const generalAuthLimiter = createRateLimiter({
+    prefix: 'auth-general',
     windowMs: 15 * 60 * 1000,
     max: 1000,
     message: 'Too many auth requests, please try again later',
-    standardHeaders: true,
-    legacyHeaders: false,
 });
 
 app.use('/api/v1/auth/sign-in', strictAuthLimiter);
@@ -135,12 +133,11 @@ app.use(express.json({ limit: '1mb' }));
 
 app.use('/api/v1', csrfProtection);
 
-const apiRateLimiter = rateLimit({
+const apiRateLimiter = createRateLimiter({
+    prefix: 'api',
     windowMs: 15 * 60 * 1000,
     max: 300,
     message: 'Too many requests, please try again later',
-    standardHeaders: true,
-    legacyHeaders: false,
 });
 
 app.use('/api/v1', apiRateLimiter, router);

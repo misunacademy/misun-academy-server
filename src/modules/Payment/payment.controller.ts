@@ -67,26 +67,36 @@ const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
     } catch (error) {
       logger.error(error, 'Failed to finalize payment on status callback');
     }
-  } else if (callbackStatus) {
-    try {
-      const callbackPayload = Object.keys(req.body || {}).length > 0 ? req.body : req.query;
-
-      if (callbackStatus === Status.Pending) {
-        await PaymentService.updatePaymentWithEnrollStatus(transactionId, Status.Failed, callbackPayload);
-      } else {
-        await PaymentService.updatePaymentWithEnrollStatus(transactionId, callbackStatus, callbackPayload);
-      }
-    } catch (error) {
-      logger.error(error, 'Failed to update payment from status callback');
-    }
   } else {
-    try {
-      const statusCheck = await PaymentService.checkPaymentStatus(transactionId);
-      if (statusCheck.payment?.status === Status.Pending) {
-        await PaymentService.updatePaymentWithEnrollStatus(transactionId, Status.Failed);
+    const callbackKey = (req.query.k || req.body?.k) as string | undefined;
+    const expectedKey = PaymentService.getStatusCallbackKey(transactionId);
+
+    if (!callbackKey || callbackKey !== expectedKey) {
+      logger.warn(
+        { transactionId },
+        'Status callback without val_id rejected: missing or invalid callback key'
+      );
+    } else if (callbackStatus) {
+      try {
+        const callbackPayload = Object.keys(req.body || {}).length > 0 ? req.body : req.query;
+
+        if (callbackStatus === Status.Pending) {
+          await PaymentService.updatePaymentWithEnrollStatus(transactionId, Status.Failed, callbackPayload);
+        } else {
+          await PaymentService.updatePaymentWithEnrollStatus(transactionId, callbackStatus, callbackPayload);
+        }
+      } catch (error) {
+        logger.error(error, 'Failed to update payment from status callback');
       }
-    } catch (error) {
-      logger.error(error, 'Failed to cleanup pending payment without explicit callback status');
+    } else {
+      try {
+        const statusCheck = await PaymentService.checkPaymentStatus(transactionId);
+        if (statusCheck.payment?.status === Status.Pending && statusCheck.payment.status !== undefined) {
+          await PaymentService.updatePaymentWithEnrollStatus(transactionId, Status.Failed);
+        }
+      } catch (error) {
+        logger.error(error, 'Failed to cleanup pending payment without explicit callback status');
+      }
     }
   }
 
@@ -138,27 +148,32 @@ export const sslCommerzWebhook = catchAsync(
       });
     }
 
-    if (verify_sign && verify_key && amount && currency) {
-      const isValid = PaymentService.verifyWebhookSignature({
-        status: sslStatus,
-        val_id,
-        tran_id,
-        amount,
-        currency,
-        verify_key,
-        verify_sign,
+    if (!verify_sign || !verify_key || !amount || !currency) {
+      return sendResponse(res, {
+        statusCode: StatusCodes.UNAUTHORIZED,
+        success: false,
+        message: "Missing webhook signature params",
+        data: null,
       });
+    }
 
-      if (!isValid) {
-        return sendResponse(res, {
-          statusCode: StatusCodes.UNAUTHORIZED,
-          success: false,
-          message: "Invalid webhook signature",
-          data: null,
-        });
-      }
-    } else {
-      logger.warn('Webhook received without signature params - skipping verification');
+    const isValid = PaymentService.verifyWebhookSignature({
+      status: sslStatus,
+      val_id,
+      tran_id,
+      amount,
+      currency,
+      verify_key,
+      verify_sign,
+    });
+
+    if (!isValid) {
+      return sendResponse(res, {
+        statusCode: StatusCodes.UNAUTHORIZED,
+        success: false,
+        message: "Invalid webhook signature",
+        data: null,
+      });
     }
 
     try {

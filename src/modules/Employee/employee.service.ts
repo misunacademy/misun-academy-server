@@ -366,11 +366,55 @@ const updateLeaveStatus = async (id: string, status: 'Approved' | 'Rejected') =>
     return leave;
 };
 
+const NID_PHOTO_FIELDS = [
+    'nidPhotoFrontUrl',
+    'nidPhotoBackUrl',
+    'nidPhotoUrl',
+] as const;
+
+const resolveNidPhotoUrl = async (
+    requester: { id: string; role: string },
+    publicId: string
+): Promise<{ url: string }> => {
+    const isAdmin = requester.role === Role.ADMIN || requester.role === Role.SUPERADMIN;
+
+    if (!isAdmin) {
+        const own = await EmployeeProfileModel.findOne({ userId: requester.id })
+            .select(NID_PHOTO_FIELDS.join(' '))
+            .lean();
+
+        const ownsAsset = Boolean(
+            own && NID_PHOTO_FIELDS.some((f) => (own as any)[f] === publicId)
+        );
+
+        if (!ownsAsset) {
+            throw new ApiError(StatusCodes.FORBIDDEN, 'You do not have access to this document');
+        }
+    }
+
+    const { UploadService } = await import('../Upload/upload.service.js');
+
+    try {
+        const url = UploadService.generateSignedAssetUrl(publicId);
+        logger.info({
+            event: 'nid_photo_access',
+            actorId: requester.id,
+            actorRole: requester.role,
+            publicId,
+        }, 'NID photo signed URL issued');
+        return { url };
+    } catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Document not found');
+    }
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 export const EmployeeService = {
     // Profile
     getMyProfile,
     updateMyProfile,
+    resolveNidPhotoUrl,
     // Salaries (employee)
     getMySalaries,
     // Leave (employee)

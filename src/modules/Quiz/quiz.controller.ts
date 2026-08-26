@@ -3,8 +3,6 @@ import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { QuizService } from './quiz.service.js';
-import { QuizAttemptModel } from './attempt.model.js';
-import { AttemptStatus } from '../../types/common.js';
 
 const createQuiz = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params as { moduleId: string };

@@ -121,30 +121,6 @@ const getModuleResources = async (enrollmentId: string, moduleId: string) => {
 };
 
 /**
- * Update lesson progress
- */
-const updateLessonProgress = async (
-    enrollmentId: string,
-    lessonId: string,
-    watchTime: number,
-    lastWatchedPosition: number
-) => {
-    return await ProgressService.updateLessonProgress(
-        enrollmentId,
-        lessonId,
-        watchTime,
-        lastWatchedPosition
-    );
-};
-
-/**
- * Get batch overall progress
- */
-const getBatchProgress = async (enrollmentId: string) => {
-    return await ProgressService.getBatchProgress(enrollmentId);
-};
-
-/**
  * Get quizzes for a module with attempt progress
  */
 const getModuleQuizzes = async (enrollmentId: string, moduleId: string) => {
@@ -262,8 +238,6 @@ export const ContentService = {
     getModuleLessons,
     getLessonDetails,
     getModuleResources,
-    updateLessonProgress,
-    getBatchProgress,
     getModuleQuizzes,
     getModuleCurriculum,
 };

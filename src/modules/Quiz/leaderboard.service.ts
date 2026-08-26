@@ -1,6 +1,4 @@
-import { StatusCodes } from 'http-status-codes';
 import { LeaderboardEntryModel } from './leaderboard.model.js';
-import ApiError from '../../errors/ApiError.js';
 
 interface LeaderboardUser {
     _id: string;

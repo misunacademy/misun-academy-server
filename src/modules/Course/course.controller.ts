@@ -3,11 +3,20 @@ import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { CourseService } from './course.service.js';
+import { recordAudit } from '../../models/auditLog.model.js';
 
 const createCourse = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.user as any;
     const courseData = { ...req.body, createdBy: id };
     const course = await CourseService.createCourse(courseData);
+
+    await recordAudit({
+        actor: id,
+        action: 'course.create',
+        targetType: 'Course',
+        targetId: course._id?.toString(),
+        metadata: { title: course.title },
+    });
 
     sendResponse(res, {
         statusCode: StatusCodes.CREATED,
@@ -54,7 +63,19 @@ const getCourseBySlug = catchAsync(async (req: Request, res: Response) => {
 });
 
 const updateCourse = catchAsync(async (req: Request, res: Response) => {
+    const { id: actorId } = req.user as any;
+    const before = await CourseService.getCourseById(req.params.id as string);
     const course = await CourseService.updateCourse(req.params.id as string, req.body);
+
+    if (before && course && (before as any).status !== (course as any).status) {
+        await recordAudit({
+            actor: actorId,
+            action: `course.${(course as any).status === 'published' ? 'publish' : 'status_change'}`,
+            targetType: 'Course',
+            targetId: String(course._id),
+            metadata: { from: (before as any).status, to: (course as any).status },
+        });
+    }
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -65,7 +86,16 @@ const updateCourse = catchAsync(async (req: Request, res: Response) => {
 });
 
 const deleteCourse = catchAsync(async (req: Request, res: Response) => {
-    await CourseService.deleteCourse(req.params.id as string);
+    const { id: actorId } = req.user as any;
+    const courseId = req.params.id as string;
+    await CourseService.deleteCourse(courseId);
+
+    await recordAudit({
+        actor: actorId,
+        action: 'course.delete',
+        targetType: 'Course',
+        targetId: courseId,
+    });
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -78,8 +108,17 @@ const deleteCourse = catchAsync(async (req: Request, res: Response) => {
 const assignInstructor = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { instructorId } = req.body as { instructorId: string | null };
+    const { id: actorId } = req.user as any;
 
     const course = await CourseService.assignInstructor(id, instructorId ?? null);
+
+    await recordAudit({
+        actor: actorId,
+        action: 'course.instructor_assign',
+        targetType: 'Course',
+        targetId: String(course._id),
+        metadata: { instructorId: instructorId ?? null },
+    });
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,

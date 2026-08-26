@@ -1,11 +1,8 @@
-import { StatusCodes } from 'http-status-codes';
 import { ZamesTransactionModel } from './zames.model.js';
 import { LeaderboardEntryModel } from './leaderboard.model.js';
 import { QuizModel } from './quiz.model.js';
 import { QuizAttemptModel } from './attempt.model.js';
-import { QuestionModel } from './question.model.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
-import ApiError from '../../errors/ApiError.js';
 import { ZamesSource } from '../../types/common.js';
 import { LeaderboardService } from './leaderboard.service.js';
 
@@ -54,22 +51,30 @@ const awardZames = async (params: AwardZamesParams) => {
     const balanceBefore = await getCurrentBalance(userId, courseId, batchId);
     const balanceAfter = balanceBefore + points;
 
-    const tx = await ZamesTransactionModel.create({
-        userId: userId as any,
-        courseId: courseId as any,
-        batchId: batchId as any,
-        quizAttemptId: quizAttemptId as any,
-        quizId: quizId as any,
-        source: source || ZamesSource.Quiz,
-        points,
-        balanceBefore,
-        balanceAfter,
-        metadata: {
-            ...metadata,
-            quizTitle: quiz?.title,
-            attemptNumber: attempt?.attemptNumber,
-        },
-    });
+    let tx;
+    try {
+        tx = await ZamesTransactionModel.create({
+            userId: userId as any,
+            courseId: courseId as any,
+            batchId: batchId as any,
+            quizAttemptId: quizAttemptId as any,
+            quizId: quizId as any,
+            source: source || ZamesSource.Quiz,
+            points,
+            balanceBefore,
+            balanceAfter,
+            metadata: {
+                ...metadata,
+                quizTitle: quiz?.title,
+                attemptNumber: attempt?.attemptNumber,
+            },
+        });
+    } catch (error: any) {
+        if (error?.code === 11000) {
+            return { pointsEarned: 0, newBalance: balanceBefore, transaction: null };
+        }
+        throw error;
+    }
 
     await updateLeaderboardEntry(userId, quizId, points, attempt, courseId, batchId);
 
@@ -157,7 +162,6 @@ const getStats = async (userId: string, courseId?: string, batchId?: string) => 
     const totalZames = completedAttempts.reduce((sum, a) => sum + (a.zamesEarned || 0), 0);
     const completedCount = completedAttempts.length;
     const totalMarks = completedAttempts.reduce((sum, a) => sum + a.earnedMarks, 0);
-    const totalPossible = completedAttempts.reduce((sum, a) => sum + a.totalMarks, 0);
     const averageScore = completedCount > 0 ? Math.round(totalMarks / completedCount) : 0;
     const highestScore = completedCount > 0 ? Math.max(...completedAttempts.map(a => a.percentage)) : 0;
 
@@ -171,12 +175,12 @@ const getStats = async (userId: string, courseId?: string, batchId?: string) => 
         submittedAt: a.submittedAt,
     }));
 
-    let currentRank = null;
+    let currentRank: number | null = null;
     try {
-        const rankResult = await LeaderboardService.getUserRank(userId, 'all_time', courseId, batchId);
+        const rankResult = await LeaderboardService.getUserRank(userId, "all_time", courseId, batchId);
         currentRank = rankResult?.rank || null;
     } catch {
-        currentRank = null;
+        // rank lookup is best-effort; keep null
     }
 
     return {

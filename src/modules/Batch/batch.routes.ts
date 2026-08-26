@@ -3,7 +3,21 @@ import validateRequest from '../../middlewares/validateRequest.js';
 import { BatchController } from './batch.controller.js';
 import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 import { createBatchSchema, updateBatchSchema, updateBatchStatusSchema } from './batch.validation.js';
+import env from '../../config/env.js';
+
 const router = express.Router();
+
+const allowCronSecret = (
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+) => {
+    const authHeader = req.headers.authorization;
+    if (env.CRON_SECRET && authHeader === `Bearer ${env.CRON_SECRET}`) {
+        return next();
+    }
+    requireAuth(req, res, () => requireAdmin(req, res, next));
+};
 
 // Public access for listing batches (used by student-facing views)
 router.get('/', BatchController.getAllBatches);
@@ -37,11 +51,10 @@ router.post(
     BatchController.transitionBatchStatus
 );
 
-// Trigger auto-transition (admin can run manually)
-router.post(
+// Trigger auto-transition (admin manually, or Vercel Cron with Bearer CRON_SECRET)
+router.all(
     '/auto-transition/run',
-    requireAuth,
-    requireAdmin,
+    allowCronSecret,
     BatchController.runAutoTransition
 );
 
