@@ -2,13 +2,13 @@ import nodemailer from 'nodemailer';
 import mongoose from 'mongoose';
 import env from '../config/env.js';
 import { logger } from '../config/logger.js';
-import { EmailLogModel, IEmailLog, EmailPriority } from '../models/email.model.js';
+import { EmailLogModel, type IEmailLog, type EmailPriority } from '../models/email.model.js';
 
 // ============================================================================
 // 1. CONFIGURATION & TRANSPORTER
 // ============================================================================
 
-const createTransporter = () => {
+export const createTransporter = () => {
     // Priority: Explicit Host/Port > Gmail Service
     if (env.EMAIL_HOST) {
         return nodemailer.createTransport({
@@ -125,8 +125,9 @@ const isServerless = process.env.VERCEL || process.env.VERCEL_ENV === 'productio
 // Initialize Worker only in non-serverless environments
 let worker: EmailWorker | null = null;
 
-export const initializeEmailWorker = () => {
+export const initializeEmailWorker = async () => {
     logger.info(`Email Worker: isServerless=${isServerless}, VERCEL=${process.env.VERCEL}, VERCEL_ENV=${process.env.VERCEL_ENV}`);
+
     if (!isServerless && !worker) {
         worker = new EmailWorker();
     }
@@ -165,6 +166,7 @@ export const queueEmail = async (
         }
     }
 
+    // MongoDB-based queue
     try {
         // Idempotency Check
         if (options.eventId && options.eventType) {

@@ -13,6 +13,10 @@ const sendResponse = <T>(
         data: data.data || null
     };
 
+    if (data.serverTimestamp !== undefined) {
+        response.serverTimestamp = data.serverTimestamp;
+    }
+
     res.status(data.statusCode).json(response);
 };
 

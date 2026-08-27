@@ -6,7 +6,7 @@ import ApiError from "../errors/ApiError.js";
 const EnvSchema = z.object({
     // General
     PORT: z.string().default("5000"),
-    NODE_ENV: z.enum(["development", "production", "stage"]),
+    NODE_ENV: z.enum(["development", "production", "stage", "test"]),
     LOG_LEVEL: z.string().default("info"),
     // Database
     MONGO_URI: z.string(),
@@ -22,15 +22,9 @@ const EnvSchema = z.object({
     GOOGLE_CLIENT_SECRET: z.string(),
     CLIENT_URL: z.string().optional(),
 
-    // JWT (DEPRECATED - will be removed after migration)
-    JWT_SECRET: z.string().optional(),
-    JWT_REFRESH_SECRET: z.string().optional().default("yourRefreshSecretKey"),
-    JWT_EXPIRY: z.string().optional(),
-
     SSL_STORE_ID: z.string(),
     SSL_STORE_PASSWORD: z.string(),
     SSL_IS_LIVE: z.string(),
-    SSL_PAYMENT_API: z.string(),
     SSL_VALIDATION_API: z.string(),
     SERVER_URL: z.string(),
     MA_FRONTEND_URL: z.string(),
@@ -70,6 +64,17 @@ const EnvSchema = z.object({
 
     // Groq AI API Key
     GROQ_API_KEY: z.string().optional(),
+
+    // Sentry
+    SENTRY_DSN: z.string().optional(),
+    SENTRY_TRACES_SAMPLE_RATE: z.string().optional().default('0.1'),
+
+    // Cron authentication (Vercel Cron sends this as Bearer token)
+    CRON_SECRET: z.string().optional(),
+
+    // Upstash Redis (persistent rate limiting; falls back to in-memory when unset)
+    UPSTASH_REDIS_REST_URL: z.string().optional(),
+    UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
 });
 
 // Validate and parse environment variables

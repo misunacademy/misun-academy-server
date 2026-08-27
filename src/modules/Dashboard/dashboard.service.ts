@@ -250,7 +250,8 @@ const getAdminDashboard = async () => {
     const topBatches = await BatchModel.find()
         .sort({ currentEnrollment: -1 })
         .limit(5)
-        .populate('courseId', 'title');
+        .populate('courseId', 'title')
+        .lean();
 
     // Recent enrollments
     const recentEnrollments = await EnrollmentModel.find()
@@ -260,7 +261,8 @@ const getAdminDashboard = async () => {
         .populate({
             path: 'batchId',
             populate: { path: 'courseId', select: 'title' }
-        });
+        })
+        .lean();
 
     return {
         overview: {
@@ -316,7 +318,8 @@ const getStudentDashboard = async (userId: string) => {
             path: 'batchId',
             populate: { path: 'courseId', select: 'title slug thumbnailImage' }
         })
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .lean();
 
     const enrolledCoursesCount = enrollments.length;
 

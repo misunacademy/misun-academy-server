@@ -45,6 +45,19 @@ router.post(
 );
 
 /**
+ * @route   POST /api/v1/upload/restricted
+ * @desc    Upload sensitive document (authenticated delivery, signed access only)
+ * @access  Protected
+ */
+router.post(
+    '/restricted',
+    requireAuth,
+    upload.single('image'),
+    handleMulterError,
+    UploadController.uploadRestricted
+);
+
+/**
  * @route   DELETE /api/v1/upload/:publicId
  * @desc    Delete image from Cloudinary
  * @access  Protected (only owner or admin can delete)

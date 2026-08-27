@@ -4,9 +4,6 @@ import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { LessonService } from './lesson.service.js';
 
-/**
- * Create a new lesson for a module
- */
 const createLesson = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params as { moduleId: string };
     const lessonData = req.body;
@@ -21,9 +18,6 @@ const createLesson = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-/**
- * Get all lessons for a module
- */
 const getModuleLessons = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params as { moduleId: string };
     const { type } = req.query as { type?: string };
@@ -38,9 +32,6 @@ const getModuleLessons = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-/**
- * Get lesson by ID
- */
 const getLessonById = catchAsync(async (req: Request, res: Response) => {
     const { lessonId } = req.params as { lessonId: string };
 
@@ -54,9 +45,6 @@ const getLessonById = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-/**
- * Update lesson
- */
 const updateLesson = catchAsync(async (req: Request, res: Response) => {
     const { lessonId } = req.params as { lessonId: string };
     const updateData = req.body;
@@ -71,9 +59,6 @@ const updateLesson = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-/**
- * Delete lesson
- */
 const deleteLesson = catchAsync(async (req: Request, res: Response) => {
     const { lessonId } = req.params as { lessonId: string };
 
@@ -87,9 +72,6 @@ const deleteLesson = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-/**
- * Reorder lessons in a module
- */
 const reorderLessons = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params as { moduleId: string };
     const { lessonOrders } = req.body;

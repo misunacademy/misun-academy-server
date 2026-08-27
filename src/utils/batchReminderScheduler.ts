@@ -5,7 +5,6 @@
 
 import { BatchModel } from '../modules/Batch/batch.model.js';
 import { EnrollmentModel } from '../modules/Enrollment/enrollment.model.js';
-import { UserModel } from '../modules/User/user.model.js';
 import { BatchStatus, EnrollmentStatus } from '../types/common.js';
 import { sendCourseBatchStartReminderEmail } from '../services/courseEmailRouter.js';
 import { logger } from '../config/logger.js';

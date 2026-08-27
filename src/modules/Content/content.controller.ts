@@ -73,40 +73,35 @@ const getModuleResources = catchAsync(async (req: Request, res: Response) => {
 });
 
 /**
- * Update lesson progress
+ * Get quizzes for a module with attempt progress
  */
-const updateLessonProgress = catchAsync(async (req: Request, res: Response) => {
-    const { lessonId } = req.params as { lessonId: string };
+const getModuleQuizzes = catchAsync(async (req: Request, res: Response) => {
+    const { moduleId } = req.params as { moduleId: string };
     const enrollment = (req as any).enrollment;
-    const { watchTime, lastWatchedPosition } = req.body;
 
-    const result = await ContentService.updateLessonProgress(
-        enrollment._id,
-        lessonId,
-        watchTime,
-        lastWatchedPosition
-    );
+    const result = await ContentService.getModuleQuizzes(enrollment._id, moduleId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
-        message: 'Progress updated successfully',
+        message: 'Quizzes retrieved successfully',
         data: result,
     });
 });
 
 /**
- * Get batch overall progress
+ * Get unified curriculum (lessons + quizzes) for a module
  */
-const getBatchProgress = catchAsync(async (req: Request, res: Response) => {
+const getModuleCurriculum = catchAsync(async (req: Request, res: Response) => {
+    const { moduleId } = req.params as { moduleId: string };
     const enrollment = (req as any).enrollment;
 
-    const result = await ContentService.getBatchProgress(enrollment._id);
+    const result = await ContentService.getModuleCurriculum(enrollment._id, moduleId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
-        message: 'Progress retrieved successfully',
+        message: 'Curriculum retrieved successfully',
         data: result,
     });
 });
@@ -116,6 +111,6 @@ export const ContentController = {
     getModuleLessons,
     getLessonDetails,
     getModuleResources,
-    updateLessonProgress,
-    getBatchProgress,
+    getModuleQuizzes,
+    getModuleCurriculum,
 };

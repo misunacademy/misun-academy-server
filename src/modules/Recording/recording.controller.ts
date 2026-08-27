@@ -3,10 +3,8 @@ import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { RecordingService } from './recording.service.js';
-import { CourseModel } from '../Course/course.model.js';
 import { Role } from '../../types/role.js';
 
-// Admin/Instructor: Create recording
 const createRecording = catchAsync(async (req: Request, res: Response) => {
     const userId = (req as any).user.id;
     const recording = await RecordingService.createRecording(req.body, userId);
@@ -19,72 +17,20 @@ const createRecording = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-// Admin/Instructor: Get all recordings with filters
-// Instructors automatically see only recordings for their assigned courses.
 const getAllRecordings = catchAsync(async (req: Request, res: Response) => {
     const { courseId, batchId, isPublished, page, limit } = req.query;
     const user = (req as any).user;
     const parsedPage = page ? parseInt(page as string) : 1;
     const parsedLimit = limit ? parseInt(limit as string) : 20;
 
-    // For instructors, restrict to their assigned courses
-    let allowedCourseId = courseId as string | undefined;
-    if (user.role === Role.INSTRUCTOR) {
-        const assignedCourses = await CourseModel.find(
-            { instructorId: user.id },
-            '_id'
-        ).lean();
-        const assignedIds = assignedCourses.map((c: any) => c._id.toString());
-
-        if (assignedIds.length === 0) {
-            return sendResponse(res, {
-                statusCode: StatusCodes.OK,
-                success: true,
-                message: 'Recordings retrieved successfully',
-                data: [],
-                meta: { page: parsedPage, limit: parsedLimit, total: 0, totalPages: 0 },
-            });
-        }
-
-        if (courseId && !assignedIds.includes(courseId as string)) {
-            // Requested course not assigned to this instructor
-            return sendResponse(res, {
-                statusCode: StatusCodes.OK,
-                success: true,
-                message: 'Recordings retrieved successfully',
-                data: [],
-                meta: { page: 1, limit: 20, total: 0, totalPages: 0 },
-            });
-        }
-        if (!courseId) {
-            // No specific course requested — must pass courseIds array
-            // Use the service's courseIds filter (extend call below)
-            allowedCourseId = undefined; // handled via courseIds
-            return sendResponse(res, await (async () => {
-                const result = await RecordingService.getAllRecordings({
-                    courseIds: assignedIds,
-                    batchId: batchId as string,
-                    isPublished: isPublished === 'true' ? true : isPublished === 'false' ? false : undefined,
-                    page: parsedPage,
-                    limit: parsedLimit,
-                });
-                return {
-                    statusCode: StatusCodes.OK,
-                    success: true,
-                    message: 'Recordings retrieved successfully',
-                    data: result.data,
-                    meta: result.meta,
-                };
-            })());
-        }
-    }
-
     const result = await RecordingService.getAllRecordings({
-        courseId: allowedCourseId,
+        courseId: courseId as string,
         batchId: batchId as string,
         isPublished: isPublished === 'true' ? true : isPublished === 'false' ? false : undefined,
         page: parsedPage,
         limit: parsedLimit,
+        userId: user.role === Role.INSTRUCTOR ? user.id : undefined,
+        userRole: user.role,
     });
 
     sendResponse(res, {
@@ -96,8 +42,6 @@ const getAllRecordings = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-
-// Admin: Get recording by ID
 const getRecordingById = catchAsync(async (req: Request, res: Response) => {
     const { recordingId } = req.params as { recordingId: string };
     const recording = await RecordingService.getRecordingById(recordingId);
@@ -110,7 +54,6 @@ const getRecordingById = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-// Student: Get recordings for enrolled batch
 const getBatchRecordings = catchAsync(async (req: Request, res: Response) => {
     const { batchId } = req.params as { batchId: string };
     const recordings = await RecordingService.getBatchRecordings(batchId);
@@ -123,7 +66,6 @@ const getBatchRecordings = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-// Student: Get all recordings for all enrolled batches
 const getStudentRecordings = catchAsync(async (req: Request, res: Response) => {
     const userId = (req as any).user.id;
     const recordings = await RecordingService.getStudentRecordings(userId);
@@ -136,10 +78,10 @@ const getStudentRecordings = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-// Admin: Update recording
 const updateRecording = catchAsync(async (req: Request, res: Response) => {
     const { recordingId } = req.params as { recordingId: string };
-    const recording = await RecordingService.updateRecording(recordingId, req.body);
+    const userId = (req as any).user.id;
+    const recording = await RecordingService.updateRecording(recordingId, req.body, userId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -149,7 +91,6 @@ const updateRecording = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-// Admin: Delete recording
 const deleteRecording = catchAsync(async (req: Request, res: Response) => {
     const { recordingId } = req.params as { recordingId: string };
     await RecordingService.deleteRecording(recordingId);
@@ -162,7 +103,6 @@ const deleteRecording = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-// Student: Increment view count
 const incrementViewCount = catchAsync(async (req: Request, res: Response) => {
     const { recordingId } = req.params as { recordingId: string };
     await RecordingService.incrementViewCount(recordingId);

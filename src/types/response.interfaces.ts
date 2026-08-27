@@ -12,6 +12,7 @@ export interface IGenericResponse<T> {
     message: string;
     meta?: IResponseMeta;
     data: T | null;
+    serverTimestamp?: number;
 }
 
 export interface IErrorMessage {

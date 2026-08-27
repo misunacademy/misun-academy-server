@@ -1,6 +1,6 @@
 import express from 'express';
 import { DashboardController } from './dashboard.controller.js';
-import { requireAuth, requireAdmin, requireEmployee, requireInstructor } from '../../middlewares/betterAuth.js';
+import { requireAuth, requireAdmin, requireInstructor, requireLearner } from '../../middlewares/betterAuth.js';
 
 const router = express.Router();
 
@@ -31,6 +31,7 @@ router.get(
 router.get(
     '/student',
     requireAuth,
+    requireLearner,
     DashboardController.getStudentDashboard
 );
 

@@ -13,9 +13,9 @@ export const seedCourses = async () => {
         // Try to require the client mock file
         // Note: this file is TypeScript but our dev environment uses ts-node so `require` should work.
         // Fallback: if not found, skip.
-        let courses: any[] = [];
+        const courses: any[] = [];
         try {
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
+             
             // courses = require('D:/projects/misun academy/misun-academy-client/src/data/mockCourse.ts').default || require('D:/projects/misun academy/misun-academy-client/src/data/mockCourse.ts');
         } catch (err) {
             console.warn('Could not load mockCourse from client; please provide data or copy it to server:', err);

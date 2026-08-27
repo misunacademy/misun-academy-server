@@ -2,27 +2,29 @@ import http, { Server } from 'http';
 import app from './app.js';
 import env from './config/env.js';
 import { logger } from './config/logger.js';
-import { connectDB } from './config/database.js';
+import { connectDB, disconnectDB } from './config/database.js';
 import { initializeEmailWorker } from './services/emailService.js';
 import { scheduleEmployeeBirthdayReminders } from './utils/employeeBirthdayReminderScheduler.js';
+import { scheduleBatchTransitions } from './utils/batchScheduler.js';
+import { scheduleBatchReminders } from './utils/batchReminderScheduler.js';
+import { initializeSocketIO, closeSocketIO } from './services/socketService.js';
 
 let server: Server | null = null;
 let dbConnected = false;
 
-// Connect to database on startup
 async function initializeDatabase() {
     if (!dbConnected) {
         try {
             await connectDB();
             logger.info('Database connected');
-            console.log('✅ Database connected successfully');
             dbConnected = true;
-            
-            // Initialize email worker after DB connection
+
             initializeEmailWorker();
             scheduleEmployeeBirthdayReminders();
+            scheduleBatchTransitions();
+            scheduleBatchReminders();
         } catch (error) {
-            console.error('❌ Error connecting to database:', error);
+            logger.error(error, 'Error connecting to database');
             throw error;
         }
     }
@@ -33,63 +35,69 @@ async function startServer() {
         await initializeDatabase();
 
         server = http.createServer(app);
+
+        initializeSocketIO(server);
+
         server.listen(env.PORT, () => {
-            console.log(`🚀 Server is running on port ${env.PORT}`);
+            logger.info(`Server is running on port ${env.PORT}`);
         });
-        // await seedSuperAdmin();
+
         handleProcessEvents();
     } catch (error) {
-        console.error('❌ Error during server startup:', error);
+        logger.error(error, 'Error during server startup');
         process.exit(1);
     }
 }
 
-/**
- * Gracefully shutdown the server and close database connections.
- * @param {string} signal - The termination signal received.
- */
 async function gracefulShutdown(signal: string) {
-    console.warn(`🔄 Received ${signal}, shutting down gracefully...`);
+    logger.warn(`Received ${signal}, shutting down gracefully...`);
+
+    const shutdownTimeout = setTimeout(() => {
+        logger.error('Forced shutdown after timeout');
+        process.exit(1);
+    }, 30000);
 
     if (server) {
         server.close(async () => {
-            console.log('✅ HTTP server closed.');
-
             try {
-                console.log('✅ Database connection closed.');
+                closeSocketIO();
+                await disconnectDB();
+                logger.info('Graceful shutdown complete');
             } catch (error) {
-                console.error('❌ Error closing database connection:', error);
+                logger.error(error, 'Error during shutdown');
+            } finally {
+                clearTimeout(shutdownTimeout);
+                process.exit(0);
             }
-
-            process.exit(0);
         });
+
+        // Force close connections after 10s
+        setTimeout(() => {
+            server?.closeAllConnections?.();
+        }, 10000);
     } else {
+        clearTimeout(shutdownTimeout);
         process.exit(0);
     }
 }
 
-/**
- * Handle system signals and unexpected errors.
- */
 function handleProcessEvents() {
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
     process.on('uncaughtException', (error) => {
-        console.error('💥 Uncaught Exception:', error);
+        logger.error(error, 'Uncaught Exception');
         gracefulShutdown('uncaughtException');
     });
 
     process.on('unhandledRejection', (reason) => {
-        console.error('💥 Unhandled Rejection:', reason);
+        logger.error(reason as Error, 'Unhandled Rejection');
         gracefulShutdown('unhandledRejection');
     });
 }
 
-// Start the application (for local development and VPS)
 if (!process.env.VERCEL) {
     startServer();
 }
 
-// Export app for Vercel serverless
 export default app;

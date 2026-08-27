@@ -8,7 +8,11 @@ import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
 import { sendCertificateApprovedEmail, sendCertificateIssuedEmail } from '../../services/misunAcademyEmails.js';
 import { UserModel } from '../User/user.model.js';
+import { recordAudit } from '../../models/auditLog.model.js';
 import mongoose from 'mongoose';
+import crypto from 'crypto';
+import { NotificationService } from '../Notification/notification.service.js';
+import { logger } from '../../config/logger.js';
 
 const findCertificateByIdentifier = async (identifier: string) => {
     if (mongoose.Types.ObjectId.isValid(identifier)) {
@@ -21,48 +25,46 @@ const findCertificateByIdentifier = async (identifier: string) => {
 /**
  * Generate unique certificate ID
  */
-const generateCertificateId = (): string => {
-    const timestamp = Date.now().toString(36).toUpperCase();
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-    return `CERT-${timestamp}-${random}`;
-};
+const generateCertificateId = (): string =>
+    `CERT-${crypto.randomUUID()}`;
 
 /**
  * Check if enrollment is eligible for certificate
  * Requirements: All modules must be at 100% completion
+ * Optionally verifies the enrollment belongs to the specified user.
  */
-const checkEligibility = async (enrollmentId: string): Promise<boolean> => {
-    const enrollment = await EnrollmentModel.findById(enrollmentId).populate({
+const checkEligibility = async (enrollmentId: string, userId?: string): Promise<{ isEligible: boolean; enrollment?: any }> => {
+    const query: any = { _id: enrollmentId };
+    if (userId) query.userId = userId;
+
+    const enrollment = await EnrollmentModel.findOne(query).populate({
         path: 'batchId',
         populate: { path: 'courseId' },
-    });
+    }).lean();
     if (!enrollment) {
-        return false;
+        return { isEligible: false };
     }
 
-    // Check if enrollment is active or completed
     if (enrollment.status !== EnrollmentStatus.Active && enrollment.status !== EnrollmentStatus.Completed) {
-        return false;
+        return { isEligible: false };
     }
 
-    // When certificate is not available for the course, not eligible
     const course = (enrollment.batchId as any)?.courseId;
     if (!course || course.isCertificateAvailable === false) {
-        return false;
+        return { isEligible: false };
     }
 
-    // Check if all modules are completed (100%)
-    const moduleProgress = await ModuleProgressModel.find({ enrollmentId });
+    const moduleProgress = await ModuleProgressModel.find({ enrollmentId }).lean();
 
     if (moduleProgress.length === 0) {
-        return false;  // No progress tracked
+        return { isEligible: false };
     }
 
     const allModulesCompleted = moduleProgress.every(
         (progress) => progress.completionPercentage === 100
     );
 
-    return allModulesCompleted;
+    return { isEligible: allModulesCompleted, enrollment };
 };
 
 /**
@@ -71,13 +73,13 @@ const checkEligibility = async (enrollmentId: string): Promise<boolean> => {
  */
 const requestCertificate = async (enrollmentId: string, userId: string) => {
     // Verify ownership
-    const enrollment = await EnrollmentModel.findOne({ _id: enrollmentId, userId });
+    const enrollment = await EnrollmentModel.findOne({ _id: enrollmentId, userId }).lean();
     if (!enrollment) {
         throw new ApiError(StatusCodes.FORBIDDEN, 'Access denied');
     }
 
     // Check if already has certificate (pending or active)
-    const existingCertificate = await CertificateModel.findOne({ enrollmentId });
+    const existingCertificate = await CertificateModel.findOne({ enrollmentId }).lean();
     if (existingCertificate) {
         if (existingCertificate.status === CertificateStatus.Pending) {
             throw new ApiError(StatusCodes.CONFLICT, 'Certificate request is pending admin approval');
@@ -85,8 +87,7 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
         throw new ApiError(StatusCodes.CONFLICT, 'Certificate already issued for this enrollment');
     }
 
-    // Check eligibility (100% completion)
-    const isEligible = await checkEligibility(enrollmentId);
+    const { isEligible } = await checkEligibility(enrollmentId);
     if (!isEligible) {
         throw new ApiError(
             StatusCodes.BAD_REQUEST,
@@ -95,7 +96,7 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
     }
 
     // Get batch and course details
-    const batch = await BatchModel.findById(enrollment.batchId).populate('courseId');
+    const batch = await BatchModel.findById(enrollment.batchId).populate('courseId').lean();
     if (!batch) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
     }
@@ -124,6 +125,24 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
         issuedBy: userId,  // Requested by student
     });
 
+    const courseName = (course as any)?.title || 'Course';
+    setImmediate(async () => {
+        try {
+            const user = await UserModel.findById(userId).lean();
+            if (user) {
+                await NotificationService.createNotificationForAdmins({
+                    type: 'certificate_requested',
+                    title: 'Certificate Request',
+                    message: `${user.name} requested a certificate for ${courseName} - ${batch.title}`,
+                    link: '/dashboard/admin/certificates',
+                    relatedTo: { model: 'Certificate', id: certificate._id.toString() },
+                });
+            }
+        } catch (error) {
+            logger.error(error, 'Failed to send certificate request notification');
+        }
+    });
+
     return certificate;
 };
 
@@ -147,6 +166,14 @@ const approveCertificate = async (certificateId: string, approvedBy: string) => 
     (certificate as any).approvedAt = new Date();
     await certificate.save();
 
+    await recordAudit({
+        actor: approvedBy,
+        action: 'certificate.approve',
+        targetType: 'Certificate',
+        targetId: certificate._id?.toString(),
+        metadata: { certificateId: certificate.certificateId, enrollmentId: certificate.enrollmentId?.toString() },
+    });
+
     // Update enrollment
     await EnrollmentModel.findByIdAndUpdate(certificate.enrollmentId, {
         certificateIssued: true,
@@ -156,10 +183,10 @@ const approveCertificate = async (certificateId: string, approvedBy: string) => 
 
     // Send certificate approved email
     try {
-        const enrollment = await EnrollmentModel.findById(certificate.enrollmentId).populate('batchId');
+        const enrollment = await EnrollmentModel.findById(certificate.enrollmentId).populate('batchId').lean();
         if (enrollment) {
-            const user = await UserModel.findById(enrollment.userId);
-            const batch = await BatchModel.findById(enrollment.batchId).populate('courseId');
+            const user = await UserModel.findById(enrollment.userId).lean();
+            const batch = await BatchModel.findById(enrollment.batchId).populate('courseId').lean();
             if (user && batch && batch.courseId) {
                 sendCertificateApprovedEmail(
                     user.email,
@@ -173,6 +200,27 @@ const approveCertificate = async (certificateId: string, approvedBy: string) => 
         console.error('Failed to send certificate approved email:', emailError);
     }
 
+    setImmediate(async () => {
+        try {
+            const enrollment = await EnrollmentModel.findById(certificate.enrollmentId).lean();
+            if (enrollment) {
+                const batch = await BatchModel.findById(certificate.batchId).populate('courseId').lean();
+                const courseName = (batch?.courseId as any)?.title || 'Course';
+                const studentUserId = enrollment.userId.toString();
+                await NotificationService.createNotification({
+                    userId: studentUserId,
+                    type: 'certificate_approved',
+                    title: 'Certificate Approved',
+                    message: `Your certificate for ${courseName} has been approved!`,
+                    link: '/my-classes',
+                    relatedTo: { model: 'Certificate', id: certificate._id.toString() },
+                });
+            }
+        } catch (error) {
+            logger.error(error, 'Failed to send certificate approved notification');
+        }
+    });
+
     return certificate;
 };
 
@@ -182,13 +230,12 @@ const approveCertificate = async (certificateId: string, approvedBy: string) => 
  */
 const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
     // Check if already issued
-    const existingCertificate = await CertificateModel.findOne({ enrollmentId });
+    const existingCertificate = await CertificateModel.findOne({ enrollmentId }).lean();
     if (existingCertificate) {
         throw new ApiError(StatusCodes.CONFLICT, 'Certificate already exists for this enrollment');
     }
 
-    // Check eligibility
-    const isEligible = await checkEligibility(enrollmentId);
+    const { isEligible } = await checkEligibility(enrollmentId);
     if (!isEligible) {
         throw new ApiError(
             StatusCodes.BAD_REQUEST,
@@ -202,13 +249,17 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
         .populate({
             path: 'batchId',
             populate: { path: 'courseId', select: 'title' },
-        });
+        }).lean();
 
     if (!enrollment) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
     }
 
     const batch = enrollment.batchId as any;
+    const learnerId =
+        typeof enrollment.userId === 'object' && enrollment.userId !== null
+            ? (enrollment.userId as any)._id.toString()
+            : String(enrollment.userId);
 
     // Generate certificate
     const certificateId = generateCertificateId();
@@ -236,9 +287,17 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
         status: EnrollmentStatus.Completed
     });
 
+    await recordAudit({
+        actor: issuedBy,
+        action: 'certificate.issue',
+        targetType: 'Certificate',
+        targetId: certificate._id?.toString(),
+        metadata: { certificateId: certificate.certificateId, enrollmentId },
+    });
+
     // Send certificate issued email
     try {
-        const user = await UserModel.findById(enrollment.userId);
+        const user = await UserModel.findById(learnerId).lean();
         if (user && batch && batch.courseId) {
             sendCertificateIssuedEmail(
                 user.email,
@@ -251,6 +310,22 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
         console.error('Failed to send certificate issued email:', emailError);
     }
 
+    setImmediate(async () => {
+        try {
+            const courseName = batch?.courseId?.title || 'Course';
+            await NotificationService.createNotification({
+                userId: learnerId,
+                type: 'certificate_issued',
+                title: 'Certificate Issued',
+                message: `Your certificate for ${courseName} has been issued!`,
+                link: '/my-classes',
+                relatedTo: { model: 'Certificate', id: certificate._id.toString() },
+            });
+        } catch (error) {
+            logger.error(error, 'Failed to send certificate issued notification');
+        }
+    });
+
     return certificate;
 };
 
@@ -258,7 +333,7 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
  * Get certificate by enrollment
  */
 const getCertificateByEnrollment = async (enrollmentId: string, userId: string) => {
-    const enrollment = await EnrollmentModel.findOne({ _id: enrollmentId, userId });
+    const enrollment = await EnrollmentModel.findOne({ _id: enrollmentId, userId }).lean();
     if (!enrollment) {
         throw new ApiError(StatusCodes.FORBIDDEN, 'Access denied');
     }
@@ -268,7 +343,7 @@ const getCertificateByEnrollment = async (enrollmentId: string, userId: string) 
         .populate({
             path: 'batchId',
             populate: { path: 'courseId', select: 'title' },
-        });
+        }).lean();
 
     if (!certificate) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Certificate not found');
@@ -286,7 +361,7 @@ const verifyCertificate = async (certificateId: string) => {
         .populate({
             path: 'batchId',
             populate: { path: 'courseId', select: 'title' },
-        });
+        }).lean();
 
     if (!certificate) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Certificate not found');
@@ -347,6 +422,34 @@ const revokeCertificate = async (
     (certificate as any).revokedBy = revokedBy;
     await certificate.save();
 
+    await recordAudit({
+        actor: revokedBy,
+        action: 'certificate.revoke',
+        targetType: 'Certificate',
+        targetId: certificate._id?.toString(),
+        metadata: { certificateId: certificate.certificateId, reason },
+    });
+
+    setImmediate(async () => {
+        try {
+            const enrollment = await EnrollmentModel.findById(certificate.enrollmentId).lean();
+            if (enrollment) {
+                const batch = await BatchModel.findById(certificate.batchId).populate('courseId').lean();
+                const courseName = (batch?.courseId as any)?.title || 'Course';
+                await NotificationService.createNotification({
+                    userId: enrollment.userId.toString(),
+                    type: 'certificate_rejected',
+                    title: 'Certificate Request Not Approved',
+                    message: `Your certificate request for ${courseName} was not approved. Reason: ${reason}`,
+                    link: '/my-classes',
+                    relatedTo: { model: 'Certificate', id: certificate._id.toString() },
+                });
+            }
+        } catch (error) {
+            logger.error(error, 'Failed to send certificate rejected notification');
+        }
+    });
+
     return certificate;
 };
 
@@ -354,12 +457,12 @@ const revokeCertificate = async (
  * Attach enrollment progress percentage to certificates
  */
 const enrichCertificateWithCompletion = async (certificate: any) => {
-    let completionPercentage = 0;
+    let completionPercentage: number;
 
     try {
         const progress = await ProgressService.getBatchProgress(certificate.enrollmentId.toString());
         completionPercentage = progress?.overallProgress ?? 0;
-    } catch (err) {
+    } catch {
         completionPercentage = 0;
     }
 
@@ -398,7 +501,8 @@ const getAllCertificates = async (params?: { status?: string; page?: number; lim
         })
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(safeLimit);
+        .limit(safeLimit)
+        .lean();
 
     const data = await Promise.all(certificates.map(enrichCertificateWithCompletion));
 
@@ -456,7 +560,8 @@ const getUserCertificates = async (userId: string) => {
             path: 'batchId',
             populate: { path: 'courseId', select: 'title thumbnail' },
         })
-        .sort({ issueDate: -1 });
+        .sort({ issueDate: -1 })
+        .lean();
 
     return Promise.all(certificates.map(enrichCertificateWithCompletion));
 };
@@ -471,7 +576,8 @@ const getPendingCertificates = async () => {
             path: 'batchId',
             populate: { path: 'courseId', select: 'title' },
         })
-        .sort({ issueDate: -1 });
+        .sort({ issueDate: -1 })
+        .lean();
 
     return Promise.all(certificates.map(enrichCertificateWithCompletion));
 };

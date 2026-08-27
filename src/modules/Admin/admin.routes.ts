@@ -1,6 +1,6 @@
 import express from 'express';
 import validateRequest from '../../middlewares/validateRequest.js';
-import { loginValidationSchema, sendNewsUpdateSchema, sendBatchProgressReminderSchema, sendBatchIncompleteReminderSchema } from './admin.validation.js';
+import { loginValidationSchema, adminRegisterSchema, updateUserSchema, updateUserStatusSchema, sendNewsUpdateSchema, sendBatchProgressReminderSchema, sendBatchIncompleteReminderSchema } from './admin.validation.js';
 import { AdminAuthController } from './admin.controller.js';
 import { requireAuth, requireAdmin, requireSuperAdmin } from '../../middlewares/betterAuth.js';
 
@@ -33,6 +33,7 @@ router.post(
     '/users',
     requireAuth,
     requireAdmin,  // Admin can create instructors/employees
+    validateRequest(adminRegisterSchema),
     AdminAuthController.createAdmin
 );
 
@@ -40,6 +41,7 @@ router.put(
     '/users/:id',
     requireAuth,
     requireAdmin,
+    validateRequest(updateUserSchema),
     AdminAuthController.updateUser
 );
 
@@ -47,13 +49,14 @@ router.patch(
     '/users/:id/status',
     requireAuth,
     requireAdmin,  // Both can suspend users
+    validateRequest(updateUserStatusSchema),
     AdminAuthController.updateUserStatus
 );
 
 router.delete(
     '/users/:id',
     requireAuth,
-    requireAdmin,  // Only SuperAdmin can delete
+    requireSuperAdmin,
     AdminAuthController.deleteUser
 );
 

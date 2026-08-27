@@ -3,6 +3,7 @@ import { getAuth } from '../config/betterAuth.js';
 import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
 import { EnrollmentModel } from '../modules/Enrollment/enrollment.model.js';
 import { EnrollmentStatus } from '../types/common.js';
+import { logger } from '../config/logger.js';
 
 const router = Router();
 
@@ -10,7 +11,7 @@ const router = Router();
 // Parse JSON only for custom server action routes.
 router.use('/server', express.json(), express.urlencoded({ extended: true }));
 
-let cachedBetterAuthHandler: ((req: Request, res: Response) => unknown) | null = null;
+
 
 const buildAuthContext = async (req: Request) => {
   return {
@@ -68,7 +69,7 @@ const runAuthAction = async (
     const response = await action();
     return await forwardBetterAuthResponse(res, response);
   } catch (error) {
-    console.error(`Better Auth server action error (${actionName}):`, error);
+    logger.error(error, `Better Auth server action error (${actionName})`);
     return res.status(500).json({
       success: false,
       message: `Authentication action failed: ${actionName}`,
@@ -267,7 +268,7 @@ router.get('/me', async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    console.error('GET /auth/me error:', error);
+    logger.error(error, 'GET /auth/me error');
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch authenticated user',
@@ -275,23 +276,12 @@ router.get('/me', async (req: Request, res: Response) => {
   }
 });
 
-// App-level catch-all handler for Better Auth endpoints.
-// Keep this outside router mounting to preserve full request path.
 export const betterAuthCatchAll = async (req: Request, res: Response) => {
   try {
-    if (!cachedBetterAuthHandler) {
-      const auth = getAuth();
-      cachedBetterAuthHandler = toNodeHandler(auth);
-    }
-
-    const handler = cachedBetterAuthHandler;
-    if (!handler) {
-      throw new Error('Better Auth handler is unavailable');
-    }
-
+    const handler = toNodeHandler(getAuth());
     return handler(req, res);
   } catch (error) {
-    console.error('Better Auth route error:', error);
+    logger.error(error, 'Better Auth route error');
     return res.status(500).json({
       success: false,
       message: 'Authentication service not initialized',

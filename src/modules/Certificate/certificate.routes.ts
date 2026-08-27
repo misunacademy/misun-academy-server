@@ -1,6 +1,8 @@
 import express from 'express';
 import { CertificateController } from './certificate.controller.js';
 import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
+import validateRequest from '../../middlewares/validateRequest.js';
+import { updateCertificateSchema, issueCertificateSchema } from '../../validations/certificate.validation.js';
 
 const router = express.Router();
 
@@ -59,6 +61,7 @@ router.post(
     '/issue/:enrollmentId',
     requireAuth,
     requireAdmin,
+    validateRequest(issueCertificateSchema),
     CertificateController.issueCertificate
 );
 
@@ -66,6 +69,7 @@ router.put(
     '/:certificateId',
     requireAuth,
     requireAdmin,
+    validateRequest(updateCertificateSchema),
     CertificateController.updateCertificate
 );
 

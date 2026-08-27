@@ -3,12 +3,42 @@ import ApiError from '../../errors/ApiError.js';
 import { RecordingModel } from './recording.model.js';
 import { IRecording } from './recording.interface.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { CourseModel } from '../Course/course.model.js';
+import { Role } from '../../types/role.js';
+import { NotificationService } from '../Notification/notification.service.js';
+import { logger } from '../../config/logger.js';
+
+const sendPublishNotification = (recording: IRecording, userId: string): void => {
+    setImmediate(async () => {
+        try {
+            await NotificationService.createBatchNotification(
+                recording.batchId.toString(),
+                {
+                    type: 'recording_published',
+                    title: 'New Live Recording',
+                    message: `New recording "${recording.title}" is now available`,
+                    link: '/my-classes',
+                },
+                userId
+            );
+        } catch (error) {
+            logger.error(error, 'Failed to send recording notification');
+        }
+    });
+};
+
+const getInstructorCourseIds = async (userId: string): Promise<string[]> => {
+    const assignedCourses = await CourseModel.find(
+        { instructorId: userId },
+        '_id'
+    ).lean();
+    return assignedCourses.map((c: any) => c._id.toString());
+};
 
 const createRecording = async (
     recordingData: Partial<IRecording>,
     createdBy: string
 ): Promise<IRecording> => {
-    // Build video URL based on source
     if (recordingData.videoSource && recordingData.videoId) {
         recordingData.videoUrl =
             recordingData.videoSource === 'youtube'
@@ -21,26 +51,45 @@ const createRecording = async (
         createdBy,
     });
 
+    if (recording.isPublished) {
+        sendPublishNotification(recording, createdBy);
+    }
+
     return recording;
 };
 
 const getAllRecordings = async (filters: {
     courseId?: string;
-    /** Filter by multiple course IDs (used to scope instructor access) */
     courseIds?: string[];
     batchId?: string;
     isPublished?: boolean;
     page?: number;
     limit?: number;
+    /** If true, restrict to courses assigned to the instructor */
+    userId?: string;
+    userRole?: string;
 }) => {
-    const { courseId, courseIds, batchId, isPublished, page = 1, limit = 20 } = filters;
+    const { courseId, courseIds, batchId, isPublished, page = 1, limit = 20, userId, userRole } = filters;
 
     const query: any = {};
-    if (courseId) {
+
+    if (userRole === Role.INSTRUCTOR && userId) {
+        const assignedIds = await getInstructorCourseIds(userId);
+
+        if (assignedIds.length === 0 || (courseId && !assignedIds.includes(courseId))) {
+            return {
+                data: [],
+                meta: { page, limit, total: 0, totalPages: 0 },
+            };
+        }
+
+        query.courseId = courseId ? courseId : { $in: assignedIds };
+    } else if (courseId) {
         query.courseId = courseId;
     } else if (courseIds && courseIds.length > 0) {
         query.courseId = { $in: courseIds };
     }
+
     if (batchId) query.batchId = batchId;
     if (isPublished !== undefined) query.isPublished = isPublished;
 
@@ -100,7 +149,7 @@ const getStudentRecordings = async (userId: string) => {
     const enrollments = await EnrollmentModel.find({
         userId: userId,
         status: 'active',
-    }).select('batchId');
+    }).select('batchId').lean();
 
     // console.log('Student Enrollments:', {
     //     userId,
@@ -139,9 +188,15 @@ const getStudentRecordings = async (userId: string) => {
 
 const updateRecording = async (
     recordingId: string,
-    updateData: Partial<IRecording>
+    updateData: Partial<IRecording>,
+    userId?: string
 ): Promise<IRecording> => {
-    // Update video URL if source or ID changed
+    const oldRecording = await RecordingModel.findById(recordingId).lean();
+
+    if (!oldRecording) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Recording not found');
+    }
+
     if (updateData.videoSource && updateData.videoId) {
         updateData.videoUrl =
             updateData.videoSource === 'youtube'
@@ -157,6 +212,10 @@ const updateRecording = async (
 
     if (!recording) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Recording not found');
+    }
+
+    if (!oldRecording.isPublished && recording.isPublished && userId) {
+        sendPublishNotification(recording, userId);
     }
 
     return recording;
@@ -185,4 +244,5 @@ export const RecordingService = {
     updateRecording,
     deleteRecording,
     incrementViewCount,
+    getInstructorCourseIds,
 };

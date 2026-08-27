@@ -12,6 +12,7 @@ const updateSettings = z.object({
     maWhatsappGroupLink: z.string().optional(),
     epFacebookGroupLink: z.string().optional(),
     epWhatsappGroupLink: z.string().optional(),
+    homeWhyVideoUrl: z.string().max(2048).optional(),
   }),
 });
 

@@ -3,10 +3,12 @@ import { CourseModel } from './course.model.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { LessonModel } from '../Lesson/lesson.model.js';
-import { ICourse } from './course.interface.js';
+import { QuizModel } from '../Quiz/quiz.model.js';
 import { UserModel } from '../User/user.model.js';
 import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
+import { NotificationService } from '../Notification/notification.service.js';
+import { logger } from '../../config/logger.js';
 
 export const CourseService = {
     async createCourse(data: any) {
@@ -32,18 +34,24 @@ export const CourseService = {
             CourseModel.countDocuments(filter),
         ]);
 
-        // Add students count for each course
-        const coursesWithCount = await Promise.all(
-            data.map(async (course:ICourse) => {
-                const count = await EnrollmentModel.countDocuments({ 
-                    course: course._id, 
-                    status: { $ne: 'cancelled' } 
-                });
-                return { ...course, studentsCount: count };
-            })
-        );
+        // Batch student count lookup to avoid N+1
+        const courseIds = data.map((c) => c._id);
+        const counts = courseIds.length > 0
+            ? await EnrollmentModel.aggregate([
+                { $match: { course: { $in: courseIds }, status: { $ne: 'cancelled' } } },
+                { $group: { _id: '$course', count: { $sum: 1 } } },
+              ])
+            : [];
+        const countByCourseId: Record<string, number> = {};
+        for (const entry of counts) {
+            countByCourseId[entry._id.toString()] = entry.count;
+        }
+        const coursesWithCount = data.map((course) => ({
+            ...course,
+            studentsCount: countByCourseId[course._id.toString()] || 0,
+        }));
 
-        return { data: coursesWithCount, total, page, perPage };
+        return { data: coursesWithCount, meta: { page, limit: perPage, total, totalPages: Math.ceil(total / perPage) } };
     },
 
     async getCourseById(id: string, opts: { batchId?: string } = {}) {
@@ -59,12 +67,13 @@ export const CourseService = {
 
         const modules = await ModuleModel.find(moduleQuery).sort({ orderIndex: 1 }).lean();
         
-        // Fetch lessons for each module
+        // Fetch lessons and quizzes for each module
         const curriculum = await Promise.all(
             modules.map(async (module: any) => {
-                const lessons = await LessonModel.find({ moduleId: module._id })
-                    .sort({ orderIndex: 1 })
-                    .lean();
+                const [lessons, quizzes] = await Promise.all([
+                    LessonModel.find({ moduleId: module._id }).sort({ orderIndex: 1 }).lean(),
+                    QuizModel.find({ moduleId: module._id, status: 'published' }).sort({ orderIndex: 1 }).lean(),
+                ]);
                 
                 return {
                     moduleId: module._id.toString(),
@@ -100,6 +109,15 @@ export const CourseService = {
                             resources: lesson.resources || [],
                         };
                     }),
+                    quizzes: quizzes.map((quiz: any) => ({
+                        quizId: quiz._id.toString(),
+                        title: quiz.title,
+                        timeLimit: quiz.timeLimit,
+                        totalQuestions: quiz.totalQuestions,
+                        totalMarks: quiz.totalMarks,
+                        passingPercentage: quiz.passingPercentage,
+                        orderIndex: quiz.orderIndex,
+                    })),
                 };
             })
         );
@@ -111,11 +129,46 @@ export const CourseService = {
     },
 
     async getCourseBySlug(slug: string) {
-        return await CourseModel.findOne({ slug });
+        return await CourseModel.findOne({ slug }).lean();
     },
 
     async updateCourse(id: string, data: any) {
-        return await CourseModel.findByIdAndUpdate(id, data, { new: true });
+        const oldCourse = await CourseModel.findById(id).lean();
+        const updated = await CourseModel.findByIdAndUpdate(id, data, { new: true });
+
+        if (updated && oldCourse && oldCourse.status !== 'published' && updated.status === 'published') {
+            setImmediate(async () => {
+                try {
+                    await NotificationService.createNotificationForAdmins({
+                        type: 'course_published',
+                        title: 'Course Published',
+                        message: `Course "${updated.title}" has been published`,
+                        link: '/dashboard/admin/courses',
+                        relatedTo: { model: 'Course', id: updated._id.toString() },
+                    });
+
+                    const instructors = await UserModel.find({
+                        role: 'instructor',
+                        status: 'active',
+                    }).select('_id').lean();
+
+                    for (const instructor of instructors) {
+                        await NotificationService.createNotification({
+                            userId: instructor._id.toString(),
+                            type: 'course_published',
+                            title: 'New Course Published',
+                            message: `Course "${updated.title}" is now available for teaching`,
+                            link: '/dashboard/instructor/courses',
+                            relatedTo: { model: 'Course', id: updated._id.toString() },
+                        });
+                    }
+                } catch (error) {
+                    logger.error(error, 'Failed to send course published notification');
+                }
+            });
+        }
+
+        return updated;
     },
 
     async deleteCourse(id: string) {
@@ -141,12 +194,13 @@ export const CourseService = {
     async assignInstructor(courseId: string, instructorId: string | null) {
         if (instructorId) {
             // Validate that the user exists and has instructor role
-            const user = await UserModel.findOne({ _id: instructorId, role: 'instructor' });
+            const user = await UserModel.findOne({ _id: instructorId, role: 'instructor' }).lean();
             if (!user) {
                 throw new ApiError(StatusCodes.BAD_REQUEST, 'User not found or does not have instructor role');
             }
         }
 
+        const oldCourse = await CourseModel.findById(courseId).lean();
         const course = await CourseModel.findByIdAndUpdate(
             courseId,
             { instructorId: instructorId ? new Types.ObjectId(instructorId) : null },
@@ -154,6 +208,24 @@ export const CourseService = {
         ).populate('instructorId', 'name email image');
 
         if (!course) throw new ApiError(StatusCodes.NOT_FOUND, 'Course not found');
+
+        if (instructorId && (!oldCourse?.instructorId || oldCourse.instructorId.toString() !== instructorId)) {
+            setImmediate(async () => {
+                try {
+                    await NotificationService.createNotification({
+                        userId: instructorId,
+                        type: 'instructor_assigned',
+                        title: 'Course Assignment',
+                        message: `You have been assigned as instructor for "${course.title}"`,
+                        link: `/dashboard/instructor/courses/${course._id}`,
+                        relatedTo: { model: 'Course', id: course._id.toString() },
+                    });
+                } catch (error) {
+                    logger.error(error, 'Failed to send instructor assigned notification');
+                }
+            });
+        }
+
         return course;
     },
 };

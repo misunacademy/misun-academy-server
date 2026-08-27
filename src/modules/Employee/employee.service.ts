@@ -133,7 +133,6 @@ const getMyLeaveRequests = async (
     const limit = Math.max(1, Number(query.limit ?? 10));
     const skip  = (page - 1) * limit;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter: any = { employeeId: new mongoose.Types.ObjectId(employeeId) };
     if (query.status && ['Pending', 'Approved', 'Rejected'].includes(query.status)) {
         filter.status = query.status;
@@ -179,7 +178,6 @@ const getAllEmployees = async (query: {
     const limit = Math.max(1, Number(query.limit ?? 10));
     const skip  = (page - 1) * limit;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter: any = { role: Role.EMPLOYEE };
     if (query.search) {
         const re = new RegExp(query.search, 'i');
@@ -227,7 +225,6 @@ const getAllSalariesAdmin = async (query: {
     const limit = Math.max(1, Number(query.limit ?? 10));
     const skip  = (page - 1) * limit;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter: any = {};
     if (query.employeeId) filter.employeeId = new mongoose.Types.ObjectId(query.employeeId);
     if (query.status && ['Paid', 'Pending'].includes(query.status)) filter.status = query.status;
@@ -350,7 +347,6 @@ const getAllLeaveRequestsAdmin = async (query: {
     const limit = Math.max(1, Number(query.limit ?? 10));
     const skip  = (page - 1) * limit;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter: any = {};
     if (query.status && ['Pending', 'Approved', 'Rejected'].includes(query.status)) {
         filter.status = query.status;
@@ -370,11 +366,55 @@ const updateLeaveStatus = async (id: string, status: 'Approved' | 'Rejected') =>
     return leave;
 };
 
+const NID_PHOTO_FIELDS = [
+    'nidPhotoFrontUrl',
+    'nidPhotoBackUrl',
+    'nidPhotoUrl',
+] as const;
+
+const resolveNidPhotoUrl = async (
+    requester: { id: string; role: string },
+    publicId: string
+): Promise<{ url: string }> => {
+    const isAdmin = requester.role === Role.ADMIN || requester.role === Role.SUPERADMIN;
+
+    if (!isAdmin) {
+        const own = await EmployeeProfileModel.findOne({ userId: requester.id })
+            .select(NID_PHOTO_FIELDS.join(' '))
+            .lean();
+
+        const ownsAsset = Boolean(
+            own && NID_PHOTO_FIELDS.some((f) => (own as any)[f] === publicId)
+        );
+
+        if (!ownsAsset) {
+            throw new ApiError(StatusCodes.FORBIDDEN, 'You do not have access to this document');
+        }
+    }
+
+    const { UploadService } = await import('../Upload/upload.service.js');
+
+    try {
+        const url = UploadService.generateSignedAssetUrl(publicId);
+        logger.info({
+            event: 'nid_photo_access',
+            actorId: requester.id,
+            actorRole: requester.role,
+            publicId,
+        }, 'NID photo signed URL issued');
+        return { url };
+    } catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Document not found');
+    }
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 export const EmployeeService = {
     // Profile
     getMyProfile,
     updateMyProfile,
+    resolveNidPhotoUrl,
     // Salaries (employee)
     getMySalaries,
     // Leave (employee)

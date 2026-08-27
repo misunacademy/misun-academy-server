@@ -22,7 +22,7 @@ const validateCloudinaryConfig = () => {
 
     // Test the configuration
     try {
-        cloudinary.api.ping((error, result) => {
+        cloudinary.api.ping((error) => {
             if (error) {
                 console.error('❌ Cloudinary configuration test failed:', error.message);
             } else {
