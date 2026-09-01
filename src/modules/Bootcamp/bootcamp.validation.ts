@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const bdMobile = /^01[3-9]\d{8}$/;
+const validWhatsAppMobile = /^(?:01[3-9]\d{8}|(?:\+?91|0)?[6789]\d{9})$/;
 
 export const registerBootcampValidationSchema = z.object({
     body: z.object({
@@ -12,7 +12,7 @@ export const registerBootcampValidationSchema = z.object({
         whatsapp: z
             .string()
             .trim()
-            .regex(bdMobile, 'Enter a valid Bangladeshi WhatsApp number')
+            .regex(validWhatsAppMobile, 'Enter a valid WhatsApp number')
             .optional()
             .or(z.literal('')),
         address: z
