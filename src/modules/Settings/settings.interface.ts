@@ -10,4 +10,5 @@ export interface ISettings {
   epFacebookGroupLink?: string;
   epWhatsappGroupLink?: string;
   homeWhyVideoUrl?: string;
+  epHomeWhyVideoUrl?: string;
 }
