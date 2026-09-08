@@ -13,6 +13,8 @@ export interface ISettings {
   epWhatsappGroupLink?: string;
   homeWhyVideoUrl?: string;
   epHomeWhyVideoUrl?: string;
+  maPaymentTutorialVideoUrl?: string;
+  epPaymentTutorialVideoUrl?: string;
 }
 
 const settingsSchema = new Schema<ISettings>({
@@ -61,6 +63,14 @@ const settingsSchema = new Schema<ISettings>({
     default: '',
   },
   epHomeWhyVideoUrl: {
+    type: String,
+    default: '',
+  },
+  maPaymentTutorialVideoUrl: {
+    type: String,
+    default: '',
+  },
+  epPaymentTutorialVideoUrl: {
     type: String,
     default: '',
   },

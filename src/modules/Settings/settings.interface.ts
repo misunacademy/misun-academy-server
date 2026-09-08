@@ -11,4 +11,6 @@ export interface ISettings {
   epWhatsappGroupLink?: string;
   homeWhyVideoUrl?: string;
   epHomeWhyVideoUrl?: string;
+  maPaymentTutorialVideoUrl?: string;
+  epPaymentTutorialVideoUrl?: string;
 }

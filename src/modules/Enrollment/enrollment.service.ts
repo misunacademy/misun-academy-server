@@ -128,12 +128,6 @@ const assignStudentIdIfMissing = async (
 /**
  * Generate unique enrollment ID
  */
-// const generateEnrollmentId = async (batch: string = '6'): Promise<string> => {
-//     const year = new Date().getFullYear();
-//     const count = await EnrollmentModel.countDocuments();
-//     const paddedCount = String(count + 1).padStart(5, '0');
-//     return `MA-${batch}${year}${paddedCount}`;
-// };
 const generateEnrollmentId = async (
     batch: string = '',
     brand: CourseBrand = CourseBrand.MA
@@ -167,104 +161,6 @@ const generateTransactionId = (): string => {
  * Initiate enrollment for a batch
  * With idempotency - returns existing pending enrollment if found
  */
-// const initiateEnrollment = async (userId: string, batchId: string) => {
-//     // Check if user has pending enrollment for this batch (idempotency)
-//     const existingPendingEnrollment = await EnrollmentModel.findOne({
-//         userId,
-//         batchId,
-//         status: { $in: [EnrollmentStatus.Pending, EnrollmentStatus.PaymentPending] }
-//     }).populate('batchId');
-
-//     if (existingPendingEnrollment) {
-//         // Return existing pending enrollment instead of creating duplicate
-//         return {
-//             enrollment: existingPendingEnrollment,
-//             batch: existingPendingEnrollment.batchId,
-//             isExisting: true,
-//         };
-//     }
-
-//     // Check if batch exists and is accepting enrollments
-//     const batch = await BatchModel.findById(batchId).populate('courseId');
-
-//     if (!batch) {
-//         throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
-//     }
-
-//     // Check batch status
-//     if (batch.status !== BatchStatus.Upcoming && batch.status !== BatchStatus.Running) {
-//         throw new ApiError(
-//             StatusCodes.BAD_REQUEST,
-//             'This batch is not accepting new enrollments'
-//         );
-//     }
-
-//     // Check enrollment window
-//     const now = new Date();
-//     if (now > batch.enrollmentEndDate) {
-//         throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment period has ended for this batch');
-//     }
-
-//     // Check if user already enrolled in THIS batch
-//     const existingEnrollment = await EnrollmentModel.findOne({
-//         userId,
-//         batchId,
-//     });
-
-//     if (existingEnrollment) {
-//         throw new ApiError(
-//             StatusCodes.CONFLICT,
-//             'You are already enrolled in this batch'
-//         );
-//     }
-
-//     // Check if user is enrolled in a CURRENT (running/upcoming) batch of the same course
-//     // Only allow one active enrollment per course at a time
-//     const courseId = batch.courseId;
-//     const existingCourseEnrollment = await EnrollmentModel.findOne({
-//         userId,
-//         status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Pending] }
-//     }).populate({
-//         path: 'batchId',
-//         match: {
-//             courseId,
-//             status: { $in: [BatchStatus.Upcoming, BatchStatus.Running] }
-//         }
-//     });
-
-//     if (existingCourseEnrollment && existingCourseEnrollment.batchId) {
-//         throw new ApiError(
-//             StatusCodes.CONFLICT,
-//             'You are already enrolled in a current batch of this course. You can only enroll in one batch at a time.'
-//         );
-//     }
-
-//     // Create pending enrollment (without enrollmentId initially)
-//     const enrollment = await EnrollmentModel.create({
-//         userId,
-//         batchId,
-//         status: EnrollmentStatus.Pending,
-//     });
-//   // Assign unique Student ID if the user doesn't have one
-//         const user = await UserModel.findById(enrollment.userId);
-//         if (user && !user.studentId) {
-//             const year = new Date().getFullYear().toString();
-//             const counter = await StudentIdCounterModel.findByIdAndUpdate(
-//                 { _id: year },
-//                 { $inc: { count: 1 } },
-//                 { new: true, upsert: true }
-//             );
-//             const paddedCount = String(counter.count).padStart(4, '0');
-//             user.studentId = `MA-${year}-${paddedCount}`;
-//             await user.save();
-//         }
-//     return {
-//         enrollment,
-//         batch,
-//         isExisting: false,
-//     };
-// };
-
 const initiateEnrollment = async (userId: string, batchId: string) => {
     const session = await mongoose.startSession();
 
@@ -321,8 +217,10 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
             throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
         }
 
-        // Validate batch status
+        // Validate batch status (evergreen recorded batches always accept enrollments)
+        const isEvergreen = (batch as any).isEvergreen === true || (batch as any).deliveryMode === 'recorded';
         if (
+            !isEvergreen &&
             batch.status !== BatchStatus.Upcoming &&
             batch.status !== BatchStatus.Running
         ) {
@@ -332,9 +230,9 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
             );
         }
 
-        // Validate enrollment window
+        // Validate enrollment window (skipped for evergreen lifetime access)
         const now = new Date();
-        if (now > batch.enrollmentEndDate) {
+        if (!isEvergreen && now > batch.enrollmentEndDate) {
             throw new ApiError(
                 StatusCodes.BAD_REQUEST,
                 'Enrollment period has ended for this batch'
@@ -420,102 +318,6 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
  * Provides lifetime access - no expiry unless user is suspended
  * Idempotent - can be called multiple times safely (webhook + redirect)
  */
-// const confirmEnrollment = async (enrollmentId: string, paymentId: string) => {
-//     const enrollment = await EnrollmentModel.findOne({ enrollmentId });
-
-//     if (!enrollment) {
-//         throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
-//     }
-
-//     // Idempotency: If already active, just return it
-//     if (enrollment.status === EnrollmentStatus.Active) {
-//         return enrollment;
-//     }
-
-//     if (enrollment.status !== EnrollmentStatus.Pending && enrollment.status !== EnrollmentStatus.PaymentPending) {
-//         throw new ApiError(StatusCodes.BAD_REQUEST, `Cannot confirm enrollment with status: ${enrollment.status}`);
-//     }
-
-//     // const mongoose = require('mongoose');
-//     const session = await mongoose.startSession();
-
-//     try {
-//         await session.startTransaction();
-
-//         // Update enrollment - LIFETIME ACCESS (no expiry date)
-//         enrollment.status = EnrollmentStatus.Active;
-//         enrollment.paymentId = paymentId as any;
-//         enrollment.enrolledAt = new Date();
-
-//         await enrollment.save({ session });
-
-//         // Increment batch enrollment count (only if not already incremented)
-//         const batch = await BatchModel.findById(enrollment.batchId);
-//         if (batch) {
-//             await BatchModel.findByIdAndUpdate(
-//                 enrollment.batchId,
-//                 { $inc: { currentEnrollment: 1 } },
-//                 { session }
-//             );
-//         }
-
-//         // Initialize module progress when batch starts
-//         await initializeModuleProgress(enrollment._id.toString(), enrollment.batchId.toString());
-
-//         // Assign unique Student ID if the user doesn't have one
-//         const user = await UserModel.findById(enrollment.userId).session(session);
-//         if (user && !user.studentId) {
-//             const year = new Date().getFullYear().toString();
-//             const counter = await StudentIdCounterModel.findByIdAndUpdate(
-//                 { _id: year },
-//                 { $inc: { count: 1 } },
-//                 { new: true, upsert: true, session }
-//             );
-//             const paddedCount = String(counter.count).padStart(4, '0');
-//             user.studentId = `MA-${year}-${paddedCount}`;
-//             await user.save({ session });
-//         }
-
-//         await session.commitTransaction();
-
-//         // AUTOMATIC PROFILE CREATION/UPDATE - Single source of truth
-//         // This runs after enrollment confirmation regardless of payment method
-//         try {
-//             await ProfileService.createOrUpdateProfileAfterEnrollment(
-//                 enrollment.userId.toString(),
-//                 enrollment.enrollmentId!
-//             );
-//         } catch (profileError) {
-//             // Log error but don't fail enrollment - profile can be synced later
-//             console.error('Failed to update student profile after enrollment:', profileError);
-//         }
-
-//         // Send enrollment confirmation email (async, don't block)
-//         setImmediate(async () => {
-//             try {
-//                 const user = await UserModel.findById(enrollment.userId);
-//                 const batchData = await BatchModel.findById(enrollment.batchId).populate('courseId');
-//                 if (user && batchData && batchData.courseId) {
-//                     sendEnrollmentConfirmationEmail(
-//                         user,
-//                         (batchData.courseId as any).title || 'Unknown Course',
-//                         enrollment.enrollmentId || 'N/A'
-//                     );
-//                 }
-//             } catch (emailError) {
-//                 console.error('Failed to send enrollment confirmation email:', emailError);
-//             }
-//         });
-
-//         return enrollment;
-//     } catch (error) {
-//         await session.abortTransaction();
-//         throw error;
-//     } finally {
-//         session.endSession();
-//     }
-// };
-
 
 
 const getSpecialAccessEnrollments = async (params: {
@@ -616,12 +418,14 @@ const enrollWithManualPayment = async (
         throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
     }
 
-    if (batch.status !== BatchStatus.Upcoming && batch.status !== BatchStatus.Running) {
+    const isEvergreenManual = (batch as any).isEvergreen === true || (batch as any).deliveryMode === 'recorded';
+
+    if (!isEvergreenManual && batch.status !== BatchStatus.Upcoming && batch.status !== BatchStatus.Running) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'This batch is not accepting enrollments');
     }
 
     const now = new Date();
-    if (now > batch.enrollmentEndDate) {
+    if (!isEvergreenManual && now > batch.enrollmentEndDate) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment period is not active');
     }
 

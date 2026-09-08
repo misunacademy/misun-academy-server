@@ -197,7 +197,7 @@ const approveCertificate = async (certificateId: string, approvedBy: string) => 
             }
         }
     } catch (emailError) {
-        console.error('Failed to send certificate approved email:', emailError);
+        logger.error(emailError, 'Failed to send certificate approved email');
     }
 
     setImmediate(async () => {
@@ -307,7 +307,7 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
             );
         }
     } catch (emailError) {
-        console.error('Failed to send certificate issued email:', emailError);
+        logger.error(emailError, 'Failed to send certificate issued email');
     }
 
     setImmediate(async () => {

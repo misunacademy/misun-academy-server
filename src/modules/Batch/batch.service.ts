@@ -109,6 +109,7 @@ export const BatchService = {
         const query: any = {
             status: BatchStatus.Upcoming,
             enrollmentEndDate: { $gte: now },
+            isHidden: { $ne: true },
         };
 
         if (courseId) {
@@ -135,6 +136,7 @@ export const BatchService = {
         const batches = await BatchModel.find({
             status: BatchStatus.Upcoming,
             enrollmentEndDate: { $gte: now },
+            isHidden: { $ne: true },
         })
             .populate('courseId', 'title slug thumbnailImage shortDescription instructor')
             .sort({ enrollmentStartDate: 1 })
@@ -163,8 +165,6 @@ export const BatchService = {
      * Update batch (allows manual status override)
      */
     updateBatch: async (id: string, data: Partial<IBatch>) => {
-        console.log('BatchService.updateBatch called:', { id, data });
-
         const batch = await BatchModel.findById(id).lean();
         if (!batch) {
             throw new ApiError(StatusCodes.NOT_FOUND, "Batch not found");
@@ -243,21 +243,6 @@ export const BatchService = {
         if (!batch) {
             throw new ApiError(StatusCodes.NOT_FOUND, "Batch not found");
         }
-
-        // // Validate status transition
-        // const validTransitions: Record<BatchStatus, BatchStatus[]> = {
-        //     [BatchStatus.Draft]: [BatchStatus.Upcoming],
-        //     [BatchStatus.Upcoming]: [BatchStatus.Running, BatchStatus.Draft],
-        //     [BatchStatus.Running]: [BatchStatus.Completed],
-        //     [BatchStatus.Completed]: [], // Cannot transition from completed
-        // };
-
-        // if (!validTransitions[batch.status].includes(newStatus)) {
-        //     throw new ApiError(
-        //         StatusCodes.BAD_REQUEST,
-        //         `Cannot transition from ${batch.status} to ${newStatus}`
-        //     );
-        // }
 
     const oldStatus = batch.status;
     batch.status = newStatus;

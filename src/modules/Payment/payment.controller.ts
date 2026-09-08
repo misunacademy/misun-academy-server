@@ -35,6 +35,18 @@ const updatePaymentWithEnrollStatus = catchAsync(async (req: Request, res: Respo
   });
 });
 
+const getPaymentDetail = catchAsync(async (req: Request, res: Response) => {
+  const transactionId = req.params.transactionId as string;
+  const result = await PaymentService.getPaymentDetail(transactionId);
+
+  sendResponse(res, {
+    statusCode: StatusCodes.OK,
+    success: true,
+    message: 'Payment detail retrieved successfully',
+    data: result,
+  });
+});
+
 const getMyPayments = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.id;
 
@@ -217,6 +229,7 @@ const verifyManualPayment = catchAsync(async (req: Request, res: Response) => {
 
 export const PaymentController = {
   getPaymentHistory,
+  getPaymentDetail,
   updatePaymentWithEnrollStatus,
   checkPaymentStatus,
   verifyPaymentSuccessForCurrentUser,

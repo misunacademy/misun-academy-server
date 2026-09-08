@@ -1,6 +1,7 @@
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../../errors/ApiError.js';
 import cloudinary, { isCloudinaryConfigured } from '../../config/cloudinary.js';
+import { logger } from '../../config/logger.js';
 import { IUploadResult, IMultipleUploadResult } from './upload.interface.js';
 
 const RESTRICTED_NID_FOLDER = 'misun-academy/employees/nid';
@@ -19,7 +20,7 @@ const uploadBufferToCloudinary = (
             (error, result) => {
                 clearTimeout(timeout);
                 if (error) {
-                    console.error('Cloudinary upload error:', error);
+                    logger.error(error, 'Cloudinary upload error');
                     reject(new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Failed to upload image to Cloudinary'));
                 } else {
                     resolve(result);
@@ -29,7 +30,7 @@ const uploadBufferToCloudinary = (
 
         uploadStream.on('error', (error) => {
             clearTimeout(timeout);
-            console.error('Upload stream error:', error);
+            logger.error(error, 'Upload stream error');
             reject(new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Upload stream failed'));
         });
 
@@ -74,7 +75,7 @@ const processSingleUpload = async (file: Express.Multer.File): Promise<IUploadRe
             uploadedAt: new Date(),
         };
     } catch (error: any) {
-        console.error('Upload service error:', error);
+        logger.error(error, 'Upload service error');
         throw new ApiError(
             StatusCodes.INTERNAL_SERVER_ERROR,
             error.message || 'Failed to process image upload'
@@ -159,7 +160,7 @@ const processMultipleUploads = async (files: Express.Multer.File[]): Promise<IMu
                 try {
                     return await processSingleUpload(file);
                 } catch (error) {
-                    console.error(`Failed to process file ${file.originalname}:`, error);
+                    logger.error(error, `Failed to process file ${file.originalname}`);
                     throw error;
                 }
             })
@@ -192,7 +193,7 @@ const deleteImage = async (publicId: string): Promise<void> => {
             throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Failed to delete image from Cloudinary');
         }
     } catch (error: any) {
-        console.error('Delete image error:', error);
+        logger.error(error, 'Delete image error');
         throw new ApiError(
             StatusCodes.INTERNAL_SERVER_ERROR,
             error.message || 'Failed to delete image from Cloudinary'
@@ -214,10 +215,10 @@ const deleteMultipleImages = async (publicIds: string[]): Promise<void> => {
         // Check if any deletions failed
         const failedDeletions = publicIds.filter(id => result.deleted[id] !== 'deleted');
         if (failedDeletions.length > 0) {
-            console.warn('Some images failed to delete:', failedDeletions);
+            logger.warn({ failedDeletions }, 'Some images failed to delete');
         }
     } catch (error: any) {
-        console.error('Delete multiple images error:', error);
+        logger.error(error, 'Delete multiple images error');
         throw new ApiError(
             StatusCodes.INTERNAL_SERVER_ERROR,
             error.message || 'Failed to delete images from Cloudinary'

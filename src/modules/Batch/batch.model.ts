@@ -18,6 +18,9 @@ export interface IBatch extends Document {
     instructors: Types.ObjectId[];
     certificateTemplate?: string;
     accessDurationAfterEnd?: number;
+    deliveryMode?: 'live' | 'recorded';
+    isEvergreen?: boolean;
+    isHidden?: boolean;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -89,6 +92,19 @@ const batchSchema = new Schema<IBatch>(
         accessDurationAfterEnd: {
             type: Number,
             default: 90,
+        },
+        deliveryMode: {
+            type: String,
+            enum: ['live', 'recorded'],
+            default: 'live',
+        },
+        isEvergreen: {
+            type: Boolean,
+            default: false,
+        },
+        isHidden: {
+            type: Boolean,
+            default: false,
         },
     },
     {

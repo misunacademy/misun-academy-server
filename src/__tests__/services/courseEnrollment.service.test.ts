@@ -121,23 +121,35 @@ describe('CourseEnrollmentService.completeLesson — sequential locking (FLOW-01
         expect(m2After?.status).toBe(ProgressStatus.Unlocked);
     });
 
-    it('rejects completion when no module progress exists for the enrollment', async () => {
+    it('backfills missing module progress (first module unlocked) and allows completion', async () => {
         const user = await createUser();
         const admin = await createAdmin();
         const course = await createCourse(admin._id);
         const batch = await createBatch(course._id);
         const m1 = await createModule(course._id, batch._id, 1);
         const lesson = await buildLesson(m1._id, 1, 'Orphan Lesson');
-        await createActiveEnrollment(user._id, batch._id);
+        const enrollment = await createActiveEnrollment(user._id, batch._id);
 
-        await expect(
-            CourseEnrollmentService.completeLesson(
-                user._id.toString(),
-                course._id.toString(),
-                m1._id.toString(),
-                lesson._id.toString()
-            )
-        ).rejects.toThrow(/locked/i);
+        const result = await CourseEnrollmentService.completeLesson(
+            user._id.toString(),
+            course._id.toString(),
+            m1._id.toString(),
+            lesson._id.toString()
+        );
+
+        expect(result.lessonId.toString()).toBe(lesson._id.toString());
+
+        const moduleProgress = await ModuleProgressModel.findOne({
+            enrollmentId: enrollment._id,
+            moduleId: m1._id,
+        });
+        expect(moduleProgress?.status).toBe(ProgressStatus.Completed);
+
+        const progress = await LessonProgressModel.findOne({
+            enrollmentId: enrollment._id,
+            lessonId: lesson._id,
+        });
+        expect(progress?.status).toBe('completed');
     });
 
     it('rejects completing a lesson from a different course/batch (no active enrollment there)', async () => {

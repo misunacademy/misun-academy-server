@@ -22,11 +22,13 @@ export const initializeModuleProgress = async (enrollmentId: string) => {
     const modules = await ModuleModel.find({ courseId, batchId: enrollment.batchId }).sort({ orderIndex: 1 }).lean();
     if (modules.length === 0) return null;
 
+    const isRecorded = (batchPopulated as any).deliveryMode === 'recorded' || (batchPopulated as any).isEvergreen === true;
+
     const progressEntries = modules.map((module: any, index: number) => ({
         enrollmentId,
         moduleId: module._id,
-        status: index === 0 ? ProgressStatus.Unlocked : ProgressStatus.Locked,
-        unlockedAt: index === 0 ? new Date() : undefined,
+        status: isRecorded ? ProgressStatus.Unlocked : index === 0 ? ProgressStatus.Unlocked : ProgressStatus.Locked,
+        unlockedAt: isRecorded || index === 0 ? new Date() : undefined,
         completionPercentage: 0,
     }));
 

@@ -1,5 +1,6 @@
 import { v2 as cloudinary } from 'cloudinary';
 import env from './env.js';
+import { logger } from './logger.js';
 
 cloudinary.config({
     cloud_name: env.CLOUDINARY_CLOUD_NAME,
@@ -14,9 +15,8 @@ const validateCloudinaryConfig = () => {
     const missing = required.filter(key => !process.env[key]);
 
     if (missing.length > 0) {
-        console.warn('⚠️  Cloudinary credentials not configured. Image uploads will fail.');
-        console.warn('   Missing environment variables:', missing.join(', '));
-        console.warn('   Please set these in your .env file');
+        logger.warn('Cloudinary credentials not configured. Image uploads will fail.');
+        logger.warn({ missing }, 'Missing Cloudinary environment variables');
         return false;
     }
 
@@ -24,13 +24,13 @@ const validateCloudinaryConfig = () => {
     try {
         cloudinary.api.ping((error) => {
             if (error) {
-                console.error('❌ Cloudinary configuration test failed:', error.message);
+                logger.error(error, 'Cloudinary configuration test failed');
             } else {
-                console.log('✅ Cloudinary configuration is valid');
+                logger.info('Cloudinary configuration is valid');
             }
         });
     } catch (error) {
-        console.error('❌ Cloudinary configuration error:', error);
+        logger.error(error, 'Cloudinary configuration error');
     }
 
     return true;

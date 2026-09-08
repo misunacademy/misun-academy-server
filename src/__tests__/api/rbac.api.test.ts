@@ -276,11 +276,17 @@ describe('API-level RBAC & IDOR matrix', () => {
     });
 
     describe('Account status enforcement', () => {
-        it('rejects API access for suspended accounts (403)', async () => {
-            const suspended = await seedApiUser('learner', { status: 'suspended' });
-            const res = await agentFor(suspended.cookieHeader).get('/api/v1/course-enrollment/nonexistent/progress');
-            expect(res.status).toBe(403);
-            expect(JSON.stringify(res.body)).toMatch(/suspend/i);
+        it('blocks sign-in for suspended accounts (403)', async () => {
+            const email = uniqueEmail('learner');
+            const password = passwordFor();
+            const signUpRes = await postWithRetry('/api/v1/auth/sign-up/email', { name: 'Suspended Tester', email, password });
+            expect([200, 201]).toContain(signUpRes.status);
+
+            await UserModel.updateOne({ email }, { $set: { emailVerified: true, role: 'learner', status: 'suspended' } });
+
+            const signInRes = await postWithRetry('/api/v1/auth/sign-in/email', { email, password });
+            expect(signInRes.status).toBe(403);
+            expect(JSON.stringify(signInRes.body)).toMatch(/suspend/i);
         });
     });
 });

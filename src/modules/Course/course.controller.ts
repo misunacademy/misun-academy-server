@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
+import { firstParam } from '../../utils/firstParam.js';
 import { CourseService } from './course.service.js';
 import { recordAudit } from '../../models/auditLog.model.js';
 
@@ -110,7 +111,7 @@ const assignInstructor = catchAsync(async (req: Request, res: Response) => {
     const { instructorId } = req.body as { instructorId: string | null };
     const { id: actorId } = req.user as any;
 
-    const course = await CourseService.assignInstructor(id, instructorId ?? null);
+    const course = await CourseService.assignInstructor(firstParam(id), instructorId ?? null);
 
     await recordAudit({
         actor: actorId,

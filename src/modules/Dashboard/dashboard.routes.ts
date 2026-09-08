@@ -36,14 +36,6 @@ router.get(
 );
 
 
-// Employee dashboard route
-// router.get(
-//     '/employee',
-//     requireAuth,
-//     requireEmployee,
-//     DashboardController.getEmployeeDashboard
-// );
-
 // Instructor dashboard route
 router.get(
     '/instructor',
