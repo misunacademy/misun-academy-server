@@ -92,10 +92,31 @@ const bootcampCatalogSchema = new Schema<IBootcampCatalog>(
             type: Boolean,
             default: false,
         },
+        videos: {
+            type: [
+                {
+                    title: { type: String, required: true, trim: true },
+                    description: { type: String, trim: true },
+                    videoSource: {
+                        type: String,
+                        enum: ['youtube', 'googledrive'],
+                        default: 'youtube',
+                    },
+                    videoId: { type: String, required: true, trim: true },
+                    videoUrl: { type: String, trim: true },
+                    duration: { type: Number, min: 0, default: 0 },
+                    orderIndex: { type: Number, default: 0 },
+                    isPublished: { type: Boolean, default: true },
+                },
+            ],
+            default: [],
+        },
+        /** @deprecated legacy link — kept only so old rows don't break */
         recordedCourseId: {
             type: Schema.Types.ObjectId,
             ref: 'Course',
         },
+        /** @deprecated legacy link — kept only so old rows don't break */
         recordedBatchId: {
             type: Schema.Types.ObjectId,
             ref: 'Batch',

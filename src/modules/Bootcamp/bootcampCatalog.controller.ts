@@ -2,7 +2,12 @@ import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
+import env from '../../config/env.js';
 import { BootcampCatalogService } from './bootcampCatalog.service.js';
+
+const redirectFrontend = (res: Response, path: string) => {
+    res.redirect(`${env.MA_FRONTEND_URL}${path}`);
+};
 
 const getCurrentBootcamp = catchAsync(async (_req: Request, res: Response) => {
     const result = await BootcampCatalogService.getCurrentBootcamp();
@@ -26,7 +31,8 @@ const getPastBootcamps = catchAsync(async (_req: Request, res: Response) => {
 
 const getBootcampBySlug = catchAsync(async (req: Request, res: Response) => {
     const { slug } = req.params as { slug: string };
-    const result = await BootcampCatalogService.getBootcampBySlug(slug);
+    const userId = (req.user as { id?: string } | undefined)?.id;
+    const result = await BootcampCatalogService.getBootcampBySlug(slug, userId);
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
@@ -115,6 +121,177 @@ const publishRecording = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+const addBootcampVideo = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.params as { id: string };
+    const { id: actorId, role } = req.user as { id: string; role?: string };
+    const result = await BootcampCatalogService.addBootcampVideo(id, req.body, {
+        id: actorId,
+        role,
+    });
+    sendResponse(res, {
+        statusCode: StatusCodes.CREATED,
+        success: true,
+        message: 'Video added to bootcamp',
+        data: result,
+    });
+});
+
+const updateBootcampVideo = catchAsync(async (req: Request, res: Response) => {
+    const { id, videoId } = req.params as { id: string; videoId: string };
+    const { id: actorId, role } = req.user as { id: string; role?: string };
+    const result = await BootcampCatalogService.updateBootcampVideo(id, videoId, req.body, {
+        id: actorId,
+        role,
+    });
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Bootcamp video updated',
+        data: result,
+    });
+});
+
+const deleteBootcampVideo = catchAsync(async (req: Request, res: Response) => {
+    const { id, videoId } = req.params as { id: string; videoId: string };
+    const { id: actorId, role } = req.user as { id: string; role?: string };
+    const result = await BootcampCatalogService.deleteBootcampVideo(id, videoId, {
+        id: actorId,
+        role,
+    });
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Bootcamp video deleted',
+        data: result,
+    });
+});
+
+const listBootcampVideos = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.params as { id: string };
+    const result = await BootcampCatalogService.listBootcampVideos(id);
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Bootcamp videos retrieved',
+        data: result,
+    });
+});
+
+const getMyBootcampPurchases = catchAsync(async (req: Request, res: Response) => {
+    const { id: userId } = req.user as { id: string };
+    const result = await BootcampCatalogService.getMyBootcampPurchases(userId);
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Your bootcamp purchases retrieved',
+        data: result,
+    });
+});
+
+const getMyBootcampVideos = catchAsync(async (req: Request, res: Response) => {
+    const { slug } = req.params as { slug: string };
+    const { id: userId } = req.user as { id: string };
+    const result = await BootcampCatalogService.getMyBootcampVideos(slug, userId);
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Bootcamp videos retrieved',
+        data: result,
+    });
+});
+
+// --- SSLCommerz payment controllers ---
+
+const initiateBootcampSSLCommerz = catchAsync(async (req: Request, res: Response) => {
+    const { slug } = req.params as { slug: string };
+    const userId = (req.user as { id: string }).id;
+    const result = await BootcampCatalogService.initiateBootcampSSLCommerz(slug, userId);
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Payment initiated',
+        data: result,
+    });
+});
+
+const bootcampPaymentStatus = catchAsync(async (req: Request, res: Response) => {
+    // SSLCommerz hits success/fail/cancel URLs with a form POST (also reachable
+    // via browser GET on retry), so accept both query and body params.
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const query = req.query as Record<string, string | undefined>;
+    const transactionId =
+        (query.t as string | undefined) ??
+        (body.tran_id as string | undefined) ??
+        (body.t as string | undefined);
+    const gatewayStatus =
+        (query.status as string | undefined) ?? (body.status as string | undefined);
+    const valId =
+        (query.val_id as string | undefined) ??
+        (body.val_id as string | undefined) ??
+        (body.valId as string | undefined);
+    const callbackKey =
+        (query.k as string | undefined) ?? (body.k as string | undefined);
+
+    if (!transactionId) {
+        redirectFrontend(res, '/bootcamp?payment=failed');
+        return;
+    }
+
+    // Verify the HMAC callback key — the gateway cannot hold a user session, so
+    // this (not requireAuth) is what authenticates the status callback.
+    const expectedKey = BootcampCatalogService.getBootcampCallbackKey(transactionId);
+    if (!callbackKey || callbackKey !== expectedKey) {
+        redirectFrontend(res, '/bootcamp?payment=failed');
+        return;
+    }
+
+    try {
+        // val_id present = successful gateway POST (regardless of status string)
+        if (valId) {
+            await BootcampCatalogService.finalizeBootcampSSLCommerz(transactionId, 'VALID', valId);
+        } else if (gatewayStatus && ['failed', 'cancel'].includes(gatewayStatus.toLowerCase())) {
+            await BootcampCatalogService.finalizeBootcampSSLCommerz(transactionId, gatewayStatus.toLowerCase());
+        } else if (gatewayStatus) {
+            await BootcampCatalogService.finalizeBootcampSSLCommerz(transactionId, gatewayStatus);
+        }
+        const status = await BootcampCatalogService.checkBootcampPaymentStatus(transactionId);
+        const slug = status.bootcampSlug || '';
+        redirectFrontend(res, `/bootcamp/${slug}?payment=${status.status === 'paid' ? 'success' : 'failed'}`);
+    } catch {
+        redirectFrontend(res, '/bootcamp?payment=failed');
+    }
+});
+
+const bootcampPaymentWebhook = catchAsync(async (req: Request, res: Response) => {
+    const { tran_id: transactionId, status: gatewayStatus, val_id: valId } = req.body as {
+        tran_id?: string;
+        status?: string;
+        val_id?: string;
+    };
+
+    if (!transactionId || !gatewayStatus) {
+        sendResponse(res, {
+            statusCode: StatusCodes.BAD_REQUEST,
+            success: false,
+            message: 'Invalid webhook payload',
+            data: null,
+        });
+        return;
+    }
+
+    await BootcampCatalogService.finalizeBootcampSSLCommerz(
+        transactionId,
+        gatewayStatus,
+        valId
+    );
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Webhook processed',
+        data: null,
+    });
+});
 export const BootcampCatalogController = {
     getCurrentBootcamp,
     getPastBootcamps,
@@ -123,5 +300,15 @@ export const BootcampCatalogController = {
     createBootcamp,
     updateBootcamp,
     setRecordedPrice,
+    addBootcampVideo,
+    updateBootcampVideo,
+    deleteBootcampVideo,
+    listBootcampVideos,
+    getMyBootcampVideos,
+    getMyBootcampPurchases,
+    initiateBootcampSSLCommerz,
+    bootcampPaymentStatus,
+    bootcampPaymentWebhook,
     publishRecording,
 };
+

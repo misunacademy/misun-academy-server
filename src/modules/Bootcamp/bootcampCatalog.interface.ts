@@ -36,6 +36,18 @@ export interface IBootcampPaymentMethod {
     type: string;
 }
 
+export interface IBootcampVideo {
+    _id?: Types.ObjectId;
+    title: string;
+    description?: string;
+    videoSource: 'youtube' | 'googledrive';
+    videoId: string;
+    videoUrl?: string;
+    duration?: number; // seconds
+    orderIndex: number;
+    isPublished: boolean;
+}
+
 export interface IBootcampCatalog {
     _id?: Types.ObjectId;
     title: string;
@@ -58,11 +70,36 @@ export interface IBootcampCatalog {
     faq: IBootcampFaq[];
     paymentMethods: IBootcampPaymentMethod[];
     registrationOpen: boolean;
+    /** @deprecated legacy link kept for migration only — bootcamps no longer depend on Course/Batch */
     recordedCourseId?: Types.ObjectId;
+    /** @deprecated legacy link kept for migration only */
     recordedBatchId?: Types.ObjectId;
+    videos: IBootcampVideo[];
     lessonsCount: number;
     durationMinutes: number;
     createdBy?: Types.ObjectId;
+    createdAt?: Date;
+    updatedAt?: Date;
+}
+
+export enum BootcampPurchaseStatus {
+    Pending = 'pending',
+    Paid = 'paid',
+    Rejected = 'rejected',
+}
+
+export interface IBootcampPurchase {
+    _id?: Types.ObjectId;
+    user: Types.ObjectId;
+    bootcamp: Types.ObjectId;
+    amount: number;
+    method: 'manual' | 'SSLCommerz';
+    transactionId: string;
+    status: BootcampPurchaseStatus;
+    gatewayResponse?: Record<string, unknown>;
+    adminNote?: string;
+    reviewedBy?: Types.ObjectId;
+    reviewedAt?: Date;
     createdAt?: Date;
     updatedAt?: Date;
 }

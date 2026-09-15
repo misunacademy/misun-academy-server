@@ -103,8 +103,53 @@ export const publishRecordingSchema = z.object({
         id: objectId,
     }),
     body: z.object({
-        sourceBatchId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid batch id').optional(),
         recordedPrice: z.number().min(0).optional(),
+    }),
+});
+
+export const videoSchema = z.object({
+    title: z.string().min(1).max(200),
+    description: z.string().max(2000).optional(),
+    videoSource: z.enum(['youtube', 'googledrive']),
+    videoId: z.string().min(1).max(200),
+    videoUrl: z.string().max(500).optional(),
+    duration: z.number().min(0).optional(),
+    isPublished: z.boolean().optional(),
+});
+
+export const addBootcampVideoSchema = z.object({
+    params: z.object({
+        id: objectId,
+    }),
+    body: videoSchema,
+});
+
+export const updateBootcampVideoSchema = z.object({
+    params: z.object({
+        id: objectId,
+        videoId: objectId,
+    }),
+    body: videoSchema.partial(),
+});
+
+export const deleteBootcampVideoSchema = z.object({
+    params: z.object({
+        id: objectId,
+        videoId: objectId,
+    }),
+});
+
+export const initiateBootcampSSLCommerzSchema = z.object({
+    params: z.object({
+        slug: z.string().min(1).max(200),
+    }),
+});
+
+export const bootcampSSLCommerzStatusSchema = z.object({
+    query: z.object({
+        t: z.string().min(1),
+        k: z.string().min(1).optional(),
+        status: z.string().optional(),
     }),
 });
 
@@ -116,3 +161,36 @@ export const adminBootcampQuerySchema = z.object({
         limit: z.coerce.number().int().min(1).max(100).optional(),
     }),
 });
+
+export const bootcampPaymentStatusSchema = z.object({
+    query: z.object({
+        t: z.string().min(1, 'Transaction ID required'),
+        k: z.string().min(1, 'Callback key required'),
+        status: z.enum(['success', 'failed', 'cancel']).optional(),
+        val_id: z.string().optional(),
+        tran_id: z.string().optional(),
+        amount: z.string().optional(),
+        currency: z.string().optional(),
+        verify_key: z.string().optional(),
+        verify_sign: z.string().optional(),
+    }),
+});
+
+export const bootcampPaymentWebhookSchema = z.object({
+    body: z.object({
+        tran_id: z.string().min(1),
+        val_id: z.string().optional(),
+        status: z.string().min(1),
+        amount: z.string().optional(),
+        currency: z.string().optional(),
+        verify_key: z.string().optional(),
+        verify_sign: z.string().optional(),
+    }),
+});
+
+export const bootcampPurchaseParamSchema = z.object({
+    params: z.object({
+        id: objectId,
+    }),
+});
+
