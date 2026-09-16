@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
+import { firstParam } from '../../utils/firstParam.js';
 import { NotificationService } from './notification.service.js';
 
 const getNotifications = catchAsync(async (req: Request, res: Response) => {
@@ -39,7 +40,7 @@ const markAsRead = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.user!;
   const { notificationId } = req.params;
 
-  const notification = await NotificationService.markAsRead(id, notificationId);
+  const notification = await NotificationService.markAsRead(id, firstParam(notificationId));
 
   sendResponse(res, {
     statusCode: StatusCodes.OK,
@@ -65,7 +66,7 @@ const deleteNotification = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.user!;
   const { notificationId } = req.params;
 
-  const notification = await NotificationService.deleteNotification(id, notificationId);
+  const notification = await NotificationService.deleteNotification(id, firstParam(notificationId));
 
   sendResponse(res, {
     statusCode: StatusCodes.OK,

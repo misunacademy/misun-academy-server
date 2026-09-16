@@ -40,7 +40,7 @@ export const CourseService = {
             ? await EnrollmentModel.aggregate([
                 { $match: { course: { $in: courseIds }, status: { $ne: 'cancelled' } } },
                 { $group: { _id: '$course', count: { $sum: 1 } } },
-              ])
+            ])
             : [];
         const countByCourseId: Record<string, number> = {};
         for (const entry of counts) {
@@ -58,15 +58,15 @@ export const CourseService = {
         const course = await CourseModel.findById(id)
             .populate('instructorId', 'name email image')
             .lean();
-        
+
         if (!course) return null;
 
-        
+
         const moduleQuery: Record<string, unknown> = { courseId: id };
         if (opts.batchId) moduleQuery.batchId = opts.batchId;
 
         const modules = await ModuleModel.find(moduleQuery).sort({ orderIndex: 1 }).lean();
-        
+
         // Fetch lessons and quizzes for each module
         const curriculum = await Promise.all(
             modules.map(async (module: any) => {
@@ -74,7 +74,7 @@ export const CourseService = {
                     LessonModel.find({ moduleId: module._id }).sort({ orderIndex: 1 }).lean(),
                     QuizModel.find({ moduleId: module._id, status: 'published' }).sort({ orderIndex: 1 }).lean(),
                 ]);
-                
+
                 return {
                     moduleId: module._id.toString(),
                     title: module.title,
@@ -83,7 +83,7 @@ export const CourseService = {
                     lessons: lessons.map((lesson: any) => {
                         // Construct video URL if not present but videoId exists
                         let videoUrl = lesson.videoUrl;
-                        
+
                         if (!videoUrl && lesson.videoId && lesson.videoSource) {
                             if (lesson.videoSource === 'youtube') {
                                 videoUrl = `https://www.youtube.com/watch?v=${lesson.videoId}`;

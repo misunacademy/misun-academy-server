@@ -34,6 +34,13 @@ router.get(
     PaymentController.getPaymentHistory
 );
 
+router.get(
+    '/history/:transactionId',
+    requireAuth,
+    requireAdmin,
+    PaymentController.getPaymentDetail
+);
+
 router.post(
     '/:transactionId/verify',
     requireAuth,

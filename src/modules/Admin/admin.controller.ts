@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import catchAsync from "../../utils/catchAsync.js";
 import { AdminService } from "./admin.service.js";
 import sendResponse from "../../utils/sendResponse.js";
+import { firstParam } from "../../utils/firstParam.js";
 import { StatusCodes } from "http-status-codes";
 
 const loginUser = catchAsync(async (req: Request, res: Response) => {
@@ -29,7 +30,7 @@ const getAllUsers = catchAsync(async (req: Request, res: Response) => {
 
 const getUserById = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.params;
-    const user = await AdminService.getUserById(id);
+    const user = await AdminService.getUserById(firstParam(id));
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -53,7 +54,7 @@ const createAdmin = catchAsync(async (req: Request, res: Response) => {
 const updateUser = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { id: actorId } = req.user as any;
-    const user = await AdminService.updateUser(id, req.body, actorId);
+    const user = await AdminService.updateUser(firstParam(id), req.body, actorId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -67,7 +68,7 @@ const updateUserStatus = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { status } = req.body;
     const { id: actorId } = req.user as any;
-    const user = await AdminService.updateUserStatus(id, status, actorId);
+    const user = await AdminService.updateUserStatus(firstParam(id), status, actorId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -79,7 +80,7 @@ const updateUserStatus = catchAsync(async (req: Request, res: Response) => {
 
 const deleteUser = catchAsync(async (req: Request, res: Response) => {
     const { id: actorId } = req.user as any;
-    await AdminService.deleteUser(req.params.id, actorId);
+    await AdminService.deleteUser(firstParam(req.params.id), actorId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -148,6 +149,16 @@ const getAllInstructors = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+const getRoleStats = catchAsync(async (_req: Request, res: Response) => {
+    const result = await AdminService.getRoleStats();
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Role stats retrieved successfully',
+        data: result,
+    });
+});
+
 export const AdminAuthController = {
     loginUser,
     getAllUsers,
@@ -161,4 +172,5 @@ export const AdminAuthController = {
     sendRunningBatchProgressReminder,
     sendCompletedBatchIncompleteReminder,
     getAllInstructors,
+    getRoleStats,
 };

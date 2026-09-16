@@ -372,41 +372,6 @@ const getStudentDashboard = async (userId: string) => {
 };
 
 
-// /**
-//  * Get employee dashboard data
-//  */
-// const getEmployeeDashboard = async (userId: string) => {
-//     const { SalaryModel } = await import('../Employee/salary.model');
-//     const { LeaveRequestModel } = await import('../Employee/leaveRequest.model');
-
-//     const totalSalaryPaid = await SalaryModel.aggregate([
-//         { $match: { employeeId: userId, status: 'Paid' } },
-//         { $group: { _id: null, total: { $sum: '$amount' } } },
-//     ]);
-
-//     const pendingLeaveCount = await LeaveRequestModel.countDocuments({
-//         employeeId: userId,
-//         status: 'Pending',
-//     });
-
-//     const approvedLeaveCount = await LeaveRequestModel.countDocuments({
-//         employeeId: userId,
-//         status: 'Approved',
-//     });
-
-//     const recentSalaries = await SalaryModel.find({ employeeId: userId })
-//         .sort({ createdAt: -1 })
-//         .limit(5)
-//         .lean();
-
-//     return {
-//         totalSalaryPaid: totalSalaryPaid[0]?.total ?? 0,
-//         pendingLeaveCount,
-//         approvedLeaveCount,
-//         recentSalaries,
-//     };
-// };
-
 const getInstructorDashboard = async (userId: string) => {
 
     // Get instructor's single assigned course (1-to-1 constraint)
@@ -436,13 +401,10 @@ const getInstructorDashboard = async (userId: string) => {
     return { course, enrolledStudents, activeBatches, totalBatches };
 };
 
-
-
 export const DashboardService = {
     getDashboardMetaData,
     getAdminDashboard,
     getUserStats,
     getStudentDashboard,
     getInstructorDashboard,
-    // getEmployeeDashboard,
 }

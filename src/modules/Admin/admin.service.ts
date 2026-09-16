@@ -635,6 +635,47 @@ const getAllInstructors = async (opts: { unassignedOnly?: boolean } = {}) => {
         .lean();
 };
 
+const getRoleStats = async () => {
+    const counts = await UserModel.aggregate([
+        { $group: { _id: '$role', count: { $sum: 1 } } },
+    ]);
+
+    const statusBreakdown = await UserModel.aggregate([
+        { $group: { _id: { role: '$role', status: '$status' }, count: { $sum: 1 } } },
+    ]);
+
+    const map: Record<string, number> = {};
+    counts.forEach((c: any) => { if (c._id) map[c._id] = c.count; });
+
+    const byRoleStatus: Record<string, Record<string, number>> = {};
+    statusBreakdown.forEach((c: any) => {
+        const role = c._id?.role;
+        const status = c._id?.status;
+        if (!role || !status) return;
+        if (!byRoleStatus[role]) byRoleStatus[role] = {};
+        byRoleStatus[role][status] = c.count;
+    });
+
+    const total = Object.values(map).reduce((a, b) => a + b, 0);
+
+    const definitions = [
+        { role: 'superadmin', label: 'Super Admin', description: 'Full system access, user deletion, audit logs, seeding', color: 'destructive' },
+        { role: 'admin', label: 'Admin', description: 'Manage users, courses, batches, payments, certificates, employees, emails', color: 'default' },
+        { role: 'instructor', label: 'Instructor', description: 'Assigned courses & batches, lessons/modules, quizzes, recordings', color: 'secondary' },
+        { role: 'employee', label: 'Employee', description: 'Self-service: profile/NID, salary, leave requests', color: 'outline' },
+        { role: 'learner', label: 'Learner', description: 'Enroll, learn, quizzes, certificates, leaderboard', color: 'outline' },
+    ];
+
+    const roles = definitions.map((d) => ({
+        ...d,
+        count: map[d.role] || 0,
+        active: byRoleStatus[d.role]?.['active'] || 0,
+        suspended: byRoleStatus[d.role]?.['suspended'] || 0,
+    }));
+
+    return { total, roles, byRoleStatus };
+};
+
 export const AdminService = {
     login,
     getAllUsers,
@@ -648,4 +689,5 @@ export const AdminService = {
     sendRunningBatchProgressReminder,
     sendCompletedBatchIncompleteReminder,
     getAllInstructors,
+    getRoleStats,
 };

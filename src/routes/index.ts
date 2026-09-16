@@ -26,6 +26,8 @@ import { AttemptRoutes } from '../modules/Quiz/attempt.routes.js';
 import { LeaderboardRoutes } from '../modules/Quiz/leaderboard.routes.js';
 import { AuditLogRoutes } from '../modules/AuditLog/auditLog.routes.js';
 import { BootcampRoutes } from '../modules/Bootcamp/bootcamp.routes.js';
+import { AnnouncementRoutes } from '../modules/Announcement/announcement.routes.js';
+import { RefundRoutes } from '../modules/Refund/refund.routes.js';
 
 
 const router = express.Router();
@@ -79,6 +81,10 @@ const moduleRoutes = [
     {
         path: '/payments',
         route: PaymentRoutes,
+    },
+    {
+        path: '/refunds',
+        route: RefundRoutes,
     },
     {
         path: '/dashboard',
@@ -135,6 +141,10 @@ const moduleRoutes = [
     {
         path: '/bootcamp',
         route: BootcampRoutes,
+    },
+    {
+        path: '/announcements',
+        route: AnnouncementRoutes,
     },
 ];
 

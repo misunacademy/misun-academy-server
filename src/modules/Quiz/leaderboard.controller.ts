@@ -5,12 +5,15 @@ import sendResponse from '../../utils/sendResponse.js';
 import { LeaderboardService } from './leaderboard.service.js';
 import { GamificationService } from './gamification.service.js';
 
+const parsePeriod = (value: unknown): 'all_time' | 'monthly' =>
+    value === 'monthly' ? 'monthly' : 'all_time';
+
 const getGlobalLeaderboard = catchAsync(async (req: Request, res: Response) => {
     const { period, month, year, page, limit } = req.query;
 
     const result = await LeaderboardService.getLeaderboard({
         type: 'global',
-        period: (period as any) || 'all_time',
+        period: parsePeriod(period),
         month: month ? Number(month) : undefined,
         year: year ? Number(year) : undefined,
         page: page ? Number(page) : 1,
@@ -32,8 +35,8 @@ const getCourseLeaderboard = catchAsync(async (req: Request, res: Response) => {
 
     const result = await LeaderboardService.getLeaderboard({
         type: 'course',
-        referenceId: courseId,
-        period: (period as any) || 'all_time',
+        referenceId: Array.isArray(courseId) ? courseId[0] : courseId,
+        period: parsePeriod(period),
         month: month ? Number(month) : undefined,
         year: year ? Number(year) : undefined,
         page: page ? Number(page) : 1,
@@ -55,8 +58,8 @@ const getBatchLeaderboard = catchAsync(async (req: Request, res: Response) => {
 
     const result = await LeaderboardService.getLeaderboard({
         type: 'batch',
-        referenceId: batchId,
-        period: (period as any) || 'all_time',
+        referenceId: Array.isArray(batchId) ? batchId[0] : batchId,
+        period: parsePeriod(period),
         month: month ? Number(month) : undefined,
         year: year ? Number(year) : undefined,
         page: page ? Number(page) : 1,

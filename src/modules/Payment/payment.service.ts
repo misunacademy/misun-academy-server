@@ -415,6 +415,100 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
     };
 };
 
+// ─── PAYMENT DETAIL (ADMIN DRILLDOWN) ───
+
+const getPaymentDetail = async (transactionId: string) => {
+    const pipeline: PipelineStage[] = [
+        { $match: { transactionId } },
+        {
+            $lookup: {
+                from: "users",
+                localField: "userId",
+                foreignField: "_id",
+                as: "user",
+            },
+        },
+        {
+            $unwind: {
+                path: "$user",
+                preserveNullAndEmptyArrays: true,
+            },
+        },
+        {
+            $lookup: {
+                from: "batches",
+                localField: "batchId",
+                foreignField: "_id",
+                as: "batch",
+            },
+        },
+        {
+            $unwind: {
+                path: "$batch",
+                preserveNullAndEmptyArrays: true,
+            },
+        },
+        {
+            $lookup: {
+                from: "courses",
+                localField: "batch.courseId",
+                foreignField: "_id",
+                as: "course",
+            },
+        },
+        {
+            $unwind: {
+                path: "$course",
+                preserveNullAndEmptyArrays: true,
+            },
+        },
+        {
+            $project: {
+                transactionId: 1,
+                enrollmentId: 1,
+                amount: 1,
+                currency: 1,
+                status: 1,
+                method: 1,
+                createdAt: 1,
+                updatedAt: 1,
+                verifiedAt: 1,
+                paidAt: 1,
+                gatewayResponse: { $ifNull: ["$gatewayResponse", {}] },
+                student: {
+                    _id: "$user._id",
+                    name: "$user.name",
+                    email: "$user.email",
+                    phone: "$user.phoneNumber",
+                },
+                batch: {
+                    _id: "$batch._id",
+                    title: "$batch.title",
+                    batchNumber: { $concat: ["Batch #", { $toString: "$batch.batchNumber" }] },
+                },
+                course: {
+                    _id: "$course._id",
+                    title: "$course.title",
+                    slug: "$course.slug",
+                },
+            },
+        },
+    ];
+
+    const [payment] = await PaymentModel.aggregate(pipeline);
+    if (!payment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, "Payment not found");
+    }
+
+    const enrollment = payment.enrollmentId
+        ? await EnrollmentModel.findOne({ enrollmentId: payment.enrollmentId })
+              .select("enrollmentId status createdAt")
+              .lean()
+        : null;
+
+    return { payment, enrollment };
+};
+
 // ─── PAYMENT STATUS UPDATE WITH ENROLLMENT ───
 
 const updatePaymentWithEnrollStatus = async (
@@ -538,23 +632,26 @@ const checkPaymentStatus = async (transactionId: string) => {
         (typeof rawCourse === 'object' ? rawCourse?.slug : undefined) ||
         (typeof rawCourse === 'string' ? rawCourse : '');
     const courseQuery = courseSlug ? `&course=${encodeURIComponent(courseSlug)}` : '';
+    const amountQuery = typeof payment.amount === 'number' && payment.amount > 0 ? `&amount=${payment.amount}` : '';
+    const currencyQuery = payment.currency ? `&currency=${encodeURIComponent(payment.currency)}` : '';
+    const transactionQuery = `&t=${encodeURIComponent(transactionId)}${courseQuery}${amountQuery}${currencyQuery}`;
 
     let redirectUrl: string;
     switch (payment.status) {
         case Status.Success:
-            redirectUrl = `/payment?status=success&t=${encodeURIComponent(transactionId)}${courseQuery}`;
+            redirectUrl = `/payment?status=success${transactionQuery}`;
             break;
         case Status.Pending:
-            redirectUrl = `/payment?status=pending&t=${encodeURIComponent(transactionId)}${courseQuery}`;
+            redirectUrl = `/payment?status=pending${transactionQuery}`;
             break;
         case Status.Failed:
-            redirectUrl = `/payment?status=failed&t=${encodeURIComponent(transactionId)}${courseQuery}`;
+            redirectUrl = `/payment?status=failed${transactionQuery}`;
             break;
         case Status.Cancel:
-            redirectUrl = `/payment?status=cancelled&t=${encodeURIComponent(transactionId)}${courseQuery}`;
+            redirectUrl = `/payment?status=cancelled${transactionQuery}`;
             break;
         default:
-            redirectUrl = `/payment?status=failed&t=${encodeURIComponent(transactionId)}${courseQuery}`;
+            redirectUrl = `/payment?status=failed${transactionQuery}`;
     }
 
     return {
@@ -1040,6 +1137,7 @@ const verifyPaymentForCurrentUser = async (transactionId: string, userId: string
 
 export const PaymentService = {
     getPaymentHistory,
+    getPaymentDetail,
     updatePaymentWithEnrollStatus,
     checkPaymentStatus,
     finalizeSSLCommerzPayment,

@@ -151,15 +151,6 @@ const getStudentRecordings = async (userId: string) => {
         status: 'active',
     }).select('batchId').lean();
 
-    // console.log('Student Enrollments:', {
-    //     userId,
-    //     enrollmentCount: enrollments.length,
-    //     enrollments: enrollments.map((e: any) => ({
-    //         batchId: e.batchId,
-    //         status: e.status
-    //     }))
-    // });
-
     const batchIds = enrollments.map((e: any) => e.batchId);
 
     // Get all published recordings for enrolled batches
@@ -172,16 +163,6 @@ const getStudentRecordings = async (userId: string) => {
         .populate('instructor', 'name email')
         .sort({ sessionDate: -1 })
         .lean();
-
-    console.log('Student Recordings Found:', {
-        batchIds: batchIds.map((id: any) => id.toString()),
-        recordingCount: recordings.length,
-        recordings: recordings.map(r => ({
-            title: r.title,
-            batchId: r.batchId,
-            isPublished: r.isPublished
-        }))
-    });
 
     return recordings;
 };

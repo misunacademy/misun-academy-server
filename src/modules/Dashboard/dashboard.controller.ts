@@ -47,17 +47,6 @@ const getStudentDashboard = catchAsync(async (req: Request, res: Response) => {
 });
 
 
-// const getEmployeeDashboard = catchAsync(async (req: Request, res: Response) => {
-//     const { id } = req.user as any;
-//     const result = await DashboardService.getEmployeeDashboard(id);
-//     sendResponse(res, {
-//         statusCode: StatusCodes.OK,
-//         success: true,
-//         message: 'Employee dashboard data retrieved successfully',
-//         data: result,
-//     });
-// });
-
 const getInstructorDashboard = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.user as any;
     const result = await DashboardService.getInstructorDashboard(id);

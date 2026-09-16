@@ -114,16 +114,7 @@ export const sendPasswordResetEmail = async (
   name: string,
   token: string,
 ) => {
-  console.log("[EmailService] 📧 Preparing password reset email");
-  console.log("[EmailService] Recipient:", email);
-  console.log("[EmailService] Name:", name);
-  console.log(
-    "[EmailService] Token (first 15):",
-    token.substring(0, 15) + "...",
-  );
-
   const link = `${env.MA_FRONTEND_URL}/reset-password?token=${token}`;
-  console.log("[EmailService] Reset link:", link);
 
   const html = getEmailTemplate(
     `
@@ -144,13 +135,11 @@ export const sendPasswordResetEmail = async (
     "#ef4444",
   );
 
-  console.log("[EmailService] Queueing email...");
   await queueEmail(email, "Reset Password Request", html, {
     priority: "high",
     eventType: "reset_pass",
     eventId: token,
   });
-  console.log("[EmailService] ✅ Email queued successfully");
 };
 
 // --- PAYMENTS & ENROLLMENT ---
@@ -675,6 +664,46 @@ export const sendNewsUpdateEmail = async (
 };
 
 /**
+ * Send a platform announcement by email
+ */
+export const sendAnnouncementEmail = async (
+  email: string,
+  name: string,
+  subject: string,
+  message: string,
+  ctaUrl: string,
+  eventId?: string,
+) => {
+  const html = getEmailTemplate(
+    `
+        <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
+            <h1>📢 ${subject}</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${name}</strong>,</p>
+
+            <div style="margin: 30px 0; font-size: 16px; line-height: 1.8;">
+                ${message}
+            </div>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="${ctaUrl}" class="button" style="background: #3b82f6;">View Details</a>
+            </div>
+
+            <p style="font-size: 14px; color: #666;">You are receiving this because an administrator published an announcement.</p>
+        </div>
+    `,
+    "#3b82f6",
+  );
+
+  await queueEmail(email, subject, html, {
+    priority: "normal",
+    eventType: "announcement",
+    eventId,
+  });
+};
+
+/**
  * Send progress reminder to running batch students below threshold
  */
 export const sendRunningBatchProgressReminderEmail = async (
@@ -817,4 +846,60 @@ export const sendCompletedBatchIncompleteReminderEmail = async (
       eventType: "batch_incomplete_reminder",
     },
   );
+};
+// --- BOOTCAMP ---
+
+export const sendBootcampRegistrationConfirmationEmail = async (
+  email: string,
+  name: string,
+  bootcampTitle?: string,
+) => {
+  const title = bootcampTitle || "Bootcamp";
+  const html = getEmailTemplate(
+    `
+        <div class="header" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+            <h1>Bootcamp Registration Received</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${name}</strong>,</p>
+            <p>We received your registration for <strong>${title}</strong> at Misun Academy.</p>
+            <div class="highlight-box" style="border-color: #f59e0b;">
+                <p>Our team is verifying your payment. Once confirmed, we will send you the live class link on email and WhatsApp.</p>
+            </div>
+            <p style="color: #6b7280;">Keep an eye on your inbox — the class link will arrive soon.</p>
+        </div>
+    `,
+    "#f59e0b",
+  );
+
+  await queueEmail(email, `Bootcamp Registration Received — ${title}`, html, {
+    eventType: "bootcamp_registration",
+  });
+};
+
+export const sendBootcampRegistrationVerifiedEmail = async (
+  email: string,
+  name: string,
+  bootcampTitle = "Bootcamp",
+) => {
+  const html = getEmailTemplate(
+    `
+        <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+            <h1>Bootcamp Registration Verified 🎉</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${name}</strong>,</p>
+            <p>Your payment has been verified. You are now confirmed for <strong>${bootcampTitle}</strong>.</p>
+            <div style="text-align: center;">
+                <a href="${env.MA_FRONTEND_URL}/bootcamp" class="button" style="background: #10b981;">Visit Bootcamp Page</a>
+            </div>
+            <p style="font-size: 12px;">The Zoom link and all class details will be shared before the sessions start.</p>
+        </div>
+    `,
+    "#10b981",
+  );
+
+  await queueEmail(email, `Bootcamp Registration Verified — ${bootcampTitle}`, html, {
+    eventType: "bootcamp_registration_verified",
+  });
 };

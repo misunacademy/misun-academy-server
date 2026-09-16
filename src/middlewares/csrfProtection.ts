@@ -50,6 +50,8 @@ function setCsrfCookie(req: Request, res: Response): void {
 const CSRF_EXEMPT_PATHS = [
   '/payments/status',
   '/payments/webhook',
+  '/bootcamp/payments/status',
+  '/bootcamp/payments/webhook',
 ];
 
 export const csrfProtection = (req: Request, res: Response, next: NextFunction) => {
