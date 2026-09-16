@@ -1,8 +1,8 @@
-import { Schema, model, Document } from 'mongoose';
+import { Schema, model } from 'mongoose';
 import bcrypt from 'bcrypt';
 import { UserStatus } from '../../types/common.js';
 import { Role } from '../../types/role.js';
-import { IUser, IUserDocument } from './user.interface.js';
+import { IUserDocument } from './user.interface.js';
 
 const userSchema = new Schema<IUserDocument>(
     {
@@ -52,5 +52,9 @@ userSchema.methods.comparePassword = async function (password: string): Promise<
     if (!this.password) return false;
     return await bcrypt.compare(password, this.password);
 };
+
+// Indexes
+userSchema.index({ role: 1, status: 1 });
+userSchema.index({ name: 1 });
 
 export const UserModel = model<IUserDocument>('User', userSchema);

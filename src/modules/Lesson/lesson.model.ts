@@ -59,6 +59,10 @@ const lessonSchema = new Schema<ILesson>(
             type: Boolean,
             default: true,
         },
+        isPublished: {
+            type: Boolean,
+            default: true,
+        },
         resources: [
             {
                 title: { type: String, required: true },

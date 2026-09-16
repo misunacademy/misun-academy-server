@@ -4,22 +4,21 @@ import { StatusCodes } from 'http-status-codes';
 import { Role } from '../types/role.js';
 import { UserStatus } from '../types/common.js';
 import { fromNodeHeaders } from 'better-auth/node';
+import { logger } from '../config/logger.js';
 
 
 // Extend Express Request to include user data
-declare global {
-  namespace Express {
-    interface Request {
-      user?: {
-        id: string;
-        email: string;
-        name: string;
-        role: Role;
-        status: UserStatus;
-        emailVerified: boolean;
-      };
-      session?: any;
-    }
+declare module 'express-serve-static-core' {
+  interface Request {
+    user?: {
+      id: string;
+      email: string;
+      name: string;
+      role: Role;
+      status: UserStatus;
+      emailVerified: boolean;
+    };
+    session?: any;
   }
 }
 
@@ -82,7 +81,7 @@ export const requireAuth = async (
 
     next();
   } catch (error) {
-    console.error('Auth middleware error:', error);
+    logger.error(error, 'Auth middleware error');
     return res.status(StatusCodes.UNAUTHORIZED).json({
       success: false,
       message: 'Invalid or expired session.',
@@ -141,6 +140,11 @@ export const requireEmployee = requireRole(
   Role.SUPERADMIN
 );
 
+/**
+ * Middleware to require LEARNER role
+ */
+export const requireLearner = requireRole(Role.LEARNER);
+
 
 /**
  * Optional auth middleware - attaches user if session exists, but doesn't require it
@@ -169,7 +173,7 @@ export const optionalAuth = async (
     }
 
     next();
-  } catch (error) {
+  } catch {
     // Silently fail for optional auth
     next();
   }

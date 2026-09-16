@@ -86,3 +86,9 @@ export const updateBatchSchema = z.object({
         description: z.string().optional(),
     }),
 });
+
+export const updateBatchStatusSchema = z.object({
+    body: z.object({
+        status: batchStatusEnum,
+    }),
+});

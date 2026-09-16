@@ -52,7 +52,8 @@ const createAdmin = catchAsync(async (req: Request, res: Response) => {
 
 const updateUser = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.params;
-    const user = await AdminService.updateUser(id, req.body);
+    const { id: actorId } = req.user as any;
+    const user = await AdminService.updateUser(id, req.body, actorId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -65,7 +66,8 @@ const updateUser = catchAsync(async (req: Request, res: Response) => {
 const updateUserStatus = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { status } = req.body;
-    const user = await AdminService.updateUserStatus(id, status);
+    const { id: actorId } = req.user as any;
+    const user = await AdminService.updateUserStatus(id, status, actorId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -76,7 +78,8 @@ const updateUserStatus = catchAsync(async (req: Request, res: Response) => {
 });
 
 const deleteUser = catchAsync(async (req: Request, res: Response) => {
-    await AdminService.deleteUser(req.params.id);
+    const { id: actorId } = req.user as any;
+    await AdminService.deleteUser(req.params.id, actorId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,

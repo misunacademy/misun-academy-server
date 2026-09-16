@@ -1,10 +1,12 @@
 import { Types } from 'mongoose';
 import { CourseStatus, CourseLevel } from '../../types/common.js';
+import { CourseBrand } from '../../utils/courseBrand.js';
 
 export interface ICourse {
     _id?: Types.ObjectId;
     title: string;
     slug: string;
+    brand: CourseBrand;
     shortDescription: string;
     fullDescription: string;
     learningOutcomes: string[];

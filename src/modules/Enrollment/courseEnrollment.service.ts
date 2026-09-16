@@ -4,9 +4,11 @@ import { EnrollmentModel } from './enrollment.model.js';
 import { BatchModel } from '../Batch/batch.model.js';
 import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
 import { LessonProgressModel } from '../Progress/lessonProgress.model.js';
+import { QuizProgressModel } from '../Progress/quizProgress.model.js';
 import { ProgressStatus, LessonProgressStatus, EnrollmentStatus } from '../../types/common.js';
 import { LessonModel } from '../Lesson/lesson.model.js';
 import { ModuleModel } from '../Module/module.model.js';
+import { QuizModel } from '../Quiz/quiz.model.js';
 
 const findEnrollmentForCourse = async (
     userId: string,
@@ -19,10 +21,10 @@ const findEnrollmentForCourse = async (
             userId,
             status: { $in: statuses },
             batchId,
-        });
+        }).lean();
     }
 
-    const batches = await BatchModel.find({ courseId }).select('_id');
+    const batches = await BatchModel.find({ courseId }).select('_id').lean();
     const batchIds = batches.map((b) => b._id);
 
     if (batchIds.length === 0) {
@@ -33,7 +35,46 @@ const findEnrollmentForCourse = async (
         userId,
         status: { $in: statuses },
         batchId: { $in: batchIds },
-    });
+    }).lean();
+};
+
+/**
+ * Ensure a ModuleProgress row exists for every module of the enrollment's batch.
+ * Modules added after enrollment are backfilled: unlocked when every previous
+ * module is completed, locked otherwise.
+ */
+const ensureModuleProgress = async (enrollmentId: string, courseId: string, batchId?: string) => {
+    const modules = await ModuleModel.find({ courseId, ...(batchId ? { batchId } : {}) })
+        .sort({ orderIndex: 1 })
+        .lean();
+
+    if (modules.length === 0) return;
+
+    const existing = await ModuleProgressModel.find({ enrollmentId }).lean();
+    const byModuleId = new Map(existing.map((row) => [row.moduleId.toString(), row]));
+
+    let allPreviousCompleted = true;
+
+    for (const mod of modules) {
+        const key = mod._id.toString();
+        const row = byModuleId.get(key);
+
+        if (!row) {
+            const created = await ModuleProgressModel.create({
+                enrollmentId,
+                moduleId: mod._id,
+                status: allPreviousCompleted ? ProgressStatus.Unlocked : ProgressStatus.Locked,
+                ...(allPreviousCompleted ? { unlockedAt: new Date() } : {}),
+                completionPercentage: 0,
+            });
+            byModuleId.set(key, created.toObject());
+        }
+
+        const current = byModuleId.get(key)!;
+        if (current.status !== ProgressStatus.Completed) {
+            allPreviousCompleted = false;
+        }
+    }
 };
 
 /**
@@ -49,36 +90,56 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
         throw new ApiError(StatusCodes.NOT_FOUND, 'No enrollment found for this course');
     }
 
+    await ensureModuleProgress(enrollment._id.toString(), courseId, batchId ?? enrollment.batchId?.toString());
+
     // Get module progress
     const moduleProgress = await ModuleProgressModel.find({
         enrollmentId: enrollment._id,
-    }).populate('moduleId', 'title orderIndex');
+    }).populate('moduleId', 'title orderIndex').lean();
 
     // Get lesson progress
     const lessonProgress = await LessonProgressModel.find({
         enrollmentId: enrollment._id,
-    });
+    }).lean();
 
-    // Calculate overall progress from lesson completion (to match course-detail percentage approach)
-    const allCourseModules = await ModuleModel.find({ courseId, batchId: enrollment.batchId }).sort({ orderIndex: 1 });
+    // Get quiz progress
+    const quizProgress = await QuizProgressModel.find({
+        enrollmentId: enrollment._id,
+    }).lean();
+
+    // Calculate overall progress from lesson + quiz completion
+    const allCourseModules = await ModuleModel.find({ courseId, batchId: enrollment.batchId }).sort({ orderIndex: 1 }).lean();
     const allModuleIds = allCourseModules.map((m) => m._id);
-    const allLessons = await LessonModel.find({ moduleId: { $in: allModuleIds } });
+    const [allLessons, allQuizzes] = await Promise.all([
+        LessonModel.find({ moduleId: { $in: allModuleIds } }).lean(),
+        QuizModel.find({ moduleId: { $in: allModuleIds }, status: 'published' }).lean(),
+    ]);
 
-    const totalLessons = allLessons.length;
+    const totalItems = allLessons.length + allQuizzes.length;
     const completedLessonsCount = lessonProgress.filter(
         (lp) => lp.status === LessonProgressStatus.Completed
     ).length;
+    const completedQuizzesCount = quizProgress.filter(
+        (qp) => qp.status === 'completed'
+    ).length;
+    const completedItemsCount = completedLessonsCount + completedQuizzesCount;
 
-    const overallProgress = totalLessons > 0 ? Math.round((completedLessonsCount / totalLessons) * 100) : 0;
+    const overallProgress = totalItems > 0 ? Math.round((completedItemsCount / totalItems) * 100) : 0;
 
-    // Find current lesson (first incomplete lesson in first incomplete module)
+    // Find current lesson (first incomplete lesson or quiz in first incomplete module)
     let currentLesson = null;
-    const sortedModules = moduleProgress.sort((a, b) => (a.moduleId as any).orderIndex - (b.moduleId as any).orderIndex);
+    // Skip orphaned rows whose module was deleted; null-safe ordering
+    const sortedModules = moduleProgress
+        .filter((row) => row.moduleId && (row.moduleId as any)._id !== undefined)
+        .sort((a, b) => ((a.moduleId as any)?.orderIndex ?? 0) - ((b.moduleId as any)?.orderIndex ?? 0));
 
     for (const modProgress of sortedModules) {
         if (modProgress.status !== ProgressStatus.Completed) {
-            // Find first incomplete lesson in this module
-            const moduleLessons = await LessonModel.find({ moduleId: modProgress.moduleId }).sort({ orderIndex: 1 });
+            const [moduleLessons, moduleQuizzes] = await Promise.all([
+                LessonModel.find({ moduleId: modProgress.moduleId }).sort({ orderIndex: 1 }).lean(),
+                QuizModel.find({ moduleId: modProgress.moduleId, status: 'published' }).sort({ orderIndex: 1 }).lean(),
+            ]);
+
             for (const lesson of moduleLessons) {
                 const lessonProg = lessonProgress.find(lp => lp.lessonId.toString() === lesson._id.toString());
                 if (!lessonProg || lessonProg.status !== LessonProgressStatus.Completed) {
@@ -89,6 +150,20 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
                     break;
                 }
             }
+
+            if (!currentLesson) {
+                for (const quiz of moduleQuizzes) {
+                    const quizProg = quizProgress.find(qp => qp.quizId.toString() === quiz._id.toString());
+                    if (!quizProg || quizProg.status !== 'completed') {
+                        currentLesson = {
+                            moduleId: modProgress.moduleId,
+                            lessonId: quiz._id,
+                        };
+                        break;
+                    }
+                }
+            }
+
             if (currentLesson) break;
         }
     }
@@ -100,7 +175,7 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
 
     const completedLessonsWithModules = await LessonModel.find({
         _id: { $in: completedLessonIds }
-    });
+    }).lean();
 
     const completedLessons = completedLessonsWithModules.map(lesson => ({
         moduleId: lesson.moduleId.toString(),
@@ -108,9 +183,25 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
         completedAt: lessonProgress.find(lp => lp.lessonId.toString() === lesson._id.toString())?.completedAt,
     }));
 
+    // Get completed quizzes with module info
+    const completedQuizIds = quizProgress
+        .filter(qp => qp.status === 'completed')
+        .map(qp => qp.quizId);
+
+    const completedQuizzesWithModules = await QuizModel.find({
+        _id: { $in: completedQuizIds }
+    }).lean();
+
+    const completedQuizzes = completedQuizzesWithModules.map(quiz => ({
+        moduleId: quiz.moduleId.toString(),
+        quizId: quiz._id.toString(),
+        completedAt: quizProgress.find(qp => qp.quizId.toString() === quiz._id.toString())?.completedAt,
+    }));
+
     return {
         percentage: overallProgress,
         completedLessons,
+        completedQuizzes,
         currentLesson,
     };
 };
@@ -119,7 +210,7 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
  * Complete a lesson for a user
  */
 const completeLesson = async (userId: string, courseId: string, moduleId: string, lessonId: string) => {
-    const module = await ModuleModel.findById(moduleId);
+    const module = await ModuleModel.findById(moduleId).lean();
     const batchId = module?.batchId?.toString();
 
     const enrollment = await findEnrollmentForCourse(userId, courseId, [
@@ -131,16 +222,31 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
     }
 
     // Verify lesson exists and belongs to the module
-    const lesson = await LessonModel.findById(lessonId);
+    const lesson = await LessonModel.findById(lessonId).lean();
     if (!lesson || lesson.moduleId.toString() !== moduleId) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found or does not belong to the specified module');
+    }
+
+    // Backfill progress rows for modules added after enrollment, then re-check
+    await ensureModuleProgress(enrollment._id.toString(), courseId, enrollment.batchId?.toString());
+
+    const moduleProgress = await ModuleProgressModel.findOne({
+        enrollmentId: enrollment._id,
+        moduleId,
+    }).lean();
+
+    if (!moduleProgress || moduleProgress.status === ProgressStatus.Locked) {
+        throw new ApiError(
+            StatusCodes.FORBIDDEN,
+            'This module is locked. Complete previous modules before attempting its lessons.'
+        );
     }
 
     // Check if lesson is already completed
     const existingProgress = await LessonProgressModel.findOne({
         enrollmentId: enrollment._id,
         lessonId,
-    });
+    }).lean();
 
     if (existingProgress && existingProgress.status === LessonProgressStatus.Completed) {
         // Already completed, return success
@@ -180,29 +286,41 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
  * Recalculate module progress based on lesson completions
  */
 const recalculateModuleProgress = async (enrollmentId: string, moduleId: string) => {
-    // Get all lessons in the module
-    const lessons = await LessonModel.find({ moduleId });
-    const totalLessons = lessons.length;
+    const [lessons, quizzes] = await Promise.all([
+        LessonModel.find({ moduleId }).lean(),
+        QuizModel.find({ moduleId, status: 'published' }).lean(),
+    ]);
 
-    if (totalLessons === 0) return;
+    const totalItems = lessons.length + quizzes.length;
+    if (totalItems === 0) return;
 
-    // Get lesson progress
-    const lessonProgress = await LessonProgressModel.find({
-        enrollmentId,
-        lessonId: { $in: lessons.map((l) => l._id) },
-    });
+    const [lessonProgress, quizProgress] = await Promise.all([
+        LessonProgressModel.find({
+            enrollmentId,
+            lessonId: { $in: lessons.map((l) => l._id) },
+        }).lean(),
+        QuizProgressModel.find({
+            enrollmentId,
+            quizId: { $in: quizzes.map((q) => q._id) },
+        }).lean(),
+    ]);
 
     const completedLessons = lessonProgress.filter(
         (p) => p.status === LessonProgressStatus.Completed
     ).length;
 
-    const completionPercentage = Math.round((completedLessons / totalLessons) * 100);
+    const completedQuizzes = quizProgress.filter(
+        (p) => p.status === 'completed'
+    ).length;
+
+    const completedItems = completedLessons + completedQuizzes;
+    const completionPercentage = Math.round((completedItems / totalItems) * 100);
 
     // Update module progress
-    let existingModuleProgress = await ModuleProgressModel.findOne({
+    const existingModuleProgress = await ModuleProgressModel.findOne({
         enrollmentId,
         moduleId,
-    });
+    }).lean();
 
     const updateData: any = {
         completionPercentage,
@@ -239,7 +357,7 @@ const recalculateModuleProgress = async (enrollmentId: string, moduleId: string)
  * Unlock next module after current module completion
  */
 const unlockNextModule = async (enrollmentId: string, currentModuleId: string) => {
-    const currentModule = await ModuleModel.findById(currentModuleId);
+    const currentModule = await ModuleModel.findById(currentModuleId).lean();
 
     if (!currentModule) return;
 
@@ -247,7 +365,7 @@ const unlockNextModule = async (enrollmentId: string, currentModuleId: string) =
     const nextModule = await ModuleModel.findOne({
         courseId: currentModule.courseId,
         orderIndex: currentModule.orderIndex + 1,
-    });
+    }).lean();
 
     if (!nextModule) return; // No next module
 

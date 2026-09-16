@@ -1,6 +1,8 @@
 import express from 'express';
 import { PaymentController } from './payment.controller.js';
 import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
+import validateRequest from '../../middlewares/validateRequest.js';
+import { verifyPaymentSchema, updatePaymentStatusSchema } from '../../validations/payment.validation.js';
 
 const router = express.Router();
 
@@ -36,6 +38,7 @@ router.post(
     '/:transactionId/verify',
     requireAuth,
     requireAdmin,
+    validateRequest(verifyPaymentSchema),
     PaymentController.verifyManualPayment
 );
 
@@ -43,6 +46,7 @@ router.put(
     '/:tran_id/status',
     requireAuth,
     requireAdmin,
+    validateRequest(updatePaymentStatusSchema),
     PaymentController.updatePaymentWithEnrollStatus
 );
 

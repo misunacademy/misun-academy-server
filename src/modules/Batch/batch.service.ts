@@ -3,6 +3,10 @@ import ApiError from "../../errors/ApiError.js";
 import { BatchModel, IBatch } from "./batch.model.js";
 import { BatchStatus } from "../../types/common.js";
 import { autoTransitionBatches } from "../../utils/batchScheduler.js";
+import { NotificationService } from '../Notification/notification.service.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { EnrollmentStatus } from '../../types/common.js';
+import { logger } from '../../config/logger.js';
 
 /**
  * Generate next batch number for a course
@@ -10,7 +14,8 @@ import { autoTransitionBatches } from "../../utils/batchScheduler.js";
 const getNextBatchNumber = async (courseId: string): Promise<number> => {
     const lastBatch = await BatchModel.findOne({ courseId })
         .sort({ batchNumber: -1 })
-        .select('batchNumber');
+        .select('batchNumber')
+        .lean();
     // Start from 1 for any new course; increment from the last batch number for existing ones
     return lastBatch ? lastBatch.batchNumber + 1 : 1;
 };
@@ -80,11 +85,12 @@ export const BatchService = {
             // .populate('instructors', 'name')
             .sort({ startDate: -1 })
             .skip(skip)
-            .limit(limit);
+            .limit(limit)
+            .lean();
 
         return {
             data,
-            pagination: {
+            meta: {
                 total,
                 page,
                 limit,
@@ -101,7 +107,7 @@ export const BatchService = {
     getCurrentEnrollmentBatch: async (courseId?: string) => {
         const now = new Date();
         const query: any = {
-            status: 'upcoming',
+            status: BatchStatus.Upcoming,
             enrollmentEndDate: { $gte: now },
         };
 
@@ -112,7 +118,8 @@ export const BatchService = {
         const batch = await BatchModel.findOne(query)
             .populate('courseId')
             // .populate('instructors', 'name')
-            .sort({ enrollmentStartDate: 1 });
+            .sort({ enrollmentStartDate: 1 })
+            .lean();
 
         return batch;
     },
@@ -126,11 +133,12 @@ export const BatchService = {
     getCurrentEnrollmentBatchesForCourses: async () => {
         const now = new Date();
         const batches = await BatchModel.find({
-            status: 'upcoming',
+            status: BatchStatus.Upcoming,
             enrollmentEndDate: { $gte: now },
         })
             .populate('courseId', 'title slug thumbnailImage shortDescription instructor')
-            .sort({ enrollmentStartDate: 1 });
+            .sort({ enrollmentStartDate: 1 })
+            .lean();
 
         return batches;
     },
@@ -141,6 +149,7 @@ export const BatchService = {
     getBatchById: async (id: string) => {
         const batch = await BatchModel.findById(id)
             .populate('courseId')
+            .lean()
         // .populate('instructors');
 
         if (!batch) {
@@ -156,7 +165,7 @@ export const BatchService = {
     updateBatch: async (id: string, data: Partial<IBatch>) => {
         console.log('BatchService.updateBatch called:', { id, data });
 
-        const batch = await BatchModel.findById(id);
+        const batch = await BatchModel.findById(id).lean();
         if (!batch) {
             throw new ApiError(StatusCodes.NOT_FOUND, "Batch not found");
         }
@@ -197,7 +206,32 @@ export const BatchService = {
             runValidators: true
         });
 
-        console.log('BatchService.updateBatch success:', updated?._id);
+        if (updated) {
+            setImmediate(async () => {
+                try {
+                    const enrollments = await EnrollmentModel.find({
+                        batchId: id,
+                        status: EnrollmentStatus.Active,
+                    }).select('userId').lean();
+
+                    const userIds = [...new Set(enrollments.map(e => e.userId.toString()))];
+
+                    for (const userId of userIds) {
+                        await NotificationService.createNotification({
+                            userId,
+                            type: 'batch_updated',
+                            title: 'Batch Updated',
+                            message: `Batch "${updated.title}" details have been updated. Check for new dates or changes.`,
+                            link: '/my-classes',
+                            relatedTo: { model: 'Batch', id: updated._id.toString() },
+                        });
+                    }
+                } catch (error) {
+                    logger.error(error, 'Failed to send batch update notification');
+                }
+            });
+        }
+
         return updated;
     },
 
@@ -225,10 +259,44 @@ export const BatchService = {
         //     );
         // }
 
-        batch.status = newStatus;
-        await batch.save();
+    const oldStatus = batch.status;
+    batch.status = newStatus;
+    await batch.save();
 
-        return batch;
+    if (oldStatus !== newStatus) {
+        const statusLabels: Record<string, string> = {
+            draft: 'Draft',
+            upcoming: 'Upcoming',
+            running: 'Running',
+            completed: 'Completed',
+        };
+
+        setImmediate(async () => {
+            try {
+                const enrollments = await EnrollmentModel.find({
+                    batchId: id,
+                    status: EnrollmentStatus.Active,
+                }).select('userId').lean();
+
+                const userIds = [...new Set(enrollments.map(e => e.userId.toString()))];
+
+                for (const userId of userIds) {
+                    await NotificationService.createNotification({
+                        userId,
+                        type: 'batch_status_changed',
+                        title: 'Batch Status Updated',
+                        message: `Batch "${batch.title}" status changed from ${statusLabels[oldStatus] || oldStatus} to ${statusLabels[newStatus] || newStatus}`,
+                        link: '/my-classes',
+                        relatedTo: { model: 'Batch', id: batch._id.toString() },
+                    });
+                }
+            } catch (error) {
+                logger.error(error, 'Failed to send batch status notification');
+            }
+        });
+    }
+
+    return batch;
     },
 
     /**
@@ -242,7 +310,7 @@ export const BatchService = {
      * Delete batch (only if no enrollments)
      */
     deleteBatch: async (id: string) => {
-        const batch = await BatchModel.findById(id);
+        const batch = await BatchModel.findById(id).lean();
         if (!batch) {
             throw new ApiError(StatusCodes.NOT_FOUND, "Batch not found");
         }
@@ -284,11 +352,12 @@ export const BatchService = {
             // .populate('instructors', 'name')
             .sort({ startDate: -1 })
             .skip(skip)
-            .limit(limit);
+            .limit(limit)
+            .lean();
 
         return {
             data,
-            pagination: {
+            meta: {
                 total,
                 page,
                 limit,

@@ -13,11 +13,11 @@ export const migrateData = async () => {
         console.log('Connected to DB');
 
         // 1. Find or create a default course for existing data
-        let defaultCourse = await CourseModel.findOne({ title: 'Complete Graphic Design With Freelancing' });
+        let defaultCourse = await CourseModel.findOne({ title: 'AI Powered Complete Graphic Design With Freelancing' });
 
         if (!defaultCourse) {
             defaultCourse = await CourseModel.create({
-                title: 'Complete Graphic Design With Freelancing',
+                title: 'AI Powered Complete Graphic Design With Freelancing',
                 slug: 'complete-graphic-design-with-freelancing',
                 courseCode: 'CGD-001',
                 subtitle: 'From Beginner to Professional Designer',

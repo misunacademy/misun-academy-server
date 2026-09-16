@@ -52,6 +52,10 @@ salarySchema.pre('save', function (next) {
     next();
 });
 
+// Indexes
+salarySchema.index({ employeeId: 1, createdAt: -1 });
+salarySchema.index({ status: 1 });
+
 // ─── Leave Request Schema ─────────────────────────────────────────────────────
 
 const leaveRequestSchema = new Schema<ILeaveRequestDocument>(
@@ -74,6 +78,11 @@ const leaveRequestSchema = new Schema<ILeaveRequestDocument>(
     },
     { timestamps: true }
 );
+
+// Indexes
+leaveRequestSchema.index({ employeeId: 1, createdAt: -1 });
+leaveRequestSchema.index({ status: 1 });
+leaveRequestSchema.index({ employeeId: 1, status: 1 });
 
 // ─── Exports ──────────────────────────────────────────────────────────────────
 

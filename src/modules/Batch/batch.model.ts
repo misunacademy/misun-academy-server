@@ -100,5 +100,6 @@ const batchSchema = new Schema<IBatch>(
 batchSchema.index({ courseId: 1, batchNumber: 1 }, { unique: true });
 batchSchema.index({ status: 1, enrollmentEndDate: 1 });
 batchSchema.index({ startDate: 1, endDate: 1 });
+batchSchema.index({ courseId: 1, status: 1 });
 
 export const BatchModel = model<IBatch>('Batch', batchSchema);

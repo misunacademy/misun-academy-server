@@ -53,4 +53,4 @@ export interface IProfile {
   updatedAt: Date;
 }
 
-export interface IProfileModel extends Model<IProfile> { }
+export type IProfileModel = Model<IProfile>;

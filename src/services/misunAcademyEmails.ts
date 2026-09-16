@@ -5,6 +5,7 @@
 import env from "../config/env.js";
 import { SettingsService } from "../modules/Settings/settings.service.js";
 import { queueEmail } from "./emailService.js";
+import { isEnglishText } from '../utils/courseBrand.js';
 
 const getDisplayCurrency = (currency: string, paymentMethod?: string) => {
   return paymentMethod === "PhonePay" ? "INR" : currency;
@@ -12,7 +13,7 @@ const getDisplayCurrency = (currency: string, paymentMethod?: string) => {
 
 const resolveGroupLinks = async (courseName: string) => {
   const groupLinks = await SettingsService.getSocialGroupLinks();
-  const isEnglishCourse = /english/i.test(courseName);
+  const isEnglishCourse = isEnglishText(courseName);
 
   return isEnglishCourse
     ? {

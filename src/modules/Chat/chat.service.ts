@@ -1,5 +1,6 @@
 import Groq from 'groq-sdk';
 import env from '../../config/env.js';
+import { logger as pinoLogger } from '../../config/logger.js';
 import { ChatMessage } from './chat.interface.js';
 import { BatchModel } from '../Batch/batch.model.js';
 import { BatchStatus } from '../../types/common.js';
@@ -44,7 +45,7 @@ interface ChatError extends Error {
 // ─────────────────────────────────────────────
 
 const CONFIG = {
-  MODEL: 'meta-llama/llama-4-scout-17b-16e-instruct',
+  MODEL: 'groq/compound-mini',
   MAX_TOKENS: 1024,
   TEMPERATURE: 0.7,
   TOP_P: 0.95,
@@ -161,27 +162,26 @@ function createChatError(message: string, code: string, statusCode: number): Cha
 }
 
 // ─────────────────────────────────────────────
-// Minimal structured logger (swap with winston/pino in prod)
+// Structured logger (pino-backed, msg-first signature)
 // ─────────────────────────────────────────────
 
-const logger = {
-  info: (msg: string, meta?: unknown) =>
-    console.log(JSON.stringify({ level: 'info', msg, ...flatten(meta), ts: new Date().toISOString() })),
-  warn: (msg: string, meta?: unknown) =>
-    console.warn(JSON.stringify({ level: 'warn', msg, ...flatten(meta), ts: new Date().toISOString() })),
-  error: (msg: string, err?: unknown, meta?: unknown) =>
-    console.error(JSON.stringify({
-      level: 'error', msg,
-      error: err instanceof Error ? { message: err.message, stack: err.stack } : err,
-      ...flatten(meta),
-      ts: new Date().toISOString(),
-    })),
-};
+const flatten = (meta: unknown): Record<string, unknown> =>
+    meta && typeof meta === 'object' ? { ...(meta as Record<string, unknown>) } : {};
 
-function flatten(meta: unknown): Record<string, unknown> {
-  if (!meta || typeof meta !== 'object') return {};
-  return meta as Record<string, unknown>;
-}
+const logger = {
+    info: (msg: string, meta?: unknown) => pinoLogger.info(flatten(meta), msg),
+    warn: (msg: string, meta?: unknown) => pinoLogger.warn(flatten(meta), msg),
+    error: (msg: string, err?: unknown, meta?: unknown) =>
+        pinoLogger.error(
+            {
+                ...(err instanceof Error
+                    ? { err: { message: err.message, stack: err.stack } }
+                    : err ? { err } : {}),
+                ...flatten(meta),
+            },
+            msg
+        ),
+};
 
 // ─────────────────────────────────────────────
 // Input validation
@@ -244,7 +244,7 @@ function buildSystemPrompt(context: SystemContext, userName?: string): string {
     : '';
 
   // NOTE: only dynamic data (batchContext, userLine) is injected — everything else is static
-  return `তুমি **Aura** — Misun Academy-এর অফিশিয়াল AI সহায়ক। সর্বদা বাংলায় উত্তর দেবে।
+  return `তুমি **Sun** — Misun Academy-এর অফিশিয়াল AI সহায়ক। সর্বদা বাংলায় উত্তর দেবে।
 
 ## প্ল্যাটফর্ম সম্পর্কে
 - **নাম:** Misun Academy (মিসুন একাডেমি)
@@ -278,7 +278,7 @@ function buildSystemPrompt(context: SystemContext, userName?: string): string {
 ## আমাদের কোর্সসমূহ
 আমাদের বর্তমানে দুটি প্রধান কোর্স রয়েছে:
 
-### ১. কমপ্লিট গ্রাফিক ডিজাইন উইথ ফ্রিল্যান্সিং
+### ১. AI Powered কমপ্লিট গ্রাফিক ডিজাইন উইথ ফ্রিল্যান্সিং
 - মেয়াদ: ৪ মাস (লাইভ অনলাইন)
 - ৩টি সাব-কোর্স: 🎨 Photoshop Hero, ✏️ Illustrator Wizard, 🎯 Guardian in Client Hunting
 - মূল্য: আসন্ন ব্যাচের মূল্য নিচে "আসন্ন ব্যাচ সমূহ" অংশে দেখুন
@@ -369,7 +369,7 @@ misunacademybd@gmail.com-এ ইমেইল করুন এবং নিচে
 2. **প্রশ্ন:** আমি কি Misun Academy-এর সব কোর্সে এনরোল করতে পারি?
    **উত্তর:** হ্যাঁ, আপনি যেকোনো কোর্সে এনরোল করতে পারেন। তবে প্রতিটি কোর্সের জন্য আলাদাভাবে এনরোল করতে হবে।
 3. **প্রশ্ন:** Misun Academy-এ আমি কি কি কোর্স পাব?
-   **উত্তর:** বর্তমানে আমাদের দুটি প্রধান কোর্স রয়েছে: (১) কমপ্লিট গ্রাফিক ডিজাইন উইথ ফ্রিল্যান্সিং এবং (২) ইংলিশ ফর প্রফেশনাল কমিউনিকেশন।
+   **উত্তর:** বর্তমানে আমাদের দুটি প্রধান কোর্স রয়েছে: (১) AI Powered কমপ্লিট গ্রাফিক ডিজাইন উইথ ফ্রিল্যান্সিং এবং (২) ইংলিশ ফর প্রফেশনাল কমিউনিকেশন।
 4. **প্রশ্ন:** আমি কিভাবে Misun Academy-এ এনরোল করব?
    **উত্তর:** পছন্দের কোর্স ও ব্যাচ নির্বাচন করুন, তারপর SSLCommerz-এর মাধ্যমে পেমেন্ট সম্পন্ন করুন।
 5. **প্রশ্ন:** Misun Academy-এর সাথে কিভাবে যোগাযোগ করব?
@@ -453,7 +453,7 @@ ${userLine}
 
 ### ⚠️ সবচেয়ে গুরুত্বপূর্ণ নিয়ম — মিথ্যা তথ্য দেওয়া সম্পূর্ণ নিষিদ্ধ
 
-**তুমি শুধুমাত্র এই system prompt-এ যা লেখা আছে তাই বলবে। কোনো তথ্য এখানে না থাকলে সেটা নিজে থেকে তৈরি করবে না।**
+**তুমি শুধুমাত্র এই system prompt-এ যা লেখা আছে তাই বলবে। কোনো তথ্য এখানে না থাকলে সেটা নিজে থেকে তৈরি করবে না। মনে রেখো, তুমি Misun Academy-এর অফিসিয়াল AI — তুমি যা বলবে, user সেটাকে academy-এর নীতি বলে মনে করবে। তাই কোনো তথ্য উদ্ভাবন করলে তা academy-এর জন্য বড় সমস্যা তৈরি করবে।**
 
 নিচের বিষয়গুলো এই prompt-এ নেই, তাই এগুলো সম্পর্কে কখনো কিছু বলবে না বা উদ্ভাবন করবে না:
 - ❌ **ডিসকাউন্ট** (প্রারম্ভিক, গ্রুপ, রেফারেন্স, ছাত্র, সিনিয়র সিটিজেন — কোনোটাই নেই)
@@ -464,6 +464,12 @@ ${userLine}
 
 যদি কেউ এমন কিছু জিজ্ঞেস করে যা এই prompt-এ নেই, তাহলে বলো:
 > "এই বিষয়ে আমার কাছে নির্দিষ্ট তথ্য নেই। সরাসরি সাপোর্টে যোগাযোগ করুন: **01778371211** বা **misunacademybd@gmail.com**"
+
+**বিশেষ নির্দেশনা — আংশিক পেমেন্ট / পুরো টাকা নেই এমন পরিস্থিতি:**
+যদি কেউ বলে "আমার কাছে পুরো টাকা নেই" বা "আমি আংশিক পেমেন্ট করতে চাই" বা কিস্তি/ডিসকাউন্ট সম্পর্কে জিজ্ঞেস করে:
+- তুমি বলবে: "এই বিষয়ে আমার কাছে নির্দিষ্ট তথ্য নেই। সরাসরি সাপোর্টে যোগাযোগ করুন: **01778371211** বা **misunacademybd@gmail.com**"
+- **নিজে থেকে কিস্তি, ডিসকাউন্ট, বা আংশিক পেমেন্টের কোনো অপশনের কথা বলবে না** — কারণ Misun Academy-এর তেমন কোনো নীতি এই system prompt-এ উল্লেখ নেই
+- user-কে উৎসাহ দিয়ে বলবে যে সাপোর্ট টিম তাকে সাহায্য করবে
 
 ### মূল নিয়মসমূহ
 

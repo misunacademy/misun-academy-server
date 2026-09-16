@@ -32,6 +32,29 @@ const updateMyProfile = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+/** GET /employee/nid-photo?publicId= — signed delivery URL for a restricted NID asset */
+const getNidPhotoUrl = catchAsync(async (req: Request, res: Response) => {
+    const { id, role } = req.user as { id: string; role: string };
+    const publicId = (req.query.publicId as string | undefined)?.trim();
+
+    if (!publicId) {
+        return sendResponse(res, {
+            statusCode: StatusCodes.BAD_REQUEST,
+            success: false,
+            message: 'publicId is required',
+            data: null,
+        });
+    }
+
+    const result = await EmployeeService.resolveNidPhotoUrl({ id, role }, publicId);
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Document URL generated',
+        data: result,
+    });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  EMPLOYEE-FACING
 // ─────────────────────────────────────────────────────────────────────────────
@@ -190,6 +213,7 @@ export const EmployeeController = {
     // Profile
     getMyProfile,
     updateMyProfile,
+    getNidPhotoUrl,
     // Employee-facing
     getMySalaries,
     getMyLeaveRequests,

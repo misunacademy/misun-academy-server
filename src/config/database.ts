@@ -1,30 +1,43 @@
 import mongoose from "mongoose";
 import { initializeAuth } from "./betterAuth.js";
+import env from "./env.js";
+import { logger } from "./logger.js";
 
 let isConnected = false;
 
-export const connectDB = async () => {
+export const connectDB = async (poolSize = 50) => {
     if (isConnected) {
-        console.log('MongoDB already connected');
+        logger.info('MongoDB already connected');
         return;
     }
 
     try {
-        const db = await mongoose.connect(process.env.MONGO_URI!, {
-            // Disable buffering to fail fast
+        const db = await mongoose.connect(env.MONGO_URI, {
             bufferCommands: false,
-            maxPoolSize: 10,
+            maxPoolSize: poolSize,
             serverSelectionTimeoutMS: 5000,
             socketTimeoutMS: 45000,
+            retryWrites: true,
+            w: 'majority',
         });
         isConnected = db.connections[0].readyState === 1;
-        console.log(" MongoDB connected");
+        logger.info('MongoDB connected');
 
-        // Initialize Better Auth after database connection (await since it uses dynamic import)
         await initializeAuth();
-        console.log(" Better Auth initialized");
+        logger.info('Better Auth initialized');
     } catch (error) {
-        console.error(" MongoDB connection error:", error);
+        logger.error(error, 'MongoDB connection error');
         throw error;
+    }
+};
+
+export const disconnectDB = async () => {
+    if (!isConnected) return;
+    try {
+        await mongoose.disconnect();
+        isConnected = false;
+        logger.info('MongoDB disconnected');
+    } catch (error) {
+        logger.error(error, 'MongoDB disconnection error');
     }
 };

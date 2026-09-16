@@ -2,23 +2,31 @@ import { z } from 'zod';
 
 const createRecording = z.object({
     body: z.object({
-        course: z.string().min(1, 'Course ID is required'),
+        courseId: z.string().min(1, 'Course is required'),
+        batchId: z.string().min(1, 'Batch is required'),
         title: z.string().min(1, 'Title is required'),
         description: z.string().optional(),
-        videoUrl: z.string().url('Valid video URL is required'),
-        videoType: z.enum(['youtube', 'gdrive'], {
-            required_error: 'Video type must be youtube or gdrive',
+        sessionDate: z.string().min(1, 'Session date is required'),
+        videoSource: z.enum(['youtube', 'googledrive'], {
+            required_error: 'Video source must be youtube or googledrive',
         }),
+        videoId: z.string().min(1, 'Video ID is required'),
+        duration: z.coerce.number().optional(),
+        isPublished: z.boolean().optional(),
     }),
 });
 
 const updateRecording = z.object({
     body: z.object({
-        course: z.string().optional(),
+        courseId: z.string().optional(),
+        batchId: z.string().optional(),
         title: z.string().optional(),
         description: z.string().optional(),
-        videoUrl: z.string().url().optional(),
-        videoType: z.enum(['youtube', 'gdrive']).optional(),
+        sessionDate: z.string().optional(),
+        videoSource: z.enum(['youtube', 'googledrive']).optional(),
+        videoId: z.string().optional(),
+        duration: z.coerce.number().optional(),
+        isPublished: z.boolean().optional(),
     }),
 });
 

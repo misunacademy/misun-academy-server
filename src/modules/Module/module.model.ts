@@ -49,5 +49,6 @@ const moduleSchema = new Schema<IModule>(
 // Indexes
 moduleSchema.index({ courseId: 1, batchId: 1, orderIndex: 1 });
 moduleSchema.index({ status: 1 });
+moduleSchema.index({ courseId: 1, orderIndex: 1 });
 
 export const ModuleModel = model<IModule>('Module', moduleSchema);

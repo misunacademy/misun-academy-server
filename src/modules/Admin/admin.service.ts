@@ -1,6 +1,5 @@
 import { StatusCodes } from "http-status-codes";
 import ApiError from "../../errors/ApiError.js";
-import { AdminModel } from "./admin.model.js";
 import { UserModel } from "../User/user.model.js";
 import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
 import { BatchModel } from "../Batch/batch.model.js";
@@ -9,34 +8,39 @@ import { ModuleModel } from "../Module/module.model.js";
 import { LessonProgressModel } from "../Progress/lessonProgress.model.js";
 import { ModuleProgressModel } from "../Progress/moduleProgress.model.js";
 import { BatchStatus, EnrollmentStatus, LessonProgressStatus, UserStatus } from "../../types/common.js";
-import { generateToken } from "../../utils/jwt.js";
 import { getAuth } from "../../config/betterAuth.js";
+import { recordAudit } from "../../models/auditLog.model.js";
+import { logger } from "../../config/logger.js";
 import mongoose from "mongoose";
 import { sendEnrollmentReminderEmail, sendNewsUpdateEmail } from "../../services/misunAcademyEmails.js";
 import { sendCourseCompletedBatchIncompleteReminderEmail, sendCourseRunningBatchProgressReminderEmail } from "../../services/courseEmailRouter.js";
 
 const login = async (email: string, password: string) => {
-    const admin = await AdminModel.findOne({ email });
+    const auth = getAuth();
 
-    if (!admin) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Invalid credentials');
+    let session: any;
+    try {
+        session = await auth.api.signInEmail({
+            body: { email, password },
+            asResponse: false,
+        });
+    } catch (err: any) {
+        const msg = err?.body?.message || err?.message || 'Invalid credentials';
+        throw new ApiError(StatusCodes.UNAUTHORIZED, msg);
     }
 
-    const isPasswordMatch = await admin.comparePassword(password);
-
-    if (!isPasswordMatch) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Invalid credentials');
+    if (!session?.user) {
+        throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid credentials');
     }
 
-    const token = generateToken({
-        id: admin._id as mongoose.Types.ObjectId,
-        role: admin.role,
-    });
+    const user = await UserModel.findOne({ email }).select('name email role status').lean();
 
     return {
-        token,
+        token: session.session?.token || '',
         user: {
-            name: admin.name,
+            name: user?.name || session.user.name,
+            email: session.user.email,
+            role: user?.role,
         },
     };
 };
@@ -126,7 +130,7 @@ const getAllUsers = async (params: {
             const batchStr = String(batch).trim();
             const escaped = batchStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-            let matched = await BatchModel.find({ title: { $regex: escaped, $options: 'i' } })
+            const matched = await BatchModel.find({ title: { $regex: escaped, $options: 'i' } })
                 .select('_id')
                 .lean();
             let batchIds = (matched || []).map((b: any) => b._id);
@@ -268,7 +272,19 @@ const createAdmin = async (payload: { name: string; email: string; password: str
     return localUser;
 };
 
-const updateUser = async (id: string, updateData: Record<string, any>) => {
+const revokeUserSessions = async (userId: string) => {
+    const db = mongoose.connection.db;
+    if (!db) return;
+
+    const objectId = new mongoose.Types.ObjectId(userId);
+    await db.collection('sessions').deleteMany({
+        userId: { $in: [userId, objectId] },
+    });
+};
+
+const updateUser = async (id: string, updateData: Record<string, any>, actor?: string) => {
+    const before = await UserModel.findById(id).select('role status name email').lean();
+
     const user = await UserModel.findByIdAndUpdate(id, updateData, {
         new: true,
         runValidators: true,
@@ -280,10 +296,37 @@ const updateUser = async (id: string, updateData: Record<string, any>) => {
         throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
     }
 
+    if (actor && updateData.role && before && before.role !== updateData.role) {
+        await recordAudit({
+            actor,
+            action: 'user.role_change',
+            targetType: 'User',
+            targetId: id,
+            metadata: { from: before.role, to: updateData.role },
+        });
+    }
+
+    if (actor && updateData.status && before && before.status !== updateData.status) {
+        await recordAudit({
+            actor,
+            action: 'user.status_change',
+            targetType: 'User',
+            targetId: id,
+            metadata: { from: before.status, to: updateData.status },
+        });
+
+        if (updateData.status === UserStatus.Suspended) {
+            await revokeUserSessions(user._id.toString());
+            logger.warn(`Sessions revoked for suspended user ${user.email}`);
+        }
+    }
+
     return user;
 };
 
-const updateUserStatus = async (id: string, status: string) => {
+const updateUserStatus = async (id: string, status: string, actor?: string) => {
+    const before = await UserModel.findById(id).select('status').lean();
+
     const user = await UserModel.findByIdAndUpdate(
         id,
         { status },
@@ -296,11 +339,17 @@ const updateUserStatus = async (id: string, status: string) => {
         throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
     }
 
+    if (!before || before.status === status) {
+        return user;
+    }
+
     if (status === UserStatus.Suspended) {
         await EnrollmentModel.updateMany(
             { userId: id, status: EnrollmentStatus.Active },
             { status: EnrollmentStatus.Suspended },
         );
+        await revokeUserSessions(id);
+        logger.warn(`Sessions revoked for suspended user ${user.email}`);
     }
 
     if (status === UserStatus.Active) {
@@ -310,15 +359,31 @@ const updateUserStatus = async (id: string, status: string) => {
         );
     }
 
+    await recordAudit({
+        actor,
+        action: 'user.status_change',
+        targetType: 'User',
+        targetId: id,
+        metadata: { from: before.status, to: status },
+    });
+
     return user;
 };
 
-const deleteUser = async (id: string) => {
+const deleteUser = async (id: string, actor?: string) => {
     const user = await UserModel.findByIdAndDelete(id);
 
     if (!user) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
     }
+
+    await recordAudit({
+        actor,
+        action: 'user.delete',
+        targetType: 'User',
+        targetId: id,
+        metadata: { email: user.email, role: user.role },
+    });
 };
 
 const sendEnrollmentReminder = async () => {

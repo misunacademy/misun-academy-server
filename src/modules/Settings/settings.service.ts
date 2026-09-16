@@ -10,7 +10,7 @@ export interface ISocialGroupLinks {
 }
 
 const getSettings = async (): Promise<ISettings | null> => {
-  return await Settings.findOne()
+  return await Settings.findOne().lean()
 };
 
 const updateSettings = async (payload: Partial<ISettings>): Promise<ISettings | null> => {

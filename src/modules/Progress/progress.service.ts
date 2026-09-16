@@ -2,8 +2,10 @@ import { StatusCodes } from 'http-status-codes';
 import ApiError from '../../errors/ApiError.js';
 import { LessonProgressModel } from './lessonProgress.model.js';
 import { ModuleProgressModel } from './moduleProgress.model.js';
+import { QuizProgressModel } from './quizProgress.model.js';
 import { LessonModel } from '../Lesson/lesson.model.js';
 import { ModuleModel } from '../Module/module.model.js';
+import { QuizModel } from '../Quiz/quiz.model.js';
 import { ProgressStatus, LessonProgressStatus } from '../../types/common.js';
 
 /**
@@ -15,7 +17,7 @@ const updateLessonProgress = async (
     watchTime: number,
     lastWatchedPosition: number
 ) => {
-    const lesson = await LessonModel.findById(lessonId);
+    const lesson = await LessonModel.findById(lessonId).lean();
 
     if (!lesson) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found');
@@ -61,23 +63,35 @@ const updateLessonProgress = async (
  * Recalculate module progress based on lesson completions
  */
 const recalculateModuleProgress = async (enrollmentId: string, moduleId: string) => {
-    // Get all lessons in the module
-    const lessons = await LessonModel.find({ moduleId });
-    const totalLessons = lessons.length;
+    const [lessons, quizzes] = await Promise.all([
+        LessonModel.find({ moduleId }).lean(),
+        QuizModel.find({ moduleId, status: 'published' }).lean(),
+    ]);
 
-    if (totalLessons === 0) return;
+    const totalItems = lessons.length + quizzes.length;
+    if (totalItems === 0) return;
 
-    // Get lesson progress
-    const lessonProgress = await LessonProgressModel.find({
-        enrollmentId,
-        lessonId: { $in: lessons.map((l) => l._id) },
-    });
+    const [lessonProgress, quizProgress] = await Promise.all([
+        LessonProgressModel.find({
+            enrollmentId,
+            lessonId: { $in: lessons.map((l) => l._id) },
+        }).lean(),
+        QuizProgressModel.find({
+            enrollmentId,
+            quizId: { $in: quizzes.map((q) => q._id) },
+        }).lean(),
+    ]);
 
     const completedLessons = lessonProgress.filter(
         (p) => p.status === LessonProgressStatus.Completed
     ).length;
 
-    const completionPercentage = Math.round((completedLessons / totalLessons) * 100);
+    const completedQuizzes = quizProgress.filter(
+        (p) => p.status === 'completed'
+    ).length;
+
+    const completedItems = completedLessons + completedQuizzes;
+    const completionPercentage = Math.round((completedItems / totalItems) * 100);
 
     // Update module progress
     const moduleProgress = await ModuleProgressModel.findOne({
@@ -112,7 +126,7 @@ const recalculateModuleProgress = async (enrollmentId: string, moduleId: string)
  * Unlock next module after current module completion
  */
 const unlockNextModule = async (enrollmentId: string, currentModuleId: string) => {
-    const currentModule = await ModuleModel.findById(currentModuleId);
+    const currentModule = await ModuleModel.findById(currentModuleId).lean();
     
     if (!currentModule) return;
 
@@ -121,7 +135,7 @@ const unlockNextModule = async (enrollmentId: string, currentModuleId: string) =
         courseId: currentModule.courseId,
         batchId: currentModule.batchId,
         orderIndex: currentModule.orderIndex + 1,
-    });
+    }).lean();
 
     if (!nextModule) return; // No next module
 
@@ -145,9 +159,9 @@ const getBatchProgress = async (enrollmentId: string) => {
     const moduleProgress = await ModuleProgressModel.find({ enrollmentId }).populate(
         'moduleId',
         'title orderIndex'
-    );
+    ).lean();
 
-    const lessonProgress = await LessonProgressModel.find({ enrollmentId });
+    const lessonProgress = await LessonProgressModel.find({ enrollmentId }).lean();
 
     const allCourseModuleIds = moduleProgress.map((m) => m.moduleId.toString());
     const totalModules = allCourseModuleIds.length;
@@ -186,7 +200,7 @@ const getModuleProgress = async (enrollmentId: string, moduleId: string) => {
     const moduleProgress = await ModuleProgressModel.findOne({
         enrollmentId,
         moduleId,
-    });
+    }).lean();
 
     if (!moduleProgress) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Module progress not found');
@@ -199,7 +213,7 @@ const getModuleProgress = async (enrollmentId: string, moduleId: string) => {
     const lessonProgress = await LessonProgressModel.find({
         enrollmentId,
         lessonId: { $in: lessons.map((l) => l._id) },
-    });
+    }).lean();
 
     // Map progress to lessons
     const lessonsWithProgress = lessons.map((lesson) => {

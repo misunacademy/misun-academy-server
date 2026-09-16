@@ -2,8 +2,7 @@ import { NextFunction, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../errors/ApiError.js';
 import { EnrollmentModel } from '../modules/Enrollment/enrollment.model.js';
-import { EnrollmentStatus, ProgressStatus } from '../types/common.js';
-import { ModuleProgressModel } from '../modules/Progress/moduleProgress.model.js';
+import { EnrollmentStatus } from '../types/common.js';
 
 /**
  * Middleware to verify that the user is enrolled in a specific batch
@@ -39,36 +38,6 @@ export const checkBatchEnrollment = async (req: any, res: Response, next: NextFu
         // Attach enrollment to request for use in controllers
         req.enrollment = enrollment;
 
-        next();
-    } catch (error) {
-        next(error);
-    }
-};
-
-/**
- * Middleware to verify module access for enrolled learner
- * Checks if module is unlocked for the batch
- */
-export const checkModuleAccess = async (req: any, res: Response, next: NextFunction) => {
-    try {
-        const { moduleId } = req.params;
-        const enrollment = req.enrollment;
-
-        if (!enrollment) {
-            throw new ApiError(StatusCodes.FORBIDDEN, 'Enrollment verification required');
-        }
-
-      
-        // Check ModuleProgress to see if module is unlocked
-        const moduleProgress = await ModuleProgressModel.findOne({
-            enrollmentId: enrollment._id,
-            moduleId,
-        });
-
-        if (!moduleProgress || moduleProgress.status === ProgressStatus.Locked) {
-            throw new ApiError(StatusCodes.FORBIDDEN, 'Module is not unlocked yet');
-        }
-        
         next();
     } catch (error) {
         next(error);

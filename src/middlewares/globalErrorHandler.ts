@@ -1,6 +1,3 @@
-/* eslint-disable no-unused-vars */
-/* eslint-disable no-unused-expressions */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 import env from '../config/env.js';
@@ -10,7 +7,6 @@ import handleZodError from '../errors/handleZodError.js';
 import handleCastError from '../errors/handleCastError.js';
 import ApiError from '../errors/ApiError.js';
 import { IGenericErrorMessage } from '../types/error.js';
-
 const isMongoDuplicateKeyError = (
     err: unknown
 ): err is {
@@ -29,11 +25,11 @@ const globalErrorHandler: ErrorRequestHandler = (
     error,
     req: Request,
     res: Response,
-    next: NextFunction
+    _next: NextFunction,
 ) => {
-    env.NODE_ENV === 'development'
-        ? console.log(`🐱‍🏍 globalErrorHandler ~~`, { error })
-        : logger.error(`🐱‍🏍 globalErrorHandler ~~`, error);
+    const correlationId = req?.correlationId || 'unknown';
+
+    logger.error({ correlationId, err: error }, `Error: ${error?.message || 'Unknown error'}`);
 
     let statusCode = 500;
     let message = 'Something went wrong !';
@@ -56,10 +52,8 @@ const globalErrorHandler: ErrorRequestHandler = (
         errorMessages = simplifiedError.errorMessages;
     } else if (isMongoDuplicateKeyError(error)) {
         statusCode = 409;
-        const duplicateField =
-            Object.keys(error.keyPattern || {})[0] ||
-            Object.keys(error.keyValue || {})[0] ||
-            '';
+        const keys = error.keyPattern ? Object.keys(error.keyPattern) : Object.keys(error.keyValue || {});
+        const duplicateField = keys[0] || '';
         const duplicateValue = duplicateField
             ? error.keyValue?.[duplicateField]
             : undefined;
@@ -104,6 +98,8 @@ const globalErrorHandler: ErrorRequestHandler = (
         success: false,
         message,
         errorMessages,
+        correlationId,
+        sentryEventId: statusCode >= 500 ? (res as { sentry?: string }).sentry : undefined,
         stack: env.NODE_ENV === 'development' ? error?.stack : undefined,
     });
 };

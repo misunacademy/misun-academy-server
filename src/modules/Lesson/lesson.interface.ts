@@ -15,6 +15,7 @@ export interface ILesson {
     videoDuration?: number;
     content?: string;
     isMandatory: boolean;
+    isPublished?: boolean;
     resources?: ILessonResource[];
     createdAt?: Date;
     updatedAt?: Date;

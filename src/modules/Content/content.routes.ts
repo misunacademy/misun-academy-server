@@ -36,18 +36,18 @@ router.get(
     ContentController.getModuleResources
 );
 
-// Update lesson progress
-router.post(
-    '/progress/lessons/:lessonId',
+// Get quizzes for a module
+router.get(
+    '/batches/:batchId/modules/:moduleId/quizzes',
     checkBatchEnrollment,
-    ContentController.updateLessonProgress
+    ContentController.getModuleQuizzes
 );
 
-// Get batch progress
+// Get unified curriculum (lessons + quizzes) for a module
 router.get(
-    '/progress/batches/:batchId',
+    '/batches/:batchId/modules/:moduleId/curriculum',
     checkBatchEnrollment,
-    ContentController.getBatchProgress
+    ContentController.getModuleCurriculum
 );
 
 export const ContentRoutes = router;

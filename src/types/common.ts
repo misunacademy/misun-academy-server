@@ -109,3 +109,39 @@ export enum CertificateStatus {
     Active = "active",    // Approved and issued
     Revoked = "revoked"   // Revoked by admin
 }
+
+export enum QuizStatus {
+    Draft = "draft",
+    Published = "published"
+}
+
+export enum QuestionType {
+    MCQ = "mcq",
+    TrueFalse = "true_false"
+}
+
+export enum ContentBlockType {
+    Text = "text",
+    Image = "image",
+    TextImage = "text_image",
+    Audio = "audio",
+    Video = "video"
+}
+
+export enum AttemptStatus {
+    InProgress = "in_progress",
+    Completed = "completed"
+}
+
+export enum ZamesSource {
+    Quiz = "quiz",
+    Bonus = "bonus",
+    Achievement = "achievement",
+    Streak = "streak",
+    Multiplier = "multiplier"
+}
+
+export enum LeaderboardPeriod {
+    AllTime = "all_time",
+    Monthly = "monthly"
+}

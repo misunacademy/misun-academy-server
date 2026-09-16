@@ -195,6 +195,111 @@ const deleteModuleLesson = catchAsync(async (req: Request, res: Response) => {
     sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Lesson deleted successfully', data: null });
 });
 
+/** Get quizzes for a module */
+const getModuleQuizzes = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { moduleId } = req.params as { moduleId: string };
+    const result = await InstructorService.getModuleQuizzesForInstructor(id, moduleId);
+    sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Quizzes retrieved successfully', data: result });
+});
+
+/** Get a single quiz by ID */
+const getQuizById = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { quizId } = req.params as { quizId: string };
+    const result = await InstructorService.getQuizByIdForInstructor(id, quizId);
+    sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Quiz retrieved successfully', data: result });
+});
+
+/** Create a quiz for a module */
+const createModuleQuiz = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { moduleId } = req.params as { moduleId: string };
+    const result = await InstructorService.createQuizForInstructor(id, moduleId, req.body);
+    sendResponse(res, { statusCode: StatusCodes.CREATED, success: true, message: 'Quiz created successfully', data: result });
+});
+
+/** Update a quiz */
+const updateModuleQuiz = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { quizId } = req.params as { quizId: string };
+    const result = await InstructorService.updateQuizForInstructor(id, quizId, req.body);
+    sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Quiz updated successfully', data: result });
+});
+
+/** Delete a quiz */
+const deleteModuleQuiz = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { quizId } = req.params as { quizId: string };
+    await InstructorService.deleteQuizForInstructor(id, quizId);
+    sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Quiz deleted successfully', data: null });
+});
+
+/** Get questions for a quiz */
+const getQuizQuestions = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { quizId } = req.params as { quizId: string };
+    const result = await InstructorService.getQuizQuestionsForInstructor(id, quizId);
+    sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Questions retrieved successfully', data: result });
+});
+
+/** Get quiz analytics */
+const getQuizAnalytics = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { quizId } = req.params as { quizId: string };
+    const result = await InstructorService.getQuizAnalyticsForInstructor(id, quizId);
+    sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Quiz analytics retrieved successfully', data: result });
+});
+
+/** Get a single question by ID */
+const getQuestionById = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { questionId } = req.params as { questionId: string };
+    const result = await InstructorService.getQuestionByIdForInstructor(id, questionId);
+    sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Question retrieved successfully', data: result });
+});
+
+/** Create a question */
+const createQuestion = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { quizId } = req.params as { quizId: string };
+    const result = await InstructorService.createQuestionForInstructor(id, quizId, req.body);
+    sendResponse(res, { statusCode: StatusCodes.CREATED, success: true, message: 'Question created successfully', data: result });
+});
+
+/** Update a question */
+const updateQuestion = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { questionId } = req.params as { questionId: string };
+    const result = await InstructorService.updateQuestionForInstructor(id, questionId, req.body);
+    sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Question updated successfully', data: result });
+});
+
+/** Delete a question */
+const deleteQuestion = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { questionId } = req.params as { questionId: string };
+    await InstructorService.deleteQuestionForInstructor(id, questionId);
+    sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Question deleted successfully', data: null });
+});
+
+/** Duplicate a question */
+const duplicateQuestion = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { questionId } = req.params as { questionId: string };
+    const result = await InstructorService.duplicateQuestionForInstructor(id, questionId);
+    sendResponse(res, { statusCode: StatusCodes.CREATED, success: true, message: 'Question duplicated successfully', data: result });
+});
+
+/** Reorder questions */
+const reorderQuestions = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { quizId } = req.params as { quizId: string };
+    const { questionOrders } = req.body as { questionOrders: { questionId: string; orderIndex: number }[] };
+    const result = await InstructorService.reorderQuestionsForInstructor(id, quizId, questionOrders);
+    sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Questions reordered successfully', data: result });
+});
+
 /** Get enrolled students with pagination and filtering */
 const getInstructorEnrolledStudents = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.user as any;
@@ -226,5 +331,18 @@ export const InstructorController = {
     createModuleLesson,
     updateModuleLesson,
     deleteModuleLesson,
+    getModuleQuizzes,
+    getQuizById,
+    createModuleQuiz,
+    updateModuleQuiz,
+    deleteModuleQuiz,
+    getQuizQuestions,
+    getQuizAnalytics,
+    getQuestionById,
+    createQuestion,
+    updateQuestion,
+    deleteQuestion,
+    duplicateQuestion,
+    reorderQuestions,
     getInstructorEnrolledStudents,
 };

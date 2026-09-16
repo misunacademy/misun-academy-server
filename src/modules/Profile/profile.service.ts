@@ -92,7 +92,8 @@ const createProfile = async (userId: string, profileData: Partial<IProfile>) => 
 
 const getProfile = async (userId: string) => {
   const profile = await ProfileModel.findOne({ user: userId })
-    .populate({ path: 'user' });
+    .populate({ path: 'user' })
+    .lean();
 
   return hydrateProfileWithEnrollmentDetails(profile);
 };
@@ -180,7 +181,7 @@ const createOrUpdateProfileAfterEnrollment = async (
     }
 
     // Validate enrollment existence
-    const enrollment = await EnrollmentModel.findOne({ enrollmentId }).session(session);
+    const enrollment = await EnrollmentModel.findOne({ enrollmentId }).lean().session(session);
 
     if (!enrollment) {
       throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
@@ -251,7 +252,7 @@ const updateProfileEnrollmentStatus = async (
     await session.startTransaction();
 
     // Find enrollment to get user ID
-    const enrollment = await EnrollmentModel.findOne({ enrollmentId }).session(session);
+    const enrollment = await EnrollmentModel.findOne({ enrollmentId }).lean().session(session);
     if (!enrollment) {
       throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
     }
@@ -286,7 +287,8 @@ const updateProfileEnrollmentStatus = async (
  */
 const getCompleteStudentProfile = async (userId: string) => {
   const profileDoc = await ProfileModel.findOne({ user: userId })
-    .populate({ path: 'user' });
+    .populate({ path: 'user' })
+    .lean();
 
   const profile = await hydrateProfileWithEnrollmentDetails(profileDoc);
 
@@ -321,6 +323,7 @@ const syncAllUserEnrollmentsToProfile = async (userId: string): Promise<void> =>
     // Get all user enrollments
     const enrollments = await EnrollmentModel.find({ userId })
       .select('enrollmentId')
+      .lean()
       .session(session);
 
     // Find or create profile
@@ -360,7 +363,7 @@ const syncAllUserEnrollmentsToProfile = async (userId: string): Promise<void> =>
  * Remove enrollment from profile (for cancellations or deletions)
  */
 const removeEnrollmentFromProfile = async (enrollmentId: string): Promise<void> => {
-  const enrollment = await EnrollmentModel.findOne({ enrollmentId });
+  const enrollment = await EnrollmentModel.findOne({ enrollmentId }).lean();
   if (!enrollment) {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
   }
