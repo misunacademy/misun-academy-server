@@ -1,5 +1,6 @@
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../../errors/ApiError.js';
+import { normalizeVideoId, buildDrivePreviewUrl } from '../../utils/video.utils.js';
 import { RecordingModel } from './recording.model.js';
 import { IRecording } from './recording.interface.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
@@ -40,10 +41,11 @@ const createRecording = async (
     createdBy: string
 ): Promise<IRecording> => {
     if (recordingData.videoSource && recordingData.videoId) {
+        recordingData.videoId = normalizeVideoId(recordingData.videoSource, recordingData.videoId);
         recordingData.videoUrl =
             recordingData.videoSource === 'youtube'
                 ? `https://www.youtube.com/embed/${recordingData.videoId}`
-                : `https://drive.google.com/file/d/${recordingData.videoId}/preview`;
+                : buildDrivePreviewUrl(recordingData.videoId);
     }
 
     const recording = await RecordingModel.create({
@@ -179,10 +181,11 @@ const updateRecording = async (
     }
 
     if (updateData.videoSource && updateData.videoId) {
+        updateData.videoId = normalizeVideoId(updateData.videoSource, updateData.videoId as string);
         updateData.videoUrl =
             updateData.videoSource === 'youtube'
                 ? `https://www.youtube.com/embed/${updateData.videoId}`
-                : `https://drive.google.com/file/d/${updateData.videoId}/preview`;
+                : buildDrivePreviewUrl(updateData.videoId as string);
     }
 
     const recording = await RecordingModel.findByIdAndUpdate(
