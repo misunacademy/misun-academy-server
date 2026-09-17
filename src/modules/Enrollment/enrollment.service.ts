@@ -258,9 +258,20 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
         } catch (err: any) {
 
             if (err.code === 11000) {
+                // Only userId+batchId conflicts mean "already enrolled".
+                // enrollmentId collisions (or legacy nulls) must not mislead the user.
+                const keyPattern = err.keyPattern as Record<string, number> | undefined;
+                if (!keyPattern || keyPattern.userId || keyPattern.batchId) {
+                    throw new ApiError(
+                        StatusCodes.CONFLICT,
+                        'You are already enrolled in this batch'
+                    );
+                }
+
+                logger.error(err, 'Enrollment ID collision during initiateEnrollment');
                 throw new ApiError(
-                    StatusCodes.CONFLICT,
-                    'You are already enrolled in this batch'
+                    StatusCodes.INTERNAL_SERVER_ERROR,
+                    'Failed to initiate enrollment. Please try again.'
                 );
             }
 
