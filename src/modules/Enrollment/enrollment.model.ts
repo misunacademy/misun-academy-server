@@ -16,7 +16,7 @@ const enrollmentSchema = new Schema<IEnrollment>(
         },
         enrollmentId: {
             type: String,
-            unique: true, // Allow null/undefined values, but unique when present
+            // Uniqueness enforced by sparse index below (allows multiple null/missing during creation)
         },
         paymentId: {
             type: Schema.Types.ObjectId,
@@ -55,6 +55,7 @@ const enrollmentSchema = new Schema<IEnrollment>(
 );
 
 // Indexes
+enrollmentSchema.index({ enrollmentId: 1 }, { unique: true, sparse: true });
 enrollmentSchema.index({ userId: 1, status: 1 });
 enrollmentSchema.index({ batchId: 1, status: 1 });
 enrollmentSchema.index({ userId: 1, batchId: 1 }, { unique: true });

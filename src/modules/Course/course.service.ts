@@ -7,6 +7,7 @@ import { QuizModel } from '../Quiz/quiz.model.js';
 import { UserModel } from '../User/user.model.js';
 import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
+import { buildDrivePreviewUrl, buildYouTubeWatchUrl, normalizeVideoId } from '../../utils/video.utils.js';
 import { NotificationService } from '../Notification/notification.service.js';
 import { logger } from '../../config/logger.js';
 
@@ -81,15 +82,23 @@ export const CourseService = {
                     description: module.description,
                     order: module.orderIndex,
                     lessons: lessons.map((lesson: any) => {
-                        // Construct video URL if not present but videoId exists
+                        // Construct video URL if not present but videoId exists.
+                        // Normalize first: older rows may hold a full pasted URL
+                        // (or a double-wrapped watch?v=<url>) in videoId.
+                        const rawVideoId = typeof lesson.videoId === 'string' ? lesson.videoId : '';
+                        const videoId = rawVideoId ? normalizeVideoId(lesson.videoSource, rawVideoId) : '';
                         let videoUrl = lesson.videoUrl;
 
-                        if (!videoUrl && lesson.videoId && lesson.videoSource) {
+                        if (!videoUrl && videoId && lesson.videoSource) {
                             if (lesson.videoSource === 'youtube') {
-                                videoUrl = `https://www.youtube.com/watch?v=${lesson.videoId}`;
+                                videoUrl = buildYouTubeWatchUrl(videoId);
                             } else if (lesson.videoSource === 'googledrive') {
-                                videoUrl = `https://drive.google.com/file/d/${lesson.videoId}/view`;
+                                videoUrl = buildDrivePreviewUrl(videoId);
                             }
+                        } else if (videoUrl && lesson.videoSource === 'googledrive' && videoUrl.includes('/view')) {
+                            // `/view` does not embed in an iframe — serve `/preview`.
+                            const driveId = videoId || normalizeVideoId('googledrive', videoUrl);
+                            if (driveId) videoUrl = buildDrivePreviewUrl(driveId);
                         }
 
                         return {
@@ -102,7 +111,7 @@ export const CourseService = {
                             media: videoUrl ? {
                                 url: videoUrl,
                                 type: lesson.videoSource || 'youtube',
-                                videoId: lesson.videoId,
+                                videoId: videoId || lesson.videoId,
                             } : null,
                             content: lesson.content,
                             isMandatory: lesson.isMandatory,

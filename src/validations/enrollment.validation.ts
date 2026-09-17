@@ -9,6 +9,10 @@ export const initiateEnrollmentSchema = z.object({
 export const manualEnrollmentSchema = z.object({
     body: z.object({
         batchId: z.string(),
+        paymentData: z.object({
+            senderNumber: z.string(),
+            transactionId: z.string(),
+        }).optional(),
         transactionId: z.string().optional(),
         amount: z.number().positive().optional(),
     }),
@@ -17,6 +21,7 @@ export const manualEnrollmentSchema = z.object({
 export const grantAccessSchema = z.object({
     body: z.object({
         email: z.string().email(),
+        courseId: z.string(),
         batchId: z.string(),
     }),
 });

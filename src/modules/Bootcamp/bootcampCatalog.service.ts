@@ -15,6 +15,7 @@ import {
     BootcampPurchaseStatus,
 } from './bootcampCatalog.interface.js';
 import { recordAudit } from '../../models/auditLog.model.js';
+import { normalizeVideoId } from '../../utils/video.utils.js';
 import { UserModel } from '../User/user.model.js';
 import { logger } from '../../config/logger.js';
 
@@ -204,7 +205,7 @@ const addBootcampVideo = async (
         title: payload.title!,
         description: payload.description,
         videoSource: payload.videoSource ?? 'youtube',
-        videoId: payload.videoId!,
+        videoId: normalizeVideoId(payload.videoSource ?? 'youtube', payload.videoId) || payload.videoId!,
         videoUrl: payload.videoUrl,
         duration: payload.duration ?? 0,
         orderIndex: lastOrder,
@@ -237,6 +238,14 @@ const updateBootcampVideo = async (
     const video = bootcamp.videos.id(videoId);
     if (!video) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Video not found');
+    }
+    if (typeof (payload as any).videoId === 'string' && (payload as any).videoId) {
+        (payload as any).videoId = normalizeVideoId(
+            (payload as any).videoSource ?? (video as any).videoSource,
+            (payload as any).videoId
+        ) || (payload as any).videoId;
+        // A fresh id invalidates any previously stored embed URL.
+        if (!(payload as any).videoUrl) (video as any).videoUrl = undefined;
     }
     Object.assign(video, payload);
     syncRecordingStats(bootcamp);

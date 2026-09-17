@@ -2,6 +2,7 @@ import { StatusCodes } from 'http-status-codes';
 import { LessonModel } from './lesson.model.js';
 import { ModuleModel } from '../Module/module.model.js';
 import ApiError from '../../errors/ApiError.js';
+import { normalizeVideoId } from '../../utils/video.utils.js';
 import { NotificationService } from '../Notification/notification.service.js';
 import { logger } from '../../config/logger.js';
 
@@ -50,6 +51,12 @@ const createLesson = async (moduleId: string, lessonData: any) => {
     } else {
         const maxOrder = await LessonModel.findOne({ moduleId }).sort({ orderIndex: -1 }).lean();
         lessonData.orderIndex = maxOrder ? maxOrder.orderIndex + 1 : 0;
+    }
+
+    if (lessonData.videoId) {
+        lessonData.videoId = normalizeVideoId(lessonData.videoSource, lessonData.videoId);
+        // Drop stale embed URLs built from a previously-wrapped id.
+        delete lessonData.videoUrl;
     }
 
     const lesson = await LessonModel.create({
@@ -113,6 +120,11 @@ const updateLesson = async (lessonId: string, updateData: any) => {
         }
     }
 
+    if (updateData.videoId) {
+        updateData.videoId = normalizeVideoId(updateData.videoSource ?? (oldLesson as any).videoSource, updateData.videoId);
+        delete updateData.videoUrl;
+    }
+
     const lesson = await LessonModel.findByIdAndUpdate(
         lessonId,
         { $set: updateData },
@@ -145,6 +157,29 @@ const deleteLesson = async (lessonId: string) => {
 };
 
 /**
+ * Backfill existing rows created before input normalization: strip full
+ * URLs / double-wrapped values down to raw ids and drop stale videoUrls.
+ * Returns the number of lessons repaired.
+ */
+const backfillVideoIds = async (): Promise<number> => {
+    const lessons = await LessonModel.find({ videoId: { $exists: true, $ne: '' } }).lean();
+    let fixed = 0;
+    for (const lesson of lessons) {
+        const raw = (lesson as any).videoId;
+        if (typeof raw !== 'string' || !raw) continue;
+        const normalized = normalizeVideoId((lesson as any).videoSource, raw);
+        if (normalized && normalized !== raw) {
+            await LessonModel.findByIdAndUpdate((lesson as any)._id, {
+                $set: { videoId: normalized },
+                $unset: { videoUrl: '' },
+            });
+            fixed++;
+        }
+    }
+    return fixed;
+};
+
+/**
  * Reorder lessons in a module
  */
 const reorderLessons = async (moduleId: string, lessonOrders: { lessonId: string; orderIndex: number }[]) => {
@@ -170,4 +205,5 @@ export const LessonService = {
     updateLesson,
     deleteLesson,
     reorderLessons,
+    backfillVideoIds,
 };

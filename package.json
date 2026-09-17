@@ -22,6 +22,7 @@
     "seed:bootcamp": "tsx src/scripts/seedBootcamp.ts",
     "seed:superAdmin": "tsx src/scripts/seedSuperAdmin.ts",
     "migrate:emailVerification": "tsx src/scripts/migrateEmailVerification.ts",
+    "backfill:videoIds": "tsx src/scripts/backfillVideoIds.ts",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --forceExit"
   },
   "devDependencies": {
