@@ -85,3 +85,17 @@ describe('PaymentService.checkPaymentStatus', () => {
     expect(result.payment.status).toBe(Status.Success);
   });
 });
+
+describe('PaymentService.getPaymentHistory — student phone', () => {
+  it('includes the student phone number from the user record', async () => {
+    const user = await createUser({ phone: '01700000000' });
+    const course = await createCourse(adminId);
+    const batch = await createBatch(course._id);
+    await createPayment(user._id, batch._id, { status: Status.Success });
+
+    const result: any = await PaymentService.getPaymentHistory({});
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].student.phone).toBe('01700000000');
+  });
+});

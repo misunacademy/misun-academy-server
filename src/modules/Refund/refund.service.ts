@@ -202,7 +202,7 @@ const listRefunds = async (query: ListQuery) => {
           _id: '$user._id',
           name: '$user.name',
           email: '$user.email',
-          phone: '$user.phoneNumber',
+          phone: '$user.phone',
         },
         batch: {
           _id: '$batch._id',
@@ -253,7 +253,7 @@ const listRefunds = async (query: ListQuery) => {
 
 const getRefundById = async (id: string) => {
   const refund = await RefundModel.findById(id)
-    .populate('userId', 'name email phoneNumber')
+    .populate('userId', 'name email phone')
     .populate('requestedBy', 'name email')
     .populate('processedBy', 'name email')
     .populate('batchId', 'title batchNumber')
