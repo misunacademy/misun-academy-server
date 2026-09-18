@@ -3,7 +3,7 @@ import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
 import { UserModel } from "../User/user.model.js";
 import { BatchModel } from "../Batch/batch.model.js";
 import { CourseModel } from "../Course/course.model.js";
-import { BatchStatus, EnrollmentStatus } from "../../types/common.js";
+import { BatchStatus, CourseStatus, EnrollmentStatus, Status, UserStatus } from "../../types/common.js";
 import mongoose from "mongoose";
 import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
@@ -203,7 +203,7 @@ const getAdminDashboard = async () => {
 
     // Overview stats
     const totalUsers = await UserModel.countDocuments();
-    const totalCourses = await CourseModel.countDocuments({ status: 'Published' });
+    const totalCourses = await CourseModel.countDocuments({ status: CourseStatus.Published });
     const totalBatches = await BatchModel.countDocuments();
     const activeEnrollments = await EnrollmentModel.countDocuments({
         status: EnrollmentStatus.Active
@@ -213,7 +213,7 @@ const getAdminDashboard = async () => {
     const revenueData = await PaymentModel.aggregate([
         {
             $match: {
-                status: 'Success',
+                status: Status.Success,
                 createdAt: { $gte: thirtyDaysAgo }
             }
         },
@@ -284,8 +284,8 @@ const getAdminDashboard = async () => {
  */
 const getUserStats = async () => {
     const totalUsers = await UserModel.countDocuments();
-    const activeUsers = await UserModel.countDocuments({ status: 'Active' });
-    const suspendedUsers = await UserModel.countDocuments({ status: 'Suspended' });
+    const activeUsers = await UserModel.countDocuments({ status: UserStatus.Active });
+    const suspendedUsers = await UserModel.countDocuments({ status: UserStatus.Suspended });
 
     const usersByRole = await UserModel.aggregate([
         {
@@ -329,10 +329,10 @@ const getStudentDashboard = async (userId: string) => {
         status: EnrollmentStatus.Completed
     });
 
-    // Get upcoming classes (active batches)
+    // Get upcoming classes (running batches)
     const upcomingClasses = await BatchModel.countDocuments({
         _id: { $in: enrollments.map(e => e.batchId) },
-        status: 'Active'
+        status: BatchStatus.Running
     });
 
     // Format enrolled courses

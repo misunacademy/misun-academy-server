@@ -12,7 +12,7 @@ import { QuizModel } from '../Quiz/quiz.model.js';
 import { QuestionModel } from '../Quiz/question.model.js';
 import { QuestionService } from '../Quiz/question.service.js';
 import { QuizAttemptModel } from '../Quiz/attempt.model.js';
-import { AttemptStatus } from '../../types/common.js';
+import { AttemptStatus, EnrollmentStatus } from '../../types/common.js';
 
 /**
  * Resolve a userId string to a User doc with role=instructor.
@@ -113,11 +113,17 @@ const getBatchStatistics = async (userId: string, batchId: string) => {
     const batch = await BatchModel.findById(batchId).populate('courseId', 'title').lean();
     if (!batch) throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
 
-    const hasAccess = await verifyInstructorCourseAccess(userId, batch.courseId.toString());
+    // courseId is populated (an object), so read its _id instead of
+    // stringifying the whole document.
+    const populated = batch.courseId as unknown as { _id?: { toString(): string } } | null;
+    const courseIdStr = populated?._id?.toString() ?? String(batch.courseId);
+    if (!Types.ObjectId.isValid(courseIdStr)) throw new ApiError(StatusCodes.NOT_FOUND, 'Batch course not found');
+
+    const hasAccess = await verifyInstructorCourseAccess(userId, courseIdStr);
     if (!hasAccess) throw new ApiError(StatusCodes.FORBIDDEN, 'You are not assigned to this course');
 
     const totalEnrollments = await EnrollmentModel.countDocuments({ batchId });
-    const activeEnrollments = await EnrollmentModel.countDocuments({ batchId, status: 'Active' });
+    const activeEnrollments = await EnrollmentModel.countDocuments({ batchId, status: EnrollmentStatus.Active });
 
     return {
         batch: {
