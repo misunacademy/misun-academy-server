@@ -105,7 +105,8 @@ const deleteRecording = catchAsync(async (req: Request, res: Response) => {
 
 const incrementViewCount = catchAsync(async (req: Request, res: Response) => {
     const { recordingId } = req.params as { recordingId: string };
-    await RecordingService.incrementViewCount(recordingId);
+    const user = req.user as any;
+    await RecordingService.incrementViewCount(recordingId, user?.id);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,

@@ -11,11 +11,11 @@ import { AttemptStatus } from '../../types/common.js';
 import { NotificationService } from '../Notification/notification.service.js';
 import { logger } from '../../config/logger.js';
 
-const shuffleArray = <T>(arr: T[]): T[] => {
+export const shuffleArray = <T>(arr: T[]): T[] => {
     const shuffled = [...arr];
     for (let i = shuffled.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        shuffled[i] = shuffled[j] = arr[Math.floor(Math.random() * arr.length)];
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
     return shuffled;
 };

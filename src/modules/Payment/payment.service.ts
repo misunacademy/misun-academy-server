@@ -374,7 +374,7 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
                     _id: "$user._id",
                     name: "$user.name",
                     email: "$user.email",
-                    phone: "$user.phoneNumber",
+                    phone: "$user.phone",
                 },
                 batch: {
                     _id: "$batch._id",
@@ -479,7 +479,7 @@ const getPaymentDetail = async (transactionId: string) => {
                     _id: "$user._id",
                     name: "$user.name",
                     email: "$user.email",
-                    phone: "$user.phoneNumber",
+                    phone: "$user.phone",
                 },
                 batch: {
                     _id: "$batch._id",

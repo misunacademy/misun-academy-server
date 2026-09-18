@@ -6,6 +6,7 @@ import { IRecording } from './recording.interface.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 import { CourseModel } from '../Course/course.model.js';
 import { Role } from '../../types/role.js';
+import { EnrollmentStatus } from '../../types/common.js';
 import { NotificationService } from '../Notification/notification.service.js';
 import { logger } from '../../config/logger.js';
 
@@ -213,7 +214,22 @@ const deleteRecording = async (recordingId: string): Promise<void> => {
     }
 };
 
-const incrementViewCount = async (recordingId: string): Promise<void> => {
+const incrementViewCount = async (recordingId: string, userId?: string): Promise<void> => {
+    const recording = await RecordingModel.findById(recordingId).lean();
+    if (!recording) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Recording not found');
+    }
+    // Only learners enrolled in the recording's batch count toward views.
+    if (userId && recording.batchId) {
+        const enrollment = await EnrollmentModel.findOne({
+            userId,
+            batchId: recording.batchId,
+            status: EnrollmentStatus.Active,
+        }).lean();
+        if (!enrollment) {
+            throw new ApiError(StatusCodes.FORBIDDEN, 'You are not enrolled in this batch');
+        }
+    }
     await RecordingModel.findByIdAndUpdate(recordingId, {
         $inc: { viewCount: 1 },
     });

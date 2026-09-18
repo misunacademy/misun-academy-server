@@ -300,6 +300,14 @@ export const BatchService = {
             throw new ApiError(StatusCodes.NOT_FOUND, "Batch not found");
         }
 
+        const enrollmentCount = await EnrollmentModel.countDocuments({ batchId: id });
+        if (enrollmentCount > 0) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                "Cannot delete batch with existing enrollments. Remove or transfer enrollments first."
+            );
+        }
+
         await BatchModel.findByIdAndDelete(id);
         return { message: "Batch deleted successfully" };
     },

@@ -160,6 +160,23 @@ const reorderModules = async (
         throw new ApiError(StatusCodes.BAD_REQUEST, 'moduleOrders must be an array');
     }
 
+    const seen = new Set<number>();
+    for (const entry of moduleOrders) {
+        if (seen.has(entry.orderIndex)) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Duplicate orderIndex in reorder payload');
+        }
+        seen.add(entry.orderIndex);
+    }
+
+    // Guard: every reordered module must exist and belong to this course/batch.
+    const moduleIds = moduleOrders.map((entry) => entry.moduleId);
+    const owned = moduleIds.length > 0
+        ? await ModuleModel.find({ _id: { $in: moduleIds }, courseId, batchId }).select('_id').lean()
+        : [];
+    if (owned.length !== moduleIds.length) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'All modules must belong to this course and batch');
+    }
+
     // Update order indexes
     await Promise.all(
         moduleOrders.map(({ moduleId, orderIndex }) =>

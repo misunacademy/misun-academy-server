@@ -8,6 +8,7 @@ export interface IEnrollment {
     enrollmentId?: string; // Optional - assigned after payment confirmation
     paymentId?: Types.ObjectId;
     status: EnrollmentStatus;
+    statusChangeReason?: string;
     accessType?: 'standard' | 'special';
     enrolledAt: Date;
     completedAt?: Date;

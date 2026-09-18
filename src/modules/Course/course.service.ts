@@ -35,12 +35,23 @@ export const CourseService = {
             CourseModel.countDocuments(filter),
         ]);
 
-        // Batch student count lookup to avoid N+1
+        // Batch student count lookup to avoid N+1. Enrollments reference
+        // batches (not courses), so join through the batch's courseId.
         const courseIds = data.map((c) => c._id);
         const counts = courseIds.length > 0
             ? await EnrollmentModel.aggregate([
-                { $match: { course: { $in: courseIds }, status: { $ne: 'cancelled' } } },
-                { $group: { _id: '$course', count: { $sum: 1 } } },
+                { $match: { status: { $ne: 'cancelled' } } },
+                {
+                    $lookup: {
+                        from: 'batches',
+                        localField: 'batchId',
+                        foreignField: '_id',
+                        as: 'batch',
+                    },
+                },
+                { $unwind: '$batch' },
+                { $match: { 'batch.courseId': { $in: courseIds } } },
+                { $group: { _id: '$batch.courseId', count: { $sum: 1 } } },
             ])
             : [];
         const countByCourseId: Record<string, number> = {};

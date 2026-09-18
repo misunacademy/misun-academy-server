@@ -162,7 +162,10 @@ const getStats = async (userId: string, courseId?: string, batchId?: string) => 
     const totalZames = completedAttempts.reduce((sum, a) => sum + (a.zamesEarned || 0), 0);
     const completedCount = completedAttempts.length;
     const totalMarks = completedAttempts.reduce((sum, a) => sum + a.earnedMarks, 0);
-    const averageScore = completedCount > 0 ? Math.round(totalMarks / completedCount) : 0;
+    // Average of attempt percentages (same unit as highestScore and every
+    // client display, which renders this field with a % sign).
+    const totalPercentage = completedAttempts.reduce((sum, a) => sum + (a.percentage || 0), 0);
+    const averageScore = completedCount > 0 ? Math.round(totalPercentage / completedCount) : 0;
     const highestScore = completedCount > 0 ? Math.max(...completedAttempts.map(a => a.percentage)) : 0;
 
     const recentAttempts = completedAttempts.slice(0, 5).map(a => ({

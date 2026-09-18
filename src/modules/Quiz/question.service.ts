@@ -4,6 +4,29 @@ import { QuizModel } from './quiz.model.js';
 import { QuizService } from './quiz.service.js';
 import ApiError from '../../errors/ApiError.js';
 
+/**
+ * correctAnswer stores the option VALUE (option text, or `option-<index>`
+ * fallback for textless options — same convention as the client). Reject
+ * answers that match none of the options.
+ */
+const assertCorrectAnswerMatchesOptions = (options: any[] | undefined, correctAnswer: unknown) => {
+    if (correctAnswer === undefined || correctAnswer === null || correctAnswer === '') return;
+    const values = (options || []).map((o, i) => o?.text || `option-${i}`);
+    if (!values.includes(correctAnswer)) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'correctAnswer must match one of the options');
+    }
+};
+
+/**
+ * Only validate the answer when the option set itself has a valid size —
+ * otherwise the schema's option-count error keeps precedence.
+ */
+const shouldValidateAnswer = (questionType: string | undefined, options: any[] | undefined) => {
+    if (questionType === 'true_false') return true;
+    const count = options?.length ?? 0;
+    return count >= 2 && count <= 6;
+};
+
 const createQuestion = async (quizId: string, questionData: any) => {
     const quiz = await QuizModel.findById(quizId).lean();
     if (!quiz) {
@@ -28,6 +51,10 @@ const createQuestion = async (quizId: string, questionData: any) => {
             { type: 'text', text: 'True' },
             { type: 'text', text: 'False' },
         ];
+    }
+
+    if (shouldValidateAnswer(questionData.questionType, questionData.options)) {
+        assertCorrectAnswerMatchesOptions(questionData.options, questionData.correctAnswer);
     }
 
     const question = await QuestionModel.create({
@@ -75,6 +102,15 @@ const updateQuestion = async (questionId: string, updateData: any) => {
             { type: 'text', text: 'True' },
             { type: 'text', text: 'False' },
         ];
+    }
+
+    const mergedOptions = updateData.options ?? questionDoc.options;
+    const mergedType = updateData.questionType ?? questionDoc.questionType;
+    if (shouldValidateAnswer(mergedType, mergedOptions)) {
+        assertCorrectAnswerMatchesOptions(
+            mergedOptions,
+            updateData.correctAnswer ?? questionDoc.correctAnswer
+        );
     }
 
     Object.assign(questionDoc, updateData);

@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { connectTestDB, disconnectTestDB, clearTestDB } from '../helpers/db.js';
 import { createUser, createAdmin, createCourse, createBatch, createPayment, createEnrollment } from '../helpers/factories.js';
 import { RefundService } from '../../modules/Refund/refund.service.js';
+import { UserModel } from '../../modules/User/user.model.js';
 import { RefundStatus, RefundChannel } from '../../modules/Refund/refund.interface.js';
 import { Status, EnrollmentStatus } from '../../types/common.js';
 
@@ -199,5 +200,26 @@ describe('RefundService.listRefunds', () => {
 
     const none = await RefundService.listRefunds({ status: RefundStatus.Completed });
     expect(none.meta.total).toBe(0);
+  });
+});
+describe('RefundService phone regression', () => {
+  it('listRefunds includes the student phone number', async () => {
+    const { txn, user } = await setupPaidEnrollment();
+    const actor = { id: adminId.toString() };
+    await RefundService.createRefund({ transactionId: txn, reason: 'Withdraw' }, actor);
+    await UserModel.updateOne({ _id: user._id }, { $set: { phone: '01800000000' } });
+
+    const { data } = await RefundService.listRefunds({});
+    expect(data[0].student.phone).toBe('01800000000');
+  });
+
+  it('getRefundById populates the student phone number', async () => {
+    const { txn, user } = await setupPaidEnrollment();
+    const actor = { id: adminId.toString() };
+    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Withdraw' }, actor);
+    await UserModel.updateOne({ _id: user._id }, { $set: { phone: '01900000000' } });
+
+    const found: any = await RefundService.getRefundById((refund._id as mongoose.Types.ObjectId).toString());
+    expect(found.userId.phone).toBe('01900000000');
   });
 });

@@ -27,6 +27,9 @@ const enrollmentSchema = new Schema<IEnrollment>(
             enum: Object.values(EnrollmentStatus),
             default: EnrollmentStatus.Pending,
         },
+        statusChangeReason: {
+            type: String,
+        },
         accessType: {
             type: String,
             enum: ['standard', 'special'],
