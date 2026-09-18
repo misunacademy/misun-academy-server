@@ -12,6 +12,7 @@ import {
     createModuleProgress,
 } from '../helpers/factories.js';
 import { CertificateService } from '../../modules/Certificate/certificate.service.js';
+import { UserModel } from '../../modules/User/user.model.js';
 import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
 import { CertificateStatus, EnrollmentStatus, ProgressStatus } from '../../types/common.js';
 
@@ -412,5 +413,30 @@ describe('CertificateService.getPendingCertificates', () => {
         const pending = await CertificateService.getPendingCertificates();
         expect(pending).toHaveLength(1);
         expect(pending[0].status).toBe(CertificateStatus.Pending);
+    });
+});
+
+describe('CertificateService.verifyCertificate — orphaned refs', () => {
+    it('returns unverifiable instead of crashing when the user was deleted', async () => {
+        const user = await createUser();
+        const course = await createCourse(admin._id, { isCertificateAvailable: true });
+        const batch = await createBatch(course._id);
+        const enrollment = await createActiveEnrollment(user._id, batch._id);
+        const mod = await createModule(course._id, batch._id, 0);
+        await createModuleProgress(enrollment._id, mod._id, {
+            status: ProgressStatus.Completed,
+            completionPercentage: 100,
+        });
+
+        const pending = await CertificateService.requestCertificate(
+            enrollment._id.toString(), user._id.toString()
+        );
+        await CertificateService.approveCertificate(pending.certificateId, admin._id.toString());
+
+        await UserModel.deleteOne({ _id: user._id });
+
+        const result = await CertificateService.verifyCertificate(pending.certificateId);
+        expect(result.isValid).toBe(false);
+        expect(result.status).toBe('unverifiable');
     });
 });

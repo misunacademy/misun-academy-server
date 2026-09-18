@@ -385,14 +385,25 @@ const verifyCertificate = async (certificateId: string) => {
         };
     }
 
+    const recipient = certificate.userId as any;
+    const batch = certificate.batchId as any;
+    const course = batch?.courseId as any;
+    if (!recipient || !batch || !course) {
+        return {
+            isValid: false,
+            status: 'unverifiable',
+            reason: 'Certificate references were removed and can no longer be verified',
+        };
+    }
+
     return {
         isValid: true,
         status: 'active',
         certificate: {
             certificateId: certificate.certificateId,
-            recipientName: (certificate.userId as any).name,
-            courseName: ((certificate.batchId as any).courseId as any).title,
-            batchName: (certificate.batchId as any).title,
+            recipientName: recipient.name,
+            courseName: course.title,
+            batchName: batch.title,
             batchId: certificate.batchId,
             issuedDate: certificate.issueDate,
         },
