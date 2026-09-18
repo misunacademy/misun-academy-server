@@ -57,7 +57,7 @@ const ensureModuleProgress = async (enrollmentId: string, courseId: string, batc
 
     for (const mod of modules) {
         const key = mod._id.toString();
-        const row = byModuleId.get(key);
+        let row = byModuleId.get(key);
 
         if (!row) {
             const created = await ModuleProgressModel.create({
@@ -67,7 +67,17 @@ const ensureModuleProgress = async (enrollmentId: string, courseId: string, batc
                 ...(allPreviousCompleted ? { unlockedAt: new Date() } : {}),
                 completionPercentage: 0,
             });
-            byModuleId.set(key, created.toObject());
+            row = created.toObject();
+            byModuleId.set(key, row);
+        } else if ((row.status as ProgressStatus) === ProgressStatus.Locked && allPreviousCompleted) {
+            // Self-heal: every previous module is completed but this one stayed
+            // locked (e.g. the unlock step previously missed its batch scope).
+            await ModuleProgressModel.updateOne(
+                { _id: row._id },
+                { $set: { status: ProgressStatus.Unlocked, unlockedAt: new Date() } }
+            );
+            row = { ...row, status: ProgressStatus.Unlocked, unlockedAt: new Date() };
+            byModuleId.set(key, row);
         }
 
         const current = byModuleId.get(key)!;
@@ -361,11 +371,17 @@ const unlockNextModule = async (enrollmentId: string, currentModuleId: string) =
 
     if (!currentModule) return;
 
-    // Find next module by orderIndex
-    const nextModule = await ModuleModel.findOne({
+    // Find next module by orderIndex within the SAME batch. Modules are
+    // batch-scoped (courseId + batchId + orderIndex), so omitting batchId can
+    // match a sibling batch's module and leave the real next module locked.
+    const nextQuery: Record<string, unknown> = {
         courseId: currentModule.courseId,
         orderIndex: currentModule.orderIndex + 1,
-    }).lean();
+    };
+    if (currentModule.batchId) {
+        nextQuery.batchId = currentModule.batchId;
+    }
+    const nextModule = await ModuleModel.findOne(nextQuery).lean();
 
     if (!nextModule) return; // No next module
 
