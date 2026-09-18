@@ -6,6 +6,6 @@ export const submitQuizSchema = z.object({
             questionId: z.string(),
             selectedAnswer: z.string().nullable(),
         })),
-        timeTaken: z.number().int().positive().optional(),
+        timeTaken: z.number().int().nonnegative().optional(),
     }),
 });
