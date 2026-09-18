@@ -130,14 +130,10 @@ const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
  * Admin: Update enrollment status
  */
 const updateEnrollmentStatus = catchAsync(async (req: Request, res: Response) => {
-    const { enrollmentId } = req.params;
+    const { enrollmentId } = req.params as { enrollmentId: string };
     const { status, reason } = req.body;
 
-    const enrollment = await EnrollmentModel.findByIdAndUpdate(
-        enrollmentId,
-        { status, $set: { statusChangeReason: reason } },
-        { new: true }
-    );
+    const enrollment = await EnrollmentService.updateEnrollmentStatus(enrollmentId, status, reason);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,

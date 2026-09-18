@@ -28,7 +28,16 @@ export const grantAccessSchema = z.object({
 
 export const updateEnrollmentStatusSchema = z.object({
     body: z.object({
-        status: z.enum(['Pending', 'Active', 'Completed', 'Expired', 'Cancelled', 'PaymentFailed']),
+        // Must match EnrollmentStatus (lowercase) in src/types/common.ts
+        status: z.enum([
+            'pending',
+            'payment-pending',
+            'active',
+            'completed',
+            'suspended',
+            'refunded',
+            'payment-failed',
+        ]),
         reason: z.string().optional(),
     }),
 });

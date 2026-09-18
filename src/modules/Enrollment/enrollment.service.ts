@@ -1041,6 +1041,24 @@ const getAllEnrollments = async (params: {
     };
 };
 
+/**
+ * Admin: update an enrollment's status. Values are validated against
+ * EnrollmentStatus (lowercase) — runs validators so capitalized/unknown
+ * values are rejected instead of corrupting the row — and the optional
+ * reason is persisted to statusChangeReason.
+ */
+const updateEnrollmentStatus = async (enrollmentId: string, status: EnrollmentStatus, reason?: string) => {
+    const enrollment = await EnrollmentModel.findByIdAndUpdate(
+        enrollmentId,
+        { status, $set: { statusChangeReason: reason } },
+        { new: true, runValidators: true }
+    );
+    if (!enrollment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+    }
+    return enrollment;
+};
+
 export const EnrollmentService = {
     initiateEnrollment,
     enrollWithManualPayment,
@@ -1049,6 +1067,7 @@ export const EnrollmentService = {
     getUserEnrollments,
     getEnrollmentDetails,
     getAllEnrollments,
+    updateEnrollmentStatus,
     initializeModuleProgress,
     generateEnrollmentId,
     ensureStudentIdForUser,

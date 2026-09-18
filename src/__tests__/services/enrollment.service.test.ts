@@ -166,3 +166,49 @@ describe('EnrollmentService.getSpecialAccessEnrollments', () => {
     expect(result.meta.totalPages).toBe(1);
   });
 });
+
+describe('EnrollmentService.updateEnrollmentStatus', () => {
+    it('persists a lowercase status and the reason', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const enrollment = await createActiveEnrollment(user._id, batch._id);
+
+        const updated: any = await EnrollmentService.updateEnrollmentStatus(
+            enrollment._id.toString(),
+            EnrollmentStatus.Suspended,
+            'Payment dispute'
+        );
+
+        expect(updated.status).toBe('suspended');
+        expect(updated.statusChangeReason).toBe('Payment dispute');
+    });
+
+    it('throws NOT_FOUND for an unknown enrollment', async () => {
+        await expect(
+            EnrollmentService.updateEnrollmentStatus(
+                new mongoose.Types.ObjectId().toString(),
+                EnrollmentStatus.Active
+            )
+        ).rejects.toThrow(/Enrollment not found/i);
+    });
+
+    it('rejects enum-invalid statuses instead of corrupting the row', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const enrollment = await createActiveEnrollment(user._id, batch._id);
+
+        await expect(
+            (EnrollmentService.updateEnrollmentStatus as any)(enrollment._id.toString(), 'Active')
+        ).rejects.toThrow(/validation failed/i);
+
+        const untouched: any = await EnrollmentService.getEnrollmentDetails(
+            enrollment._id.toString(),
+            user._id.toString()
+        );
+        expect(untouched.status).toBe(EnrollmentStatus.Active);
+    });
+});
