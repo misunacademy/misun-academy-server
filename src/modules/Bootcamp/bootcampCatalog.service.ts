@@ -97,6 +97,7 @@ const getBootcampBySlug = async (slug: string, userId?: string) => {
     const purchased = await hasPaidPurchase(userId, bootcamp._id);
     delete bootcamp.recordedCourseId;
     delete bootcamp.recordedBatchId;
+    delete bootcamp.certificateNote;
     delete bootcamp.videos;
     return { ...bootcamp, hasPurchased: purchased };
 };
@@ -210,6 +211,7 @@ const addBootcampVideo = async (
         duration: payload.duration ?? 0,
         orderIndex: lastOrder,
         isPublished: payload.isPublished ?? true,
+        resources: payload.resources ?? [],
     });
     syncRecordingStats(bootcamp);
     await bootcamp.save();

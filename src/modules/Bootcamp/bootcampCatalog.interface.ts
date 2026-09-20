@@ -36,6 +36,11 @@ export interface IBootcampPaymentMethod {
     type: string;
 }
 
+export interface IBootcampVideoResource {
+    title: string;
+    url: string;
+}
+
 export interface IBootcampVideo {
     _id?: Types.ObjectId;
     title: string;
@@ -46,6 +51,31 @@ export interface IBootcampVideo {
     duration?: number; // seconds
     orderIndex: number;
     isPublished: boolean;
+    resources: IBootcampVideoResource[];
+}
+
+export interface IBootcampPainPoint {
+    title: string;
+    description: string;
+}
+
+export interface IBootcampOutcome {
+    title: string;
+    description: string;
+}
+
+export interface IBootcampMentor {
+    name: string;
+    title?: string;
+    bio?: string;
+    image?: string;
+}
+
+export interface IBootcampTestimonial {
+    name: string;
+    role?: string;
+    quote: string;
+    rating?: number;
 }
 
 export interface IBootcampCatalog {
@@ -69,6 +99,12 @@ export interface IBootcampCatalog {
     schedule: IBootcampScheduleItem[];
     faq: IBootcampFaq[];
     paymentMethods: IBootcampPaymentMethod[];
+    painPoints: IBootcampPainPoint[];
+    outcomes: IBootcampOutcome[];
+    audience: string[];
+    mentor?: IBootcampMentor;
+    testimonials: IBootcampTestimonial[];
+    guaranteeNote?: string;
     registrationOpen: boolean;
     /** @deprecated legacy link kept for migration only — bootcamps no longer depend on Course/Batch */
     recordedCourseId?: Types.ObjectId;

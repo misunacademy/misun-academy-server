@@ -25,6 +25,30 @@ const paymentMethodSchema = z.object({
     type: z.string().max(100).optional(),
 });
 
+const painPointSchema = z.object({
+    title: z.string().min(1).max(200),
+    description: z.string().min(1).max(1000),
+});
+
+const outcomeSchema = z.object({
+    title: z.string().min(1).max(200),
+    description: z.string().min(1).max(1000),
+});
+
+const mentorSchema = z.object({
+    name: z.string().min(1).max(200),
+    title: z.string().max(200).optional(),
+    bio: z.string().max(2000).optional(),
+    image: z.string().url().optional().or(z.literal('')),
+});
+
+const testimonialSchema = z.object({
+    name: z.string().min(1).max(200),
+    role: z.string().max(200).optional(),
+    quote: z.string().min(1).max(2000),
+    rating: z.number().min(1).max(5).optional(),
+});
+
 export const createBootcampSchema = z.object({
     body: z.object({
         title: z.string().min(3).max(200),
@@ -45,6 +69,12 @@ export const createBootcampSchema = z.object({
         schedule: z.array(scheduleSchema).optional(),
         faq: z.array(faqSchema).optional(),
         paymentMethods: z.array(paymentMethodSchema).optional(),
+        painPoints: z.array(painPointSchema).optional(),
+        outcomes: z.array(outcomeSchema).optional(),
+        audience: z.array(z.string().min(1).max(200)).optional(),
+        mentor: mentorSchema.optional(),
+        testimonials: z.array(testimonialSchema).optional(),
+        guaranteeNote: z.string().max(2000).optional(),
         registrationOpen: z.boolean().optional(),
     }),
 });
@@ -73,6 +103,12 @@ export const updateBootcampSchema = z.object({
         schedule: z.array(scheduleSchema).optional(),
         faq: z.array(faqSchema).optional(),
         paymentMethods: z.array(paymentMethodSchema).optional(),
+        painPoints: z.array(painPointSchema).optional(),
+        outcomes: z.array(outcomeSchema).optional(),
+        audience: z.array(z.string().min(1).max(200)).optional(),
+        mentor: mentorSchema.optional(),
+        testimonials: z.array(testimonialSchema).optional(),
+        guaranteeNote: z.string().max(2000).optional(),
         registrationOpen: z.boolean().optional(),
     }),
 });
@@ -115,6 +151,14 @@ export const videoSchema = z.object({
     videoUrl: z.string().max(500).optional(),
     duration: z.number().min(0).optional(),
     isPublished: z.boolean().optional(),
+    resources: z
+        .array(
+            z.object({
+                title: z.string().min(1).max(200),
+                url: z.string().min(1).max(1000),
+            })
+        )
+        .optional(),
 });
 
 export const addBootcampVideoSchema = z.object({
