@@ -1048,9 +1048,11 @@ const getAllEnrollments = async (params: {
  * reason is persisted to statusChangeReason.
  */
 const updateEnrollmentStatus = async (enrollmentId: string, status: EnrollmentStatus, reason?: string) => {
+    // NOTE: update docs must use pure atomic operators — mixing a bare
+    // `status` field with `$set` is rejected by MongoDB.
     const enrollment = await EnrollmentModel.findByIdAndUpdate(
         enrollmentId,
-        { status, $set: { statusChangeReason: reason } },
+        { $set: { status, ...(reason !== undefined ? { statusChangeReason: reason } : {}) } },
         { new: true, runValidators: true }
     );
     if (!enrollment) {
