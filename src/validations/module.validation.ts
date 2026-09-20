@@ -19,6 +19,11 @@ export const updateModuleSchema = z.object({
 
 export const reorderModulesSchema = z.object({
     body: z.object({
-        moduleIds: z.array(z.string()),
+        // What both controllers/services actually consume (module.controller,
+        // instructor.controller, module.service, instructor.service).
+        moduleOrders: z.array(z.object({
+            moduleId: z.string(),
+            orderIndex: z.number().int().min(0),
+        })),
     }),
 });
