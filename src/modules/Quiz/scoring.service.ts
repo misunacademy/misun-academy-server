@@ -52,7 +52,17 @@ const evaluateQuiz = (
             continue;
         }
 
-        const isCorrect = userAnswer.selectedAnswer === question.correctAnswer;
+        // A selection only counts when it is one of the question's option
+        // values (option text, or `option-<index>` for textless options — the
+        // same convention the player sends). This guards against legacy rows
+        // where a bare index was stored: with shuffling enabled an index no
+        // longer points at the intended option, so it must never score.
+        const optionValues = new Set(
+            (question.options || []).map((o: any, i: number) => o?.text || `option-${i}`)
+        );
+        const isCorrect =
+            optionValues.has(userAnswer.selectedAnswer) &&
+            userAnswer.selectedAnswer === question.correctAnswer;
 
         if (isCorrect) {
             earnedMarks += question.marks;

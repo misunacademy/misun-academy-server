@@ -115,4 +115,27 @@ describe('ScoringEngine.evaluate', () => {
         expect(result.passed).toBe(false);
         expect(result.answers).toHaveLength(0);
     });
+
+    it('never scores a selection that matches no option, even if it equals a legacy index correctAnswer', () => {
+        const questions = [
+            buildQuestion({
+                options: [
+                    { type: 'text', text: 'aaa' },
+                    { type: 'text', text: 'bbb' },
+                ],
+                correctAnswer: '0', // legacy bare-index row
+                marks: 2,
+            }),
+        ];
+        const answers: QuizAnswerInput[] = [
+            { questionId: questions[0]._id!.toString(), selectedAnswer: '0' },
+        ];
+
+        const result = ScoringEngine.evaluate(questions, answers, 50);
+
+        expect(result.earnedMarks).toBe(0);
+        expect(result.correctCount).toBe(0);
+        expect(result.wrongCount).toBe(1);
+        expect(result.answers[0].isCorrect).toBe(false);
+    });
 });
