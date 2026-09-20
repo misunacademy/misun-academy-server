@@ -164,9 +164,11 @@ const reorderQuizzes = async (moduleId: string, quizOrders: { quizId: string; or
         throw new ApiError(StatusCodes.BAD_REQUEST, 'quizOrders must be an array');
     }
 
+    // Scoped to the module so a stray/foreign quizId can never move a
+    // quiz that belongs to another module.
     await Promise.all(
         quizOrders.map(({ quizId, orderIndex }) =>
-            QuizModel.findByIdAndUpdate(quizId, { orderIndex })
+            QuizModel.findOneAndUpdate({ _id: quizId, moduleId }, { orderIndex })
         )
     );
 
