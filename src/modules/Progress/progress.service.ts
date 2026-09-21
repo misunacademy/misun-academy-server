@@ -69,7 +69,27 @@ const recalculateModuleProgress = async (enrollmentId: string, moduleId: string)
     ]);
 
     const totalItems = lessons.length + quizzes.length;
-    if (totalItems === 0) return;
+    if (totalItems === 0) {
+        // A module with no lessons and no published quizzes has nothing to
+        // complete — treat it as complete so a freshly created or draft-only
+        // module never blocks certificates or sequential unlocking.
+        const completed = await ModuleProgressModel.findOneAndUpdate(
+            { enrollmentId, moduleId },
+            {
+                $set: {
+                    completionPercentage: 100,
+                    status: ProgressStatus.Completed,
+                    completedAt: new Date(),
+                },
+            },
+            { upsert: true, new: true }
+        );
+
+        // Check if next module should be unlocked (sequential unlocking)
+        await unlockNextModule(enrollmentId, moduleId);
+
+        return completed;
+    }
 
     const [lessonProgress, quizProgress] = await Promise.all([
         LessonProgressModel.find({
