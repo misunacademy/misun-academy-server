@@ -21,7 +21,7 @@ export const refundNoteSchema = z.object({
 
 export const refundQuerySchema = z.object({
   query: z.object({
-    status: z.enum(['pending', 'approved', 'rejected', 'completed']).optional(),
+    status: z.enum(['pending', 'approved', 'processing', 'rejected', 'completed']).optional(),
     search: z.string().trim().max(100).optional(),
     page: z.coerce.number().int().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
