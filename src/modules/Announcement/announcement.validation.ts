@@ -6,7 +6,7 @@ export const createAnnouncementSchema = z.object({
     message: z.string().trim().min(10).max(2000),
     type: z.enum(['info', 'success', 'warning', 'critical']).optional(),
     audience: z.enum(['all', 'learner', 'instructor', 'employee', 'admin']).optional(),
-    status: z.enum(['draft', 'published', 'scheduled']).optional(),
+    status: z.enum(['draft', 'published', 'scheduled', 'unpublished']).optional(),
     link: z.string().trim().max(2048).optional().or(z.literal('')),
     isDismissible: z.boolean().optional(),
     notifyByEmail: z.boolean().optional(),
@@ -22,7 +22,7 @@ export const updateAnnouncementSchema = z.object({
     message: z.string().trim().min(10).max(2000).optional(),
     type: z.enum(['info', 'success', 'warning', 'critical']).optional(),
     audience: z.enum(['all', 'learner', 'instructor', 'employee', 'admin']).optional(),
-    status: z.enum(['draft', 'published', 'scheduled', 'expired']).optional(),
+    status: z.enum(['draft', 'published', 'scheduled', 'expired', 'unpublished']).optional(),
     link: z.string().trim().max(2048).optional().or(z.literal('')),
     isDismissible: z.boolean().optional(),
     notifyByEmail: z.boolean().optional(),
@@ -37,7 +37,7 @@ export const announcementIdParamSchema = z.object({
 
 export const announcementQuerySchema = z.object({
   query: z.object({
-    status: z.enum(['draft', 'published', 'scheduled', 'expired']).optional(),
+    status: z.enum(['draft', 'published', 'scheduled', 'expired', 'unpublished']).optional(),
     audience: z.enum(['all', 'learner', 'instructor', 'employee', 'admin']).optional(),
     search: z.string().trim().max(100).optional(),
     page: z.coerce.number().int().min(1).optional(),

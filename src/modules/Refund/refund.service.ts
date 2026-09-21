@@ -9,6 +9,7 @@ import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
 import { recordAudit } from '../../models/auditLog.model.js';
 import { NotificationService } from '../Notification/notification.service.js';
+import { Role } from '../../types/role.js';
 import env from '../../config/env.js';
 
 interface Actor {
@@ -33,6 +34,26 @@ const getBankTranId = (gatewayResponse: unknown): string | undefined => {
   if (!gatewayResponse || typeof gatewayResponse !== 'object') return undefined;
   const gw = gatewayResponse as Record<string, unknown>;
   return typeof gw.bank_tran_id === 'string' && gw.bank_tran_id ? gw.bank_tran_id : undefined;
+};
+
+/**
+ * Maker-checker: the admin who requested a refund must not be the one to
+ * move its money (approve / complete). Superadmins bypass — they are the
+ * checker by definition, which also keeps solo-superadmin teams working.
+ * Cancelling (reject) your own request is always allowed: no money moves.
+ */
+const assertChecker = (
+  refund: { requestedBy: unknown },
+  actor: Actor,
+  action: 'approve' | 'complete'
+) => {
+  if (actor.role === Role.SUPERADMIN) return;
+  if (refund.requestedBy?.toString() === actor.id) {
+    throw new ApiError(
+      StatusCodes.FORBIDDEN,
+      `A second admin must ${action} this refund — the requester cannot ${action} their own refund`
+    );
+  }
 };
 
 const resolveSslBaseUrl = (): string =>
@@ -98,20 +119,30 @@ const createRefund = async (payload: CreateRefundPayload, actor: Actor, ip?: str
   const channel =
     payment.method === 'SSLCommerz' && bankTranId ? RefundChannel.Gateway : RefundChannel.Manual;
 
-  const refund = await RefundModel.create({
-    paymentId: payment._id,
-    transactionId: payment.transactionId,
-    enrollmentId: payment.enrollmentId,
-    userId: payment.userId,
-    batchId: payment.batchId,
-    amount,
-    currency: payment.currency,
-    method: payment.method,
-    channel,
-    status: RefundStatus.Pending,
-    reason: payload.reason,
-    requestedBy: new mongoose.Types.ObjectId(actor.id),
-  });
+  let refund;
+  try {
+    refund = await RefundModel.create({
+      paymentId: payment._id,
+      transactionId: payment.transactionId,
+      enrollmentId: payment.enrollmentId,
+      userId: payment.userId,
+      batchId: payment.batchId,
+      amount,
+      currency: payment.currency,
+      method: payment.method,
+      channel,
+      status: RefundStatus.Pending,
+      reason: payload.reason,
+      requestedBy: new mongoose.Types.ObjectId(actor.id),
+    });
+  } catch (error: any) {
+    // Partial unique index backstop: a concurrent request won the race after
+    // the activeRefund check above.
+    if (error?.code === 11000) {
+      throw new ApiError(StatusCodes.CONFLICT, 'An active refund already exists for this transaction');
+    }
+    throw error;
+  }
 
   await recordAudit({
     actor: actor.id,
@@ -262,19 +293,32 @@ const getRefundById = async (id: string) => {
 };
 
 const approveRefund = async (id: string, note: string | undefined, actor: Actor, ip?: string) => {
-  const refund = await RefundModel.findById(id);
-  if (!refund) {
+  const existing = await RefundModel.findById(id).lean();
+  if (!existing) {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Refund not found');
   }
-  if (refund.status !== RefundStatus.Pending) {
+  if (existing.status !== RefundStatus.Pending) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Only pending refunds can be approved');
   }
+  assertChecker(existing, actor, 'approve');
 
-  refund.status = RefundStatus.Approved;
-  refund.decisionNote = note ?? refund.decisionNote;
-  refund.processedBy = new mongoose.Types.ObjectId(actor.id);
-  refund.processedAt = new Date();
-  await refund.save();
+  // Atomic transition: exactly one concurrent approver wins; the loser sees
+  // null and gets a clear "already decided" error instead of double audit.
+  const refund = await RefundModel.findOneAndUpdate(
+    { _id: id, status: RefundStatus.Pending },
+    {
+      $set: {
+        status: RefundStatus.Approved,
+        decisionNote: note ?? existing.decisionNote,
+        processedBy: new mongoose.Types.ObjectId(actor.id),
+        processedAt: new Date(),
+      },
+    },
+    { new: true }
+  );
+  if (!refund) {
+    throw new ApiError(StatusCodes.CONFLICT, 'Refund was already decided by another admin');
+  }
 
   await recordAudit({
     actor: actor.id,
@@ -290,19 +334,30 @@ const approveRefund = async (id: string, note: string | undefined, actor: Actor,
 };
 
 const rejectRefund = async (id: string, note: string | undefined, actor: Actor, ip?: string) => {
-  const refund = await RefundModel.findById(id);
-  if (!refund) {
+  const existing = await RefundModel.findById(id).lean();
+  if (!existing) {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Refund not found');
   }
-  if (refund.status !== RefundStatus.Pending) {
+  if (existing.status !== RefundStatus.Pending) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Only pending refunds can be rejected');
   }
+  // No maker-checker here: cancelling moves no money.
 
-  refund.status = RefundStatus.Rejected;
-  refund.decisionNote = note ?? refund.decisionNote;
-  refund.processedBy = new mongoose.Types.ObjectId(actor.id);
-  refund.processedAt = new Date();
-  await refund.save();
+  const refund = await RefundModel.findOneAndUpdate(
+    { _id: id, status: RefundStatus.Pending },
+    {
+      $set: {
+        status: RefundStatus.Rejected,
+        decisionNote: note ?? existing.decisionNote,
+        processedBy: new mongoose.Types.ObjectId(actor.id),
+        processedAt: new Date(),
+      },
+    },
+    { new: true }
+  );
+  if (!refund) {
+    throw new ApiError(StatusCodes.CONFLICT, 'Refund was already decided by another admin');
+  }
 
   await recordAudit({
     actor: actor.id,
@@ -318,29 +373,57 @@ const rejectRefund = async (id: string, note: string | undefined, actor: Actor, 
 };
 
 const completeRefund = async (id: string, actor: Actor, ip?: string) => {
-  const refund = await RefundModel.findById(id);
-  if (!refund) {
+  const existing = await RefundModel.findById(id).lean();
+  if (!existing) {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Refund not found');
   }
-  if (refund.status !== RefundStatus.Approved) {
+  if (existing.status !== RefundStatus.Approved) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Only approved refunds can be completed');
   }
+  assertChecker(existing, actor, 'complete');
 
-  let gatewayResponse: unknown = refund.gatewayResponse;
-  let gatewayRef = refund.gatewayRef;
+  // Atomic claim BEFORE any gateway I/O: exactly one concurrent completer
+  // moves Approved -> Processing, so the gateway refund can never fire twice.
+  const claimed = await RefundModel.findOneAndUpdate(
+    { _id: id, status: RefundStatus.Approved },
+    {
+      $set: {
+        status: RefundStatus.Processing,
+        processedBy: new mongoose.Types.ObjectId(actor.id),
+        processedAt: new Date(),
+      },
+    },
+    { new: true }
+  ).lean();
+  if (!claimed) {
+    throw new ApiError(StatusCodes.CONFLICT, 'Refund is already being completed by another admin');
+  }
 
-  if (refund.channel === RefundChannel.Gateway) {
-    const payment = await PaymentModel.findById(refund.paymentId).lean();
+  let gatewayResponse: unknown = claimed.gatewayResponse;
+  let gatewayRef = claimed.gatewayRef;
+
+  if (claimed.channel === RefundChannel.Gateway) {
+    const payment = await PaymentModel.findById(claimed.paymentId).lean();
     const bankTranId = getBankTranId(payment?.gatewayResponse);
     if (!bankTranId) {
+      // Release the claim so the refund can be completed manually instead of
+      // wedging it in Processing forever.
+      await RefundModel.findOneAndUpdate(
+        { _id: id, status: RefundStatus.Processing },
+        { $set: { status: RefundStatus.Approved } }
+      );
       throw new ApiError(
         StatusCodes.BAD_REQUEST,
         'Gateway refund unavailable: bank_tran_id missing. Complete this refund manually instead.'
       );
     }
 
-    const result = await requestGatewayRefund(bankTranId, refund.amount, `Refund for ${refund.transactionId}`);
+    const result = await requestGatewayRefund(bankTranId, claimed.amount, `Refund for ${claimed.transactionId}`);
     if (!result || result.status !== 'SUCCESS') {
+      await RefundModel.findOneAndUpdate(
+        { _id: id, status: RefundStatus.Processing },
+        { $set: { status: RefundStatus.Approved, gatewayResponse: result ?? { error: 'no response from SSLCommerz' } } }
+      );
       throw new ApiError(
         StatusCodes.BAD_GATEWAY,
         `Gateway refund failed: ${result?.errorReason ?? 'no response from SSLCommerz'}`
@@ -354,22 +437,32 @@ const completeRefund = async (id: string, actor: Actor, ip?: string) => {
   try {
     session.startTransaction();
 
-    refund.status = RefundStatus.Completed;
-    refund.gatewayResponse = gatewayResponse;
-    refund.gatewayRef = gatewayRef;
-    refund.processedBy = new mongoose.Types.ObjectId(actor.id);
-    refund.completedAt = new Date();
-    await refund.save({ session });
+    const finished = await RefundModel.findOneAndUpdate(
+      { _id: id, status: RefundStatus.Processing },
+      {
+        $set: {
+          status: RefundStatus.Completed,
+          gatewayResponse,
+          gatewayRef,
+          processedBy: new mongoose.Types.ObjectId(actor.id),
+          completedAt: new Date(),
+        },
+      },
+      { new: true, session }
+    );
+    if (!finished) {
+      throw new ApiError(StatusCodes.CONFLICT, 'Refund changed state during completion');
+    }
 
     await PaymentModel.findOneAndUpdate(
-      { transactionId: refund.transactionId },
+      { transactionId: claimed.transactionId },
       { status: Status.Refunded, updatedAt: new Date() },
       { session }
     );
 
-    if (refund.enrollmentId) {
+    if (claimed.enrollmentId) {
       await EnrollmentModel.findOneAndUpdate(
-        { enrollmentId: refund.enrollmentId },
+        { enrollmentId: claimed.enrollmentId },
         { status: EnrollmentStatus.Refunded },
         { session }
       );
@@ -383,14 +476,14 @@ const completeRefund = async (id: string, actor: Actor, ip?: string) => {
     throw error;
   }
 
-  const user = await UserModel.findById(refund.userId).lean();
+  const user = await UserModel.findById(claimed.userId).lean();
   if (user) {
     try {
       await NotificationService.createNotification({
         userId: user._id.toString(),
         type: 'payment_refunded',
         title: 'Payment refunded',
-        message: `Your payment for transaction ${refund.transactionId} has been refunded.`,
+        message: `Your payment for transaction ${claimed.transactionId} has been refunded.`,
         link: '/dashboard/notifications',
       });
     } catch {
@@ -405,9 +498,9 @@ const completeRefund = async (id: string, actor: Actor, ip?: string) => {
     targetType: 'Refund',
     targetId: id,
     metadata: {
-      transactionId: refund.transactionId,
-      amount: refund.amount,
-      channel: refund.channel,
+      transactionId: claimed.transactionId,
+      amount: claimed.amount,
+      channel: claimed.channel,
       gatewayRef,
     },
     ip,

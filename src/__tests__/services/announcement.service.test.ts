@@ -164,6 +164,44 @@ describe('AnnouncementService.publishAnnouncement', () => {
     });
 });
 
+describe('AnnouncementService.unpublishAnnouncement', () => {
+    it('returns null for unknown id', async () => {
+        const admin = await createAdmin({ email: `admin-${uid()}@example.com` });
+        expect(await AnnouncementService.unpublishAnnouncement(admin._id.toString(), actorOf(admin))).toBeNull();
+    });
+
+    it('moves a published announcement to unpublished and hides it from live', async () => {
+        const admin = await createAdmin({ email: `admin-${uid()}@example.com` });
+        const actor = actorOf(admin);
+        const created: any = await AnnouncementService.createAnnouncement(
+            { title: `Take down ${uid()}`, message: 'bye' },
+            actor
+        );
+        await AnnouncementService.publishAnnouncement(created._id.toString(), actor);
+
+        const unpublished: any = await AnnouncementService.unpublishAnnouncement(created._id.toString(), actor);
+        expect(unpublished.status).toBe(AnnouncementStatus.Unpublished);
+
+        const live = await AnnouncementService.getLiveAnnouncements('all', 10);
+        expect(live.map((a: any) => a._id.toString())).not.toContain(created._id.toString());
+
+        const stats = await AnnouncementService.getAnnouncementStats();
+        expect(stats.unpublished).toBe(1);
+        expect(stats.published).toBe(0);
+    });
+
+    it('rejects unpublishing a draft', async () => {
+        const admin = await createAdmin({ email: `admin-${uid()}@example.com` });
+        const created: any = await AnnouncementService.createAnnouncement(
+            { title: `Draft ${uid()}`, message: 'm' },
+            actorOf(admin)
+        );
+        await expect(
+            AnnouncementService.unpublishAnnouncement(created._id.toString(), actorOf(admin))
+        ).rejects.toThrow(/only published or scheduled/i);
+    });
+});
+
 describe('AnnouncementService.getLiveAnnouncements / getAnnouncementStats / isLiveNow', () => {
     it('shows only live published announcements for the requested audience', async () => {
         const admin = await createAdmin({ email: `admin-${uid()}@example.com` });

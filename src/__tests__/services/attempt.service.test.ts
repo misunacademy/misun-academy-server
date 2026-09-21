@@ -7,8 +7,10 @@ import {
     createCourse,
     createBatch,
     createActiveEnrollment,
+    createEnrollment,
     createModule,
 } from '../helpers/factories.js';
+import { EnrollmentStatus } from '../../types/common.js';
 import { QuizModel } from '../../modules/Quiz/quiz.model.js';
 import { QuestionModel } from '../../modules/Quiz/question.model.js';
 import { QuizAttemptModel } from '../../modules/Quiz/attempt.model.js';
@@ -224,5 +226,45 @@ describe('AttemptService — server-side timed quiz expiry', () => {
         await expect(
             AttemptService.startAttempt(quiz._id.toString(), user._id.toString(), enrollment._id.toString())
         ).rejects.toThrow(/maximum number of attempts/i);
+    });
+
+    it('rejects enrollments that do not belong to the learner or quiz batch', async () => {
+        const { user, quiz, enrollment } = await seedTimedQuiz();
+        const stamp = `${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+        const stranger = await createUser({ email: `stranger-${stamp}@example.com` });
+        const otherAdmin = await createAdmin({ email: `other-admin-${stamp}@example.com` });
+        const otherCourse = await createCourse(otherAdmin._id, { title: `Other ${stamp}`, slug: `other-${stamp}` });
+        const otherBatch = await createBatch(otherCourse._id);
+        const otherEnrollment = await createEnrollment(stranger._id, otherBatch._id, {
+            status: EnrollmentStatus.Active,
+            enrollmentId: `MA-9${stamp}`,
+            enrolledAt: new Date(),
+        });
+
+        await expect(
+            AttemptService.startAttempt(quiz._id.toString(), user._id.toString(), otherEnrollment._id.toString())
+        ).rejects.toThrow(/does not belong to you/i);
+
+        await expect(
+            AttemptService.startAttempt(quiz._id.toString(), user._id.toString(), 'not-an-id')
+        ).rejects.toThrow(/invalid enrollment/i);
+
+        // enrollment of the right user but for a different batch
+        const wrongBatchEnrollment = await createEnrollment(user._id, otherBatch._id, {
+            status: EnrollmentStatus.Active,
+            enrollmentId: `MA-8${stamp}`,
+            enrolledAt: new Date(),
+        });
+        await expect(
+            AttemptService.startAttempt(quiz._id.toString(), user._id.toString(), wrongBatchEnrollment._id.toString())
+        ).rejects.toThrow(/does not include this quiz/i);
+
+        // sanity: the correct enrollment still works
+        const ok = await AttemptService.startAttempt(
+            quiz._id.toString(),
+            user._id.toString(),
+            enrollment._id.toString()
+        );
+        expect(ok.attempt.status).toBe('in_progress');
     });
 });

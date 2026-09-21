@@ -8,6 +8,8 @@ import {
 } from './announcement.interface.js';
 import { UserModel } from '../User/user.model.js';
 import { recordAudit } from '../../models/auditLog.model.js';
+import ApiError from '../../errors/ApiError.js';
+import { StatusCodes } from 'http-status-codes';
 import { NotificationModel } from '../Notification/notification.model.js';
 import { sendAnnouncementEmail } from '../../services/misunAcademyEmails.js';
 import env from '../../config/env.js';
@@ -282,6 +284,45 @@ const publishAnnouncement = async (
   return before.toObject();
 };
 
+const unpublishAnnouncement = async (
+  id: string,
+  actor: { id: string; role?: string },
+  ip?: string
+) => {
+  const before = await AnnouncementModel.findById(id).lean();
+  if (!before) return null;
+
+  // Only live-ish announcements can be taken down; drafts are already hidden
+  // and expired ones ran their course (re-publish instead).
+  if (
+    before.status !== AnnouncementStatus.Published &&
+    before.status !== AnnouncementStatus.Scheduled
+  ) {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      'Only published or scheduled announcements can be unpublished'
+    );
+  }
+
+  const updated = await AnnouncementModel.findByIdAndUpdate(
+    id,
+    { status: AnnouncementStatus.Unpublished },
+    { new: true, runValidators: true }
+  ).lean();
+
+  await recordAudit({
+    actor: actor.id,
+    actorRole: actor.role,
+    action: 'announcement.unpublish',
+    targetType: 'Announcement',
+    targetId: id,
+    metadata: { beforeStatus: before.status },
+    ip,
+  });
+
+  return updated;
+};
+
 const getLiveAnnouncements = async (audience?: string, limit = 5) => {
   const now = new Date();
   const query: FilterQuery<IAnnouncement> = {
@@ -303,12 +344,13 @@ const getLiveAnnouncements = async (audience?: string, limit = 5) => {
 };
 
 const getAnnouncementStats = async () => {
-  const [total, draft, published, scheduled, expired, byAudience, byType] = await Promise.all([
+  const [total, draft, published, scheduled, expired, unpublished, byAudience, byType] = await Promise.all([
     AnnouncementModel.countDocuments(),
     AnnouncementModel.countDocuments({ status: AnnouncementStatus.Draft }),
     AnnouncementModel.countDocuments({ status: AnnouncementStatus.Published }),
     AnnouncementModel.countDocuments({ status: AnnouncementStatus.Scheduled }),
     AnnouncementModel.countDocuments({ status: AnnouncementStatus.Expired }),
+    AnnouncementModel.countDocuments({ status: AnnouncementStatus.Unpublished }),
     AnnouncementModel.aggregate([{ $group: { _id: '$audience', count: { $sum: 1 } } }]),
     AnnouncementModel.aggregate([{ $group: { _id: '$type', count: { $sum: 1 } } }]),
   ]);
@@ -318,7 +360,7 @@ const getAnnouncementStats = async () => {
   const typeMap: Record<string, number> = {};
   byType.forEach((b: any) => { if (b._id) typeMap[b._id] = b.count; });
 
-  return { total, draft, published, scheduled, expired, byAudience: audienceMap, byType: typeMap };
+  return { total, draft, published, scheduled, expired, unpublished, byAudience: audienceMap, byType: typeMap };
 };
 
 export const AnnouncementService = {
@@ -328,6 +370,7 @@ export const AnnouncementService = {
   updateAnnouncement,
   deleteAnnouncement,
   publishAnnouncement,
+  unpublishAnnouncement,
   getLiveAnnouncements,
   getAnnouncementStats,
   isLiveNow,

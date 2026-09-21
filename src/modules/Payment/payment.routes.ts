@@ -2,7 +2,7 @@ import express from 'express';
 import { PaymentController } from './payment.controller.js';
 import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 import validateRequest from '../../middlewares/validateRequest.js';
-import { verifyPaymentSchema, updatePaymentStatusSchema } from '../../validations/payment.validation.js';
+import { verifyPaymentSchema, updatePaymentStatusSchema, paymentHistoryQuerySchema } from '../../validations/payment.validation.js';
 
 const router = express.Router();
 
@@ -31,6 +31,7 @@ router.get(
     '/history',
     requireAuth,
     requireAdmin,
+    validateRequest(paymentHistoryQuerySchema),
     PaymentController.getPaymentHistory
 );
 

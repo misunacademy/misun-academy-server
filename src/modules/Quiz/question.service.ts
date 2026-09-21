@@ -165,9 +165,11 @@ const reorderQuestions = async (quizId: string, questionOrders: { questionId: st
         throw new ApiError(StatusCodes.BAD_REQUEST, 'questionOrders must be an array');
     }
 
+    // Scoped to the quiz so a stray/foreign questionId can never move a
+    // question that belongs to another quiz.
     await Promise.all(
         questionOrders.map(({ questionId, orderIndex }) =>
-            QuestionModel.findByIdAndUpdate(questionId, { orderIndex })
+            QuestionModel.findOneAndUpdate({ _id: questionId, quizId }, { orderIndex })
         )
     );
 

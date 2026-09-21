@@ -65,6 +65,15 @@ router.post(
   AnnouncementController.publishAnnouncement
 );
 
+// Admin: unpublish (take down without deleting)
+router.post(
+  '/:id/unpublish',
+  requireAuth,
+  requireAdmin,
+  validateRequest(announcementIdParamSchema),
+  AnnouncementController.unpublishAnnouncement
+);
+
 // Admin: delete
 router.delete(
   '/:id',

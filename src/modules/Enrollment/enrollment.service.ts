@@ -418,10 +418,9 @@ const enrollWithManualPayment = async (
         if (existingEnrollment.status === EnrollmentStatus.Active) {
             throw new ApiError(StatusCodes.CONFLICT, 'You are already enrolled in this batch');
         }
-
-        // Allow reusing an existing pending/failed enrollment for manual payment
-        existingEnrollment.status = EnrollmentStatus.PaymentPending;
-        await existingEnrollment.save();
+        // NOTE: the PaymentPending flip happens inside the transaction below.
+        // A premature save here would persist the flip even when batch/UTR
+        // validation fails afterwards, stranding the enrollment.
     }
 
     const batch = await BatchModel.findById(batchId).populate('courseId').lean();
@@ -471,7 +470,10 @@ const enrollWithManualPayment = async (
 
         let enrollment = existingEnrollment;
 
-        const batchNumber = batch.title?.split(' ')[1];
+        // Prefer the stable batch number; fall back to the legacy "second
+        // word of the title" convention, never undefined.
+        const batchNumber =
+            (batch as any).batchNumber ?? batch.title?.split(' ')[1] ?? '';
         const courseBrand = deriveCourseBrand(batch.courseId as any);
 
         // Create or reuse enrollment with a robust enrollmentId assignment.
@@ -832,8 +834,10 @@ const getAllEnrollments = async (params: {
     search?: string;
 }) => {
     const { batchId, courseId, status: statusParam, page = 1, limit = 10, search } = params;
-    const pageNumber = Number(page);
-    const limitNumber = Number(limit);
+    // Sanitize pagination: raw query strings can be non-numeric (NaN $skip
+    // throws) — clamp to sane bounds.
+    const pageNumber = Math.max(1, Number(page) || 1);
+    const limitNumber = Math.min(100, Math.max(1, Number(limit) || 10));
 
     const pipeline: any[] = [];
 
@@ -844,7 +848,14 @@ const getAllEnrollments = async (params: {
             ? (statusParam as EnrollmentStatus)
             : EnrollmentStatus.Active;
     matchStage.status = requestedStatus;
-    if (batchId) matchStage.batchId = new mongoose.Types.ObjectId(batchId as string);
+    if (batchId) {
+        // Mirror the courseId guard below: an invalid id is a 400, not a
+        // BSONError 500 (new ObjectId() throws outside CastError handling).
+        if (typeof batchId !== 'string' || !mongoose.Types.ObjectId.isValid(batchId)) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid batchId');
+        }
+        matchStage.batchId = new mongoose.Types.ObjectId(batchId);
+    }
 
     if (Object.keys(matchStage).length > 0) {
         pipeline.push({ $match: matchStage });
@@ -1048,9 +1059,11 @@ const getAllEnrollments = async (params: {
  * reason is persisted to statusChangeReason.
  */
 const updateEnrollmentStatus = async (enrollmentId: string, status: EnrollmentStatus, reason?: string) => {
+    // NOTE: update docs must use pure atomic operators — mixing a bare
+    // `status` field with `$set` is rejected by MongoDB.
     const enrollment = await EnrollmentModel.findByIdAndUpdate(
         enrollmentId,
-        { status, $set: { statusChangeReason: reason } },
+        { $set: { status, ...(reason !== undefined ? { statusChangeReason: reason } : {}) } },
         { new: true, runValidators: true }
     );
     if (!enrollment) {

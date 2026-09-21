@@ -8,6 +8,7 @@ import { RefundStatus, RefundChannel } from '../../modules/Refund/refund.interfa
 import { Status, EnrollmentStatus } from '../../types/common.js';
 
 let adminId: mongoose.Types.ObjectId;
+let checkerId: mongoose.Types.ObjectId;
 let txnSeq = 0;
 
 const nextTxn = (prefix = 'TXN') => `${prefix}-${Date.now()}-${++txnSeq}`;
@@ -24,7 +25,13 @@ beforeEach(async () => {
   await clearTestDB();
   const admin = await createAdmin();
   adminId = admin._id;
+  // Second admin with a guaranteed-unique email for maker-checker flows.
+  const checker = await createAdmin({ email: `checker-${Date.now()}-${++txnSeq}@example.com` });
+  checkerId = checker._id;
 });
+
+const requester = () => ({ id: adminId.toString(), role: 'admin' });
+const checker = () => ({ id: checkerId.toString(), role: 'admin' });
 
 const setupPaidEnrollment = async (overrides: Record<string, unknown> = {}) => {
   const user = await createUser();
@@ -110,36 +117,51 @@ describe('RefundService.createRefund', () => {
 describe('RefundService decisions', () => {
   it('approves a pending refund and stamps the processor', async () => {
     const { txn } = await setupPaidEnrollment();
-    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Withdraw' }, { id: adminId.toString() });
+    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Withdraw' }, requester());
 
     const approved = await RefundService.approveRefund(
       (refund._id as mongoose.Types.ObjectId).toString(),
       'Verified with student',
-      { id: adminId.toString() }
+      checker()
     );
 
     expect(approved.status).toBe(RefundStatus.Approved);
     expect(approved.decisionNote).toBe('Verified with student');
-    expect(approved.processedBy?.toString()).toBe(adminId.toString());
+    expect(approved.processedBy?.toString()).toBe(checkerId.toString());
+  });
+
+  it('rejects the requester approving or completing their own refund (maker-checker)', async () => {
+    const { txn } = await setupPaidEnrollment();
+    const own = { id: adminId.toString(), role: 'admin' };
+    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Withdraw' }, own);
+    const refundId = (refund._id as mongoose.Types.ObjectId).toString();
+
+    await expect(RefundService.approveRefund(refundId, undefined, own)).rejects.toMatchObject({ statusCode: 403 });
+
+    // A superadmin bypasses the separation (checker by definition).
+    const approved = await RefundService.approveRefund(refundId, undefined, { id: adminId.toString(), role: 'superadmin' });
+    expect(approved.status).toBe(RefundStatus.Approved);
+
+    // Requester still cannot complete even after someone else approved.
+    await expect(RefundService.completeRefund(refundId, own)).rejects.toMatchObject({ statusCode: 403 });
   });
 
   it('rejects completing a refund that is still pending', async () => {
     const { txn } = await setupPaidEnrollment();
-    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Withdraw' }, { id: adminId.toString() });
+    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Withdraw' }, requester());
 
     await expect(
-      RefundService.completeRefund((refund._id as mongoose.Types.ObjectId).toString(), { id: adminId.toString() })
+      RefundService.completeRefund((refund._id as mongoose.Types.ObjectId).toString(), checker())
     ).rejects.toMatchObject({ statusCode: 400 });
   });
 
   it('completes a manual refund and revokes the enrollment', async () => {
     const { txn } = await setupPaidEnrollment();
-    const actor = { id: adminId.toString() };
-    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Withdraw' }, actor);
+    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Withdraw' }, requester());
     const refundId = (refund._id as mongoose.Types.ObjectId).toString();
 
-    await RefundService.approveRefund(refundId, undefined, actor);
-    const completed = await RefundService.completeRefund(refundId, actor);
+    await RefundService.approveRefund(refundId, undefined, checker());
+    const completed = await RefundService.completeRefund(refundId, checker());
 
     expect(completed?.status).toBe(RefundStatus.Completed);
     expect(completed?.completedAt).toBeDefined();
@@ -174,9 +196,8 @@ describe('RefundService decisions', () => {
 describe('RefundService.listRefunds', () => {
   it('returns refunds with student, course and batch info', async () => {
     const { txn, course } = await setupPaidEnrollment();
-    const actor = { id: adminId.toString() };
-    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Withdraw' }, actor);
-    await RefundService.approveRefund((refund._id as mongoose.Types.ObjectId).toString(), undefined, actor);
+    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Withdraw' }, requester());
+    await RefundService.approveRefund((refund._id as mongoose.Types.ObjectId).toString(), undefined, checker());
 
     const { data, meta } = await RefundService.listRefunds({ status: RefundStatus.Approved });
 

@@ -9,7 +9,14 @@ import env from "../../config/env.js";
 import { logger } from "../../config/logger.js";
 
 const getPaymentHistory = catchAsync(async (req: Request, res: Response) => {
-  const result = await PaymentService.getPaymentHistory(req.query);
+  // validateRequest checks req.query but does not replace it, so coerce here:
+  // $skip/$limit require real numbers, not numeric strings.
+  const { page, limit, ...rest } = req.query as Record<string, unknown>;
+  const result = await PaymentService.getPaymentHistory({
+    ...rest,
+    ...(page === undefined ? {} : { page: Number(page) }),
+    ...(limit === undefined ? {} : { limit: Number(limit) }),
+  });
 
   sendResponse(res, {
     statusCode: StatusCodes.OK,

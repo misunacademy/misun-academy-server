@@ -76,6 +76,35 @@ const bootcampCatalogSchema = new Schema<IBootcampCatalog>(
             type: [{ title: String, description: String }],
             default: [],
         },
+        painPoints: {
+            type: [{ title: String, description: String }],
+            default: [],
+        },
+        outcomes: {
+            type: [{ title: String, description: String }],
+            default: [],
+        },
+        audience: {
+            type: [String],
+            default: [],
+        },
+        mentor: {
+            type: {
+                name: { type: String, trim: true },
+                title: { type: String, trim: true },
+                bio: { type: String, trim: true },
+                image: { type: String, trim: true },
+            },
+            default: undefined,
+        },
+        testimonials: {
+            type: [{ name: String, role: String, quote: String, rating: Number }],
+            default: [],
+        },
+        guaranteeNote: {
+            type: String,
+            trim: true,
+        },
         schedule: {
             type: [{ day: String, dose: String, title: String, description: String }],
             default: [],
@@ -107,6 +136,10 @@ const bootcampCatalogSchema = new Schema<IBootcampCatalog>(
                     duration: { type: Number, min: 0, default: 0 },
                     orderIndex: { type: Number, default: 0 },
                     isPublished: { type: Boolean, default: true },
+                    resources: {
+                        type: [{ title: String, url: String }],
+                        default: [],
+                    },
                 },
             ],
             default: [],

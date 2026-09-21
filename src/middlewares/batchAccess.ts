@@ -21,11 +21,13 @@ export const checkBatchEnrollment = async (req: any, res: Response, next: NextFu
             throw new ApiError(StatusCodes.BAD_REQUEST, 'Batch ID is required');
         }
 
-        // Check if user has active enrollment in this batch
+        // Graduates keep lifetime access: approving a certificate flips the
+        // enrollment to Completed, which must still pass this gate. Only
+        // terminal/revoked states are blocked.
         const enrollment = await EnrollmentModel.findOne({
             userId,
             batchId,
-            status: EnrollmentStatus.Active,
+            status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] },
         });
 
         if (!enrollment) {

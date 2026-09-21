@@ -20,6 +20,9 @@ export enum AnnouncementStatus {
   Published = 'published',
   Scheduled = 'scheduled',
   Expired = 'expired',
+  // Taken down after being live: hidden from users but kept for records
+  // (unlike delete). Only reachable from published/scheduled.
+  Unpublished = 'unpublished',
 }
 
 export interface IAnnouncement {

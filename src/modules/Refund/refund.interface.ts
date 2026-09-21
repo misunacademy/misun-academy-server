@@ -3,6 +3,9 @@ import { Types } from 'mongoose';
 export enum RefundStatus {
   Pending = 'pending',
   Approved = 'approved',
+  // Claimed by exactly one completer before any gateway I/O, so concurrent
+  // complete calls can never double-fire the gateway refund.
+  Processing = 'processing',
   Rejected = 'rejected',
   Completed = 'completed',
 }

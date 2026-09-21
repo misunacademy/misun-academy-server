@@ -1,13 +1,16 @@
 import { StatusCodes } from 'http-status-codes';
+import { Types } from 'mongoose';
 import { QuizModel } from './quiz.model.js';
 import { QuestionModel } from './question.model.js';
 import { QuizAttemptModel } from './attempt.model.js';
+import { ModuleModel } from '../Module/module.model.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 import { ScoringEngine, QuizAnswerInput } from './scoring.service.js';
 import { GamificationService } from './gamification.service.js';
 import { QuizProgressModel } from '../Progress/quizProgress.model.js';
 import { ProgressService } from '../Progress/progress.service.js';
 import ApiError from '../../errors/ApiError.js';
-import { AttemptStatus } from '../../types/common.js';
+import { AttemptStatus, EnrollmentStatus } from '../../types/common.js';
 import { NotificationService } from '../Notification/notification.service.js';
 import { logger } from '../../config/logger.js';
 
@@ -33,6 +36,27 @@ const startAttempt = async (quizId: string, userId: string, enrollmentId: string
 
     if (quiz.status !== 'published') {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'This quiz is not published yet');
+    }
+
+    if (!Types.ObjectId.isValid(enrollmentId)) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid enrollmentId');
+    }
+
+    const enrollment = await EnrollmentModel.findById(enrollmentId).lean();
+    if (!enrollment || enrollment.userId.toString() !== userId) {
+        throw new ApiError(StatusCodes.FORBIDDEN, 'This enrollment does not belong to you');
+    }
+
+    if (
+        enrollment.status !== EnrollmentStatus.Active &&
+        enrollment.status !== EnrollmentStatus.Completed
+    ) {
+        throw new ApiError(StatusCodes.FORBIDDEN, 'Your enrollment is not active for this quiz');
+    }
+
+    const quizModule = await ModuleModel.findById(quiz.moduleId).select('batchId').lean();
+    if (quizModule?.batchId && enrollment.batchId.toString() !== quizModule.batchId.toString()) {
+        throw new ApiError(StatusCodes.FORBIDDEN, 'This enrollment does not include this quiz');
     }
 
     const existingInProgress = await QuizAttemptModel.findOne({

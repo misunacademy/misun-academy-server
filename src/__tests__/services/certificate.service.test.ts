@@ -12,6 +12,7 @@ import {
     createModuleProgress,
 } from '../helpers/factories.js';
 import { CertificateService } from '../../modules/Certificate/certificate.service.js';
+import { ProgressService } from '../../modules/Progress/progress.service.js';
 import { UserModel } from '../../modules/User/user.model.js';
 import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
 import { CertificateStatus, EnrollmentStatus, ProgressStatus } from '../../types/common.js';
@@ -99,8 +100,28 @@ describe('CertificateService.checkEligibility', () => {
         expect(result.isEligible).toBe(false);
     });
 
-    it('returns false when enrollment belongs to a different user', async () => {
-        const user1 = await createUser();
+    it('treats an empty module as complete so it never blocks eligibility', async () => {
+        const user = await createUser();
+        const course = await createCourse(admin._id, { isCertificateAvailable: true });
+        const batch = await createBatch(course._id);
+        const enrollment = await createActiveEnrollment(user._id, batch._id);
+        // No lessons, no published quizzes — nothing to complete.
+        const mod = await createModule(course._id, batch._id, 0);
+        await createModuleProgress(enrollment._id, mod._id, {
+            status: ProgressStatus.Locked,
+            completionPercentage: 0,
+        });
+
+        await ProgressService.recalculateModuleProgress(
+            enrollment._id.toString(),
+            mod._id.toString()
+        );
+
+        const result = await CertificateService.checkEligibility(enrollment._id.toString());
+        expect(result.isEligible).toBe(true);
+    });
+
+    it('returns false when enrollment belongs to a different user', async () => {        const user1 = await createUser();
         const user2 = await createUser();
         const course = await createCourse(admin._id, { isCertificateAvailable: true });
         const batch = await createBatch(course._id);

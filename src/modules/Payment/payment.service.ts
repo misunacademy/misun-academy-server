@@ -45,6 +45,59 @@ interface ActivateEnrollmentParams {
     initializeModules?: boolean;
 }
 
+/**
+ * Post-commit notification work. Built inside the transaction (where the
+ * user/batch rows are consistent) but flushed only AFTER commit, so a
+ * "Payment Successful" email can never go out for a rolled-back payment —
+ * and slow sends never hold a DB transaction open.
+ */
+type PaymentNotifyIntent =
+    | {
+        kind: 'success';
+        user: any;
+        batch: any;
+        payment: { _id: unknown; amount: number; currency?: string; transactionId: string; method: string };
+        enrollmentId: string;
+    }
+    | { kind: 'failed'; user: any; batch: any; reason: string; paymentId: unknown };
+
+const flushPaymentNotify = async (intent: PaymentNotifyIntent | null) => {
+    if (!intent) return;
+    if (intent.kind === 'success') {
+        await sendPaymentSuccessNotifications(intent.user, intent.batch, intent.payment as any, intent.enrollmentId);
+        setImmediate(async () => {
+            try {
+                await NotificationService.createNotification({
+                    userId: intent.user._id.toString(),
+                    type: 'payment_success',
+                    title: 'Payment Successful',
+                    message: `Your payment of ${intent.payment.amount} ${intent.payment.currency || 'BDT'} has been confirmed. Welcome to ${getCourseBatchLabel(intent.batch)}!`,
+                    link: '/my-classes',
+                    relatedTo: { model: 'Payment', id: intent.payment._id!.toString() },
+                });
+            } catch (error) {
+                logger.error(error, 'Failed to send payment success notification');
+            }
+        });
+    } else {
+        await sendPaymentFailedNotifications(intent.user, intent.batch, intent.reason);
+        setImmediate(async () => {
+            try {
+                await NotificationService.createNotification({
+                    userId: intent.user._id.toString(),
+                    type: 'payment_failed',
+                    title: 'Payment Failed',
+                    message: `Your payment for ${getCourseBatchLabel(intent.batch)} was not completed. Reason: ${intent.reason}`,
+                    link: '/payment',
+                    relatedTo: { model: 'Payment', id: intent.paymentId!.toString() },
+                });
+            } catch (error) {
+                logger.error(error, 'Failed to send payment failed notification');
+            }
+        });
+    }
+};
+
 const generateTransactionId = (): string => {
     const timestamp = Date.now().toString(36).toUpperCase();
     const random = crypto.randomBytes(12).toString('hex').toUpperCase();
@@ -191,33 +244,33 @@ const activateEnrollmentForPayment = async (params: ActivateEnrollmentParams) =>
         .lean()
         .session(session);
 
-    if (user && batch) {
-        await sendPaymentSuccessNotifications(user, batch, payment, enrollmentId);
-
-        setImmediate(async () => {
-            try {
-                await NotificationService.createNotification({
-                    userId: user._id.toString(),
-                    type: 'payment_success',
-                    title: 'Payment Successful',
-                    message: `Your payment of ${payment.amount} ${payment.currency || 'BDT'} has been confirmed. Welcome to ${getCourseBatchLabel(batch)}!`,
-                    link: '/my-classes',
-                    relatedTo: { model: 'Payment', id: payment._id.toString() },
-                });
-            } catch (error) {
-                logger.error(error, 'Failed to send payment success notification');
+    // Notifications are NOT sent here — the caller flushes the returned
+    // intent after the transaction commits (see flushPaymentNotify).
+    const notify: PaymentNotifyIntent | null =
+        user && batch
+            ? {
+                kind: 'success',
+                user,
+                batch,
+                payment: {
+                    _id: payment._id,
+                    amount: payment.amount,
+                    currency: payment.currency,
+                    transactionId: payment.transactionId,
+                    method: payment.method,
+                },
+                enrollmentId,
             }
-        });
-    }
+            : null;
 
-    return enrollment;
+    return { enrollment, notify };
 };
 
 const failEnrollment = async (
     payment: IPayment & mongoose.Document,
     session: mongoose.ClientSession,
     failureReason: string,
-) => {
+): Promise<PaymentNotifyIntent | null> => {
     if (payment.enrollmentId) {
         await EnrollmentModel.findOneAndUpdate(
             { enrollmentId: payment.enrollmentId },
@@ -232,24 +285,9 @@ const failEnrollment = async (
         .lean()
         .session(session);
 
-    if (user && batch) {
-        await sendPaymentFailedNotifications(user, batch, failureReason);
+    if (!user || !batch) return null;
 
-        setImmediate(async () => {
-            try {
-                await NotificationService.createNotification({
-                    userId: user._id.toString(),
-                    type: 'payment_failed',
-                    title: 'Payment Failed',
-                    message: `Your payment for ${getCourseBatchLabel(batch)} was not completed. Reason: ${failureReason}`,
-                    link: '/payment',
-                    relatedTo: { model: 'Payment', id: payment._id.toString() },
-                });
-            } catch (error) {
-                logger.error(error, 'Failed to send payment failed notification');
-            }
-        });
-    }
+    return { kind: 'failed', user, batch, reason: failureReason, paymentId: payment._id };
 };
 
 // ─── PAYMENT HISTORY ───
@@ -272,7 +310,9 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
 
     if (status) filters.status = status;
     if (method) filters.method = method;
-    if (studentId) filters.userId = studentId;
+    // Validated as 24-hex by paymentHistoryQuerySchema — cast to ObjectId so
+    // the aggregation actually matches (a raw string never equals ObjectId).
+    if (studentId) filters.userId = new mongoose.Types.ObjectId(studentId);
 
     let filteredBatchIds: mongoose.Types.ObjectId[] | null = null;
 
@@ -347,12 +387,14 @@ const getPaymentHistory = async (query: PaymentHistoryQuery) => {
     ];
 
     if (search) {
+        const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = { $regex: escaped, $options: 'i' };
         pipeline.push({
             $match: {
                 $or: [
-                    { transactionId: { $regex: search, $options: "i" } },
-                    { "user.name": { $regex: search, $options: "i" } },
-                    { "user.email": { $regex: search, $options: "i" } },
+                    { transactionId: searchRegex },
+                    { "user.name": searchRegex },
+                    { "user.email": searchRegex },
                 ],
             },
         } as any);
@@ -517,6 +559,7 @@ const updatePaymentWithEnrollStatus = async (
     gatewayResponse?: unknown
 ) => {
     const session = await mongoose.startSession();
+    let notify: PaymentNotifyIntent | null = null;
 
     try {
         session.startTransaction();
@@ -543,18 +586,19 @@ const updatePaymentWithEnrollStatus = async (
         }
 
         if (paymentStatus === Status.Success && updatedPayment.enrollmentId) {
-            await activateEnrollmentForPayment({
+            const result = await activateEnrollmentForPayment({
                 payment: updatedPayment,
                 enrollmentId: updatedPayment.enrollmentId,
                 session,
                 context: 'payment status update',
                 initializeModules: false,
             });
+            notify = result.notify;
         } else if (
             (paymentStatus === Status.Failed || paymentStatus === Status.Cancel) &&
             updatedPayment.enrollmentId
         ) {
-            await failEnrollment(
+            notify = await failEnrollment(
                 updatedPayment,
                 session,
                 'Payment ' + paymentStatus
@@ -563,6 +607,8 @@ const updatePaymentWithEnrollStatus = async (
 
         await session.commitTransaction();
         session.endSession();
+
+        await flushPaymentNotify(notify);
 
         return {
             payment: updatedPayment,
@@ -683,60 +729,89 @@ const validateSSLCommerzPayment = async (valId: string) => {
 // ─── FINALIZE SSLCOMMERZ PAYMENT ───
 
 const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) => {
+    // Resolve the row WITHOUT a transaction first. If tran_id was superseded
+    // by a newer initiation (double-click / retry / second tab), the paid
+    // tran no longer sits on the row — rescue it via the recorded history
+    // instead of hard-failing a payment the user actually completed.
+    let payment = await PaymentModel.findOne({ transactionId });
+    if (!payment) {
+        payment = await PaymentModel.findOne({ 'gatewayResponse.supersededTranIds': transactionId });
+        if (!payment) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Payment not found');
+        }
+        logger.warn(
+            {
+                event: 'payment.orphan_rescued',
+                paid_tran_id: transactionId,
+                current_tran_id: payment.transactionId,
+                enrollmentId: payment.enrollmentId,
+            },
+            'Finalizing superseded gateway transaction against current payment row'
+        );
+    }
+
+    if (payment.status === Status.Success) {
+        return payment;
+    }
+
+    // Gateway validation is network I/O — it must never run inside the DB
+    // transaction (60s txn lifetime limit + user-facing latency).
+    const validation = await validateSSLCommerzPayment(valId);
+
     const session = await mongoose.startSession();
+    let notify: PaymentNotifyIntent | null = null;
 
     try {
         await session.startTransaction();
 
-        const payment = await PaymentModel.findOne({ transactionId }).session(session);
-        if (!payment) {
+        const locked = await PaymentModel.findById(payment._id).session(session);
+        if (!locked) {
             throw new ApiError(StatusCodes.NOT_FOUND, 'Payment not found');
         }
 
-        if (payment.status === Status.Success) {
+        if (locked.status === Status.Success) {
             await session.commitTransaction();
-            return payment;
+            return locked;
         }
-
-        const validation = await validateSSLCommerzPayment(valId);
 
         if (validation.status !== 'VALID' && validation.status !== 'VALIDATED') {
             logger.warn(
                 {
                     event: 'payment.validation_failed',
-                    tran_id: payment.transactionId,
+                    tran_id: locked.transactionId,
                     val_id: valId,
                     gatewayStatus: validation.status,
                 },
                 'SSLCommerz validation API returned non-VALID status; marking payment failed'
             );
-            payment.status = Status.Failed;
-            payment.gatewayResponse = {
-                ...payment.gatewayResponse,
+            locked.status = Status.Failed;
+            locked.gatewayResponse = {
+                ...locked.gatewayResponse,
                 val_id: valId,
                 status: validation.status,
                 processedAt: new Date(),
             };
-            await payment.save({ session });
+            await locked.save({ session });
 
-            if (payment.enrollmentId) {
-                await failEnrollment(payment, session, 'SSLCommerz validation failed');
+            if (locked.enrollmentId) {
+                notify = await failEnrollment(locked, session, 'SSLCommerz validation failed');
             }
 
             await session.commitTransaction();
-            return payment;
+            await flushPaymentNotify(notify);
+            return locked;
         }
 
         if (
-            validation.tran_id !== payment.transactionId ||
-            Number(validation.amount) !== Number(payment.amount) ||
-            validation.currency !== payment.currency
+            validation.tran_id !== transactionId ||
+            Number(validation.amount) !== Number(locked.amount) ||
+            validation.currency !== locked.currency
         ) {
             logger.error(
                 {
                     event: 'payment.data_mismatch',
-                    tran_id: payment.transactionId,
-                    expected: { amount: payment.amount, currency: payment.currency },
+                    tran_id: locked.transactionId,
+                    expected: { amount: locked.amount, currency: locked.currency },
                     received: { tran_id: validation.tran_id, amount: validation.amount, currency: validation.currency },
                 },
                 'Payment anti-tamper mismatch between stored record and gateway validation'
@@ -744,9 +819,13 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
             throw new ApiError(StatusCodes.BAD_REQUEST, 'Payment data mismatch detected');
         }
 
-        payment.status = Status.Success;
-        payment.gatewayResponse = {
-            ...payment.gatewayResponse,
+        locked.status = Status.Success;
+        locked.gatewayResponse = {
+            ...locked.gatewayResponse,
+            // Keep the actually-paid tran for audit when it differs (rescue).
+            ...(validation.tran_id !== locked.transactionId
+                ? { paidTranId: validation.tran_id }
+                : {}),
             val_id: valId,
             status: validation.status,
             amount: validation.amount,
@@ -758,33 +837,35 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
             tran_date: validation.tran_date,
             processedAt: new Date(),
         };
-        await payment.save({ session });
+        await locked.save({ session });
 
-        if (payment.enrollmentId) {
-            await activateEnrollmentForPayment({
-                payment,
-                enrollmentId: payment.enrollmentId,
+        if (locked.enrollmentId) {
+            const result = await activateEnrollmentForPayment({
+                payment: locked,
+                enrollmentId: locked.enrollmentId,
                 session,
                 context: 'SSLCommerz payment finalize',
                 initializeModules: false,
             });
+            notify = result.notify;
         }
 
         logger.info(
             {
                 event: 'payment.finalized',
-                tran_id: payment.transactionId,
-                enrollmentId: payment.enrollmentId,
-                amount: payment.amount,
-                currency: payment.currency,
-                method: payment.method,
+                tran_id: locked.transactionId,
+                enrollmentId: locked.enrollmentId,
+                amount: locked.amount,
+                currency: locked.currency,
+                method: locked.method,
                 status: Status.Success,
             },
             'Payment finalized via SSLCommerz'
         );
 
         await session.commitTransaction();
-        return payment;
+        await flushPaymentNotify(notify);
+        return locked;
     } catch (error) {
         await session.abortTransaction();
         throw error;
@@ -897,6 +978,12 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         value_c: (batch as any)._id.toString(),
     };
 
+    // Record the tran_id being replaced so finalize() can still rescue the
+    // payment if the user completes the OLDER gateway session (double-click /
+    // retry / second tab). Without this the paid tran_id vanishes from the DB
+    // and the money is captured but never credited.
+    const existingPayment = await PaymentModel.findOne({ enrollmentId }).select('transactionId').lean();
+
     await PaymentModel.findOneAndUpdate(
         { enrollmentId },
         {
@@ -911,6 +998,9 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
                 method: 'SSLCommerz',
                 gatewayResponse: { retriedAt: new Date() },
             },
+            ...(existingPayment && existingPayment.transactionId !== transactionId
+                ? { $addToSet: { 'gatewayResponse.supersededTranIds': existingPayment.transactionId } }
+                : {}),
             $unset: {
                 verifiedAt: '',
                 verifiedBy: '',
@@ -947,6 +1037,8 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
 
 const verifyManualPayment = async (transactionId: string, approved: boolean, adminId: string) => {
     const session = await mongoose.startSession();
+    // Assigned on every path below (approved / rejected); no initializer.
+    let notify: PaymentNotifyIntent | null;
 
     try {
         await session.startTransaction();
@@ -968,8 +1060,11 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
 
             let enrollmentId = payment.enrollmentId;
             if (!enrollmentId) {
+                // Prefer the stable batch number; fall back to the legacy
+                // "second word of the title" convention, never undefined.
+                const batchNo =(batch as any).title?.split(' ')[1]??"";
                 enrollmentId = await EnrollmentService.generateEnrollmentId(
-                    (batch as any).title?.split(' ')[1],
+                    batchNo,
                     deriveCourseBrand(batch.courseId as any)
                 );
             }
@@ -985,13 +1080,14 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
             };
             await payment.save({ session });
 
-            await activateEnrollmentForPayment({
+            const result = await activateEnrollmentForPayment({
                 payment,
                 enrollmentId,
                 session,
                 context: 'manual payment approval',
                 initializeModules: true,
             });
+            notify = result.notify;
 
             logger.info(
                 {
@@ -1022,7 +1118,7 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
             };
             await payment.save({ session });
 
-            await failEnrollment(payment, session, 'Payment verification failed by admin');
+            notify = await failEnrollment(payment, session, 'Payment verification failed by admin');
 
             logger.info(
                 {
@@ -1046,6 +1142,7 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
         }
 
         await session.commitTransaction();
+        await flushPaymentNotify(notify);
         return payment;
     } catch (error) {
         await session.abortTransaction();
@@ -1132,6 +1229,11 @@ const verifyPaymentForCurrentUser = async (transactionId: string, userId: string
         paymentStatus: payment.status,
         courseSlug: (payment.batchId as any)?.courseId?.slug || '',
         transactionId: payment.transactionId,
+        // Exposed so the client can report the verified purchase value to
+        // analytics instead of trusting tamperable URL params. Scoped to the
+        // caller's own payment (matched by userId above).
+        amount: payment.amount,
+        currency: payment.currency,
     };
 };
 

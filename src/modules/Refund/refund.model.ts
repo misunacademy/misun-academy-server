@@ -27,5 +27,24 @@ const refundSchema = new Schema<IRefund>(
 
 refundSchema.index({ createdAt: -1 });
 refundSchema.index({ status: 1, transactionId: 1 });
+// Backstop for the check-then-insert in createRefund: at most one
+// non-terminal refund per transaction, even under concurrent requests.
+// Rejected refunds are excluded so a denied request can be re-raised.
+refundSchema.index(
+  { transactionId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: {
+        $in: [
+          RefundStatus.Pending,
+          RefundStatus.Approved,
+          RefundStatus.Processing,
+          RefundStatus.Completed,
+        ],
+      },
+    },
+  }
+);
 
 export const RefundModel = model<IRefund>('Refund', refundSchema);

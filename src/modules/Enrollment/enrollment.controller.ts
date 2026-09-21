@@ -5,7 +5,7 @@ import sendResponse from '../../utils/sendResponse.js';
 import { EnrollmentService } from './enrollment.service.js';
 import ApiError from '../../errors/ApiError.js';
 import { PaymentService } from '../Payment/payment.service.js';
-import { EnrollmentModel } from './enrollment.model.js';
+
 /**
  * Initiate enrollment for a batch
  * Creates pending enrollment and returns payment URL

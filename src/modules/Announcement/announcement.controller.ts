@@ -120,6 +120,25 @@ const publishAnnouncement = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const unpublishAnnouncement = catchAsync(async (req: Request, res: Response) => {
+  const { id: actorId } = req.user as any;
+  const unpublished = await AnnouncementService.unpublishAnnouncement(req.params.id as string, { id: actorId }, req.ip);
+  if (!unpublished) {
+    return sendResponse(res, {
+      statusCode: StatusCodes.NOT_FOUND,
+      success: false,
+      message: 'Announcement not found',
+      data: null,
+    });
+  }
+  sendResponse(res, {
+    statusCode: StatusCodes.OK,
+    success: true,
+    message: 'Announcement unpublished and hidden from users',
+    data: unpublished,
+  });
+});
+
 const getAnnouncementStats = catchAsync(async (_req: Request, res: Response) => {
   const stats = await AnnouncementService.getAnnouncementStats();
   sendResponse(res, {
@@ -167,6 +186,7 @@ export const AnnouncementController = {
   updateAnnouncement,
   deleteAnnouncement,
   publishAnnouncement,
+  unpublishAnnouncement,
   getAnnouncementStats,
   getLiveAnnouncements,
   getAnnouncementMeta,
