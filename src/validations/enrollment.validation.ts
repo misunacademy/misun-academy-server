@@ -8,13 +8,13 @@ export const initiateEnrollmentSchema = z.object({
 
 export const manualEnrollmentSchema = z.object({
     body: z.object({
-        batchId: z.string(),
+        batchId: z.string().trim().min(1),
+        // Required: the controller rejects requests without these, so the
+        // schema enforces them up front for uniform Zod 400s.
         paymentData: z.object({
-            senderNumber: z.string(),
-            transactionId: z.string(),
-        }).optional(),
-        transactionId: z.string().optional(),
-        amount: z.number().positive().optional(),
+            senderNumber: z.string().trim().min(1, 'senderNumber is required'),
+            transactionId: z.string().trim().min(1, 'transactionId is required'),
+        }),
     }),
 });
 

@@ -221,7 +221,19 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
  */
 const completeLesson = async (userId: string, courseId: string, moduleId: string, lessonId: string) => {
     const module = await ModuleModel.findById(moduleId).lean();
-    const batchId = module?.batchId?.toString();
+    if (!module) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+    }
+    // Bind the module to the URL course: without this, a module from another
+    // course (or an unassigned legacy module with no batchId) could complete
+    // lessons against the wrong enrollment.
+    if (module.courseId.toString() !== courseId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Module does not belong to this course');
+    }
+    if (!module.batchId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Module is not assigned to a batch');
+    }
+    const batchId = module.batchId.toString();
 
     const enrollment = await findEnrollmentForCourse(userId, courseId, [
         EnrollmentStatus.Active,
