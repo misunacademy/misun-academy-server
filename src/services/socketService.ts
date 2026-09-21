@@ -2,6 +2,7 @@ import { Server as HTTPServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import { fromNodeHeaders } from 'better-auth/node';
 import { getAuth } from '../config/betterAuth.js';
+import { UserStatus } from '../types/common.js';
 
 const eventRateLimit = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW = 10000;
@@ -52,6 +53,18 @@ export const initializeSocketIO = (httpServer: HTTPServer) => {
         return next(new Error('Authentication required'));
       }
 
+      // Same bar as HTTP requireAuth: verified email + non-revoked status.
+      // Otherwise suspended/deleted/unverified users keep a realtime channel
+      // (including the admin room on stale sessions) that REST denies them.
+      if (!session.user.emailVerified) {
+        return next(new Error('Email verification required'));
+      }
+
+      const accountStatus = (session.user as any).status || UserStatus.Active;
+      if (accountStatus === UserStatus.Suspended || accountStatus === UserStatus.Deleted) {
+        return next(new Error('Account is not active'));
+      }
+
       (socket as any).userId = session.user.id;
       (socket as any).userRole = (session.user as any).role || 'learner';
       next();
@@ -70,8 +83,10 @@ export const initializeSocketIO = (httpServer: HTTPServer) => {
       socket.join('admin');
     }
 
-    socket.use(([, next]) => {
-      if (!checkRateLimit(userId)) {
+    // Rate limit per user AND event: one noisy event must not starve the
+    // user's other events for the whole window.
+    socket.use(([event, ..._args], next) => {
+      if (!checkRateLimit(`${userId}:${String(event)}`)) {
         return next(new Error('Rate limit exceeded'));
       }
       next();

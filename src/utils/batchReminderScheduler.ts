@@ -13,7 +13,17 @@ import { logger } from '../config/logger.js';
  * Send batch start reminders to enrolled students
  * Runs daily to check for batches starting tomorrow
  */
+
+// Overlap guard: the startup run and the scheduled run must never send the
+// same batch twice if a previous run is still in flight.
+let remindersRunning = false;
+
 export const sendBatchStartReminders = async () => {
+    if (remindersRunning) {
+        logger.warn('Batch start reminder run skipped: previous run still in progress');
+        return;
+    }
+    remindersRunning = true;
     try {
         const now = new Date();
         const tomorrow = new Date(now);
@@ -47,37 +57,54 @@ export const sendBatchStartReminders = async () => {
 
             logger.info(`Sending reminders to ${enrollments.length} students for batch ${batch.title}`);
 
-            // Send email to each enrolled student
-            for (const enrollment of enrollments) {
-                const user = enrollment.userId as any;
-                if (user && user.email) {
-                    try {
-                        const courseData = (batch as any).courseId;
-                        const courseName = typeof courseData === 'object'
-                            ? courseData?.title || batch.title
-                            : batch.title;
-                        const courseSlug = typeof courseData === 'object'
-                            ? courseData?.slug || ''
-                            : '';
+            // Await every send via allSettled: the send helper is async, so a
+            // bare call would leave rejections unhandled and log "sent"
+            // before the mail is even queued. Failures are collected and
+            // summarized instead of vanishing.
+            const outcomes = await Promise.allSettled(
+                enrollments.map(async (enrollment) => {
+                    const user = enrollment.userId as any;
+                    if (!user || !user.email) return null;
 
-                        sendCourseBatchStartReminderEmail(
-                            { courseName, courseSlug },
-                            user.email,
-                            user.name,
-                            batch.title,
-                            batch.startDate.toLocaleDateString()
-                        );
-                        logger.info(`Reminder sent to ${user.email} for batch ${batch.title}`);
-                    } catch (emailError: any) {
-                        logger.error(`Failed to send reminder to ${user.email}: ${emailError?.message || emailError}`);
-                    }
+                    const courseData = (batch as any).courseId;
+                    const courseName = typeof courseData === 'object'
+                        ? courseData?.title || batch.title
+                        : batch.title;
+                    const courseSlug = typeof courseData === 'object'
+                        ? courseData?.slug || ''
+                        : '';
+
+                    await sendCourseBatchStartReminderEmail(
+                        { courseName, courseSlug },
+                        user.email,
+                        user.name,
+                        batch.title,
+                        batch.startDate.toLocaleDateString()
+                    );
+                    return user.email as string;
+                })
+            );
+
+            let sent = 0;
+            const failed: string[] = [];
+            for (const outcome of outcomes) {
+                if (outcome.status === 'fulfilled') {
+                    if (outcome.value) sent += 1;
+                } else {
+                    failed.push(outcome.reason?.message || String(outcome.reason));
                 }
             }
+            logger.info(
+                `Batch reminders for "${batch.title}": ${sent} queued, ${failed.length} failed` +
+                (failed.length > 0 ? ` (${failed.slice(0, 3).join('; ')}${failed.length > 3 ? '; …' : ''})` : '')
+            );
         }
 
         logger.info('Batch start reminder check completed');
     } catch (error: any) {
         logger.error('Error sending batch start reminders: ' + (error?.message || error));
+    } finally {
+        remindersRunning = false;
     }
 };
 
