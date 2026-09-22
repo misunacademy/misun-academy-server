@@ -206,6 +206,18 @@ export const adminBootcampQuerySchema = z.object({
     }),
 });
 
+export const adminBootcampPurchaseQuerySchema = z.object({
+    query: z.object({
+        bootcampId: objectId.optional(),
+        status: z.enum(['pending', 'paid', 'rejected']).optional(),
+        search: z.string().trim().max(150).optional(),
+        from: z.coerce.date().optional(),
+        to: z.coerce.date().optional(),
+        page: z.coerce.number().int().min(1).optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+});
+
 export const bootcampPaymentStatusSchema = z.object({
     query: z.object({
         t: z.string().min(1, 'Transaction ID required'),

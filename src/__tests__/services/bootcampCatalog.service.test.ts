@@ -460,3 +460,146 @@ describe('BootcampCatalogService purchase gating (no gateway network)', () => {
         expect(k3).not.toBe(k1);
     });
 });
+
+describe('BootcampCatalogService.listBootcampPurchasesAdmin / getBootcampPurchaseStats', () => {
+    const createPurchase = async (
+        bootcampId: mongoose.Types.ObjectId,
+        userId: mongoose.Types.ObjectId,
+        overrides: Record<string, unknown> = {}
+    ) =>
+        BootcampPurchaseModel.create({
+            user: userId,
+            bootcamp: bootcampId,
+            amount: 1500,
+            method: 'SSLCommerz',
+            transactionId: `BC-${uniq()}`,
+            status: BootcampPurchaseStatus.Paid,
+            ...overrides,
+        });
+
+    it('lists purchases with buyer + bootcamp populated', async () => {
+        const bootcamp: any = await publishedCatalog();
+        const paidBuyer = await createUser({
+            email: `paid-${uniq()}@example.com`,
+            name: 'Paid Buyer',
+            phone: '01700000000',
+        });
+        const pendingBuyer = await createUser({
+            email: `pending-${uniq()}@example.com`,
+            name: 'Pending Buyer',
+        });
+
+        await createPurchase(bootcamp._id, paidBuyer._id);
+        await createPurchase(bootcamp._id, pendingBuyer._id, {
+            status: BootcampPurchaseStatus.Pending,
+        });
+
+        const result: any = await BootcampCatalogService.listBootcampPurchasesAdmin({
+            page: 1,
+            limit: 10,
+        });
+
+        expect(result.meta.total).toBe(2);
+        expect(result.data).toHaveLength(2);
+
+        const paid = result.data.find((p: any) => p.status === BootcampPurchaseStatus.Paid);
+        expect(paid.user.name).toBe('Paid Buyer');
+        expect(paid.user.email).toContain('paid-');
+        expect(paid.bootcamp.slug).toBe(bootcamp.slug);
+    });
+
+    it('paginates the admin purchase list', async () => {
+        const bootcamp: any = await publishedCatalog();
+        const buyer = await createUser({ email: `paged-${uniq()}@example.com` });
+        await Promise.all(
+            Array.from({ length: 5 }, () => createPurchase(bootcamp._id, buyer._id))
+        );
+
+        const firstPage: any = await BootcampCatalogService.listBootcampPurchasesAdmin({
+            page: 1,
+            limit: 2,
+        });
+        expect(firstPage.data).toHaveLength(2);
+        expect(firstPage.meta.total).toBe(5);
+        expect(firstPage.meta.totalPages).toBe(3);
+
+        const lastPage: any = await BootcampCatalogService.listBootcampPurchasesAdmin({
+            page: 3,
+            limit: 2,
+        });
+        expect(lastPage.data).toHaveLength(1);
+    });
+
+    it('filters by status, bootcamp, buyer search, transaction id and date range', async () => {
+        const bootcampA: any = await publishedCatalog();
+        const bootcampB: any = await publishedCatalog();
+        const buyer = await createUser({
+            email: `searchable-${uniq()}@example.com`,
+            name: 'Searchable Buyer',
+        });
+        const other = await createUser({ email: `other-${uniq()}@example.com`, name: 'Other Buyer' });
+
+        const paidTxn = `BC-PAID-${uniq()}`;
+        await createPurchase(bootcampA._id, buyer._id, { transactionId: paidTxn });
+        await createPurchase(bootcampB._id, other._id, {
+            transactionId: `BC-REJECTED-${uniq()}`,
+            status: BootcampPurchaseStatus.Rejected,
+        });
+
+        const paidOnly: any = await BootcampCatalogService.listBootcampPurchasesAdmin({
+            status: BootcampPurchaseStatus.Paid,
+        });
+        expect(paidOnly.meta.total).toBe(1);
+        expect(paidOnly.data[0].transactionId).toBe(paidTxn);
+
+        const scopedToB: any = await BootcampCatalogService.listBootcampPurchasesAdmin({
+            bootcampId: bootcampB._id.toString(),
+        });
+        expect(scopedToB.meta.total).toBe(1);
+        expect(scopedToB.data[0].bootcamp._id.toString()).toBe(bootcampB._id.toString());
+
+        const byBuyerName: any = await BootcampCatalogService.listBootcampPurchasesAdmin({
+            search: 'searchable buyer',
+        });
+        expect(byBuyerName.meta.total).toBe(1);
+
+        const byTransactionId: any = await BootcampCatalogService.listBootcampPurchasesAdmin({
+            search: paidTxn,
+        });
+        expect(byTransactionId.meta.total).toBe(1);
+
+        const outsideRange: any = await BootcampCatalogService.listBootcampPurchasesAdmin({
+            from: new Date('2000-01-01'),
+            to: new Date('2000-12-31'),
+        });
+        expect(outsideRange.meta.total).toBe(0);
+    });
+
+    it('aggregates counts, revenue and today, scoped to a bootcamp', async () => {
+        const bootcampA: any = await publishedCatalog();
+        const bootcampB: any = await publishedCatalog();
+        const buyer = await createUser({ email: `stats-${uniq()}@example.com` });
+
+        await createPurchase(bootcampA._id, buyer._id, { amount: 1000 });
+        await createPurchase(bootcampA._id, buyer._id, { amount: 500 });
+        await createPurchase(bootcampB._id, buyer._id, {
+            amount: 700,
+            status: BootcampPurchaseStatus.Pending,
+        });
+
+        const stats: any = await BootcampCatalogService.getBootcampPurchaseStats();
+        expect(stats.total).toBe(3);
+        expect(stats.paid).toBe(2);
+        expect(stats.pending).toBe(1);
+        expect(stats.rejected).toBe(0);
+        expect(stats.revenue).toBe(1500);
+        expect(stats.today).toBe(3);
+
+        const scoped: any = await BootcampCatalogService.getBootcampPurchaseStats({
+            bootcampId: bootcampB._id.toString(),
+        });
+        expect(scoped.total).toBe(1);
+        expect(scoped.paid).toBe(0);
+        expect(scoped.revenue).toBe(0);
+    });
+});
