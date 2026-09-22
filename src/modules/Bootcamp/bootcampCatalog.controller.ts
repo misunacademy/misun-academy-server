@@ -4,6 +4,7 @@ import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import env from '../../config/env.js';
 import { BootcampCatalogService } from './bootcampCatalog.service.js';
+import { BootcampPurchaseStatus } from './bootcampCatalog.interface.js';
 
 const redirectFrontend = (res: Response, path: string) => {
     res.redirect(`${env.MA_FRONTEND_URL}${path}`);
@@ -200,6 +201,50 @@ const getMyBootcampVideos = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+// --- Admin: recording purchases (who bought a recorded bootcamp) ---
+
+const listBootcampPurchases = catchAsync(async (req: Request, res: Response) => {
+    const { bootcampId, status, search, from, to, page, limit } = req.query as {
+        bootcampId?: string;
+        status?: BootcampPurchaseStatus;
+        search?: string;
+        from?: string;
+        to?: string;
+        page?: string;
+        limit?: string;
+    };
+
+    const result = await BootcampCatalogService.listBootcampPurchasesAdmin({
+        bootcampId,
+        status,
+        search,
+        from: from ? new Date(from) : undefined,
+        to: to ? new Date(to) : undefined,
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined,
+    });
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Bootcamp purchases retrieved',
+        data: result.data,
+        meta: result.meta,
+    });
+});
+
+const getBootcampPurchaseStats = catchAsync(async (req: Request, res: Response) => {
+    const { bootcampId } = req.query as { bootcampId?: string };
+    const result = await BootcampCatalogService.getBootcampPurchaseStats({ bootcampId });
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Bootcamp purchase stats retrieved',
+        data: result,
+    });
+});
+
 // --- SSLCommerz payment controllers ---
 
 const initiateBootcampSSLCommerz = catchAsync(async (req: Request, res: Response) => {
@@ -306,6 +351,8 @@ export const BootcampCatalogController = {
     listBootcampVideos,
     getMyBootcampVideos,
     getMyBootcampPurchases,
+    listBootcampPurchases,
+    getBootcampPurchaseStats,
     initiateBootcampSSLCommerz,
     bootcampPaymentStatus,
     bootcampPaymentWebhook,

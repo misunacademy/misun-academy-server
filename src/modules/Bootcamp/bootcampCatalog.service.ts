@@ -12,6 +12,7 @@ import {
     RecordedStatus,
     IBootcampCatalog,
     IBootcampVideo,
+    IBootcampPurchase,
     BootcampPurchaseStatus,
 } from './bootcampCatalog.interface.js';
 import { recordAudit } from '../../models/auditLog.model.js';
@@ -393,6 +394,108 @@ const getMyBootcampPurchases = async (userId: string) => {
         .lean();
 };
 
+// ---------- Admin: recording purchases (who bought a recorded bootcamp) ----------
+
+interface BootcampPurchaseQuery {
+    bootcampId?: string;
+    status?: BootcampPurchaseStatus;
+    search?: string;
+    from?: Date;
+    to?: Date;
+    page?: number;
+    limit?: number;
+}
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const buildBootcampPurchaseFilter = async (
+    params?: Pick<BootcampPurchaseQuery, 'bootcampId' | 'status' | 'search' | 'from' | 'to'>
+): Promise<FilterQuery<IBootcampPurchase>> => {
+    const query: FilterQuery<IBootcampPurchase> = {};
+
+    if (params?.bootcampId) {
+        query.bootcamp = new Types.ObjectId(params.bootcampId);
+    }
+
+    if (params?.status) {
+        query.status = params.status;
+    }
+
+    if (params?.from || params?.to) {
+        const createdAt: Record<string, Date> = {};
+        if (params.from) createdAt.$gte = params.from;
+        if (params.to) createdAt.$lte = params.to;
+        query.createdAt = createdAt;
+    }
+
+    if (params?.search) {
+        // Buyer identity lives on User, so resolve matching users first and
+        // match either them or the transaction id in a single $or.
+        const rx = new RegExp(escapeRegExp(params.search), 'i');
+        const matchedUsers = await UserModel.find({
+            $or: [{ name: rx }, { email: rx }, { phone: rx }],
+        })
+            .select('_id')
+            .lean();
+        query.$or = [
+            { transactionId: rx },
+            { user: { $in: matchedUsers.map((u) => u._id) } },
+        ];
+    }
+
+    return query;
+};
+
+const listBootcampPurchasesAdmin = async (params?: BootcampPurchaseQuery) => {
+    const query = await buildBootcampPurchaseFilter(params);
+    const page = Math.max(1, params?.page || 1);
+    const limit = Math.max(1, Math.min(100, params?.limit || 20));
+
+    const [data, total] = await Promise.all([
+        BootcampPurchaseModel.find(query)
+            .populate('user', 'name email phone address studentId image')
+            .populate('bootcamp', 'title season slug thumbnail')
+            .sort({ createdAt: -1 })
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .lean(),
+        BootcampPurchaseModel.countDocuments(query),
+    ]);
+
+    return {
+        data,
+        meta: { total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)) },
+    };
+};
+
+const getBootcampPurchaseStats = async (params?: Pick<BootcampPurchaseQuery, 'bootcampId'>) => {
+    const base = await buildBootcampPurchaseFilter(params);
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const [total, paid, pending, rejected, revenueAgg, today] = await Promise.all([
+        BootcampPurchaseModel.countDocuments(base),
+        BootcampPurchaseModel.countDocuments({ ...base, status: BootcampPurchaseStatus.Paid }),
+        BootcampPurchaseModel.countDocuments({ ...base, status: BootcampPurchaseStatus.Pending }),
+        BootcampPurchaseModel.countDocuments({ ...base, status: BootcampPurchaseStatus.Rejected }),
+        BootcampPurchaseModel.aggregate<{ _id: null; total: number }>([
+            { $match: { ...base, status: BootcampPurchaseStatus.Paid } },
+            { $group: { _id: null, total: { $sum: '$amount' } } },
+        ]),
+        BootcampPurchaseModel.countDocuments({ ...base, createdAt: { $gte: startOfToday } }),
+    ]);
+
+    return {
+        total,
+        paid,
+        pending,
+        rejected,
+        revenue: revenueAgg[0]?.total ?? 0,
+        today,
+    };
+};
+
 // ---------- SSLCommerz helpers for bootcamp purchases ----------
 // ---------- SSLCommerz helpers for bootcamp purchases ----------
 
@@ -662,6 +765,8 @@ export const BootcampCatalogService = {
     listBootcampVideos,
     getMyBootcampVideos,
     getMyBootcampPurchases,
+    listBootcampPurchasesAdmin,
+    getBootcampPurchaseStats,
     initiateBootcampSSLCommerz,
     finalizeBootcampSSLCommerz,
     checkBootcampPaymentStatus,

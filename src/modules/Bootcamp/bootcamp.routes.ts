@@ -8,6 +8,7 @@ import {
     setRecordedPriceSchema,
     publishRecordingSchema,
     adminBootcampQuerySchema,
+    adminBootcampPurchaseQuerySchema,
     addBootcampVideoSchema,
     updateBootcampVideoSchema,
     deleteBootcampVideoSchema,
@@ -155,7 +156,24 @@ router.get(
 );
 
 // --- Bootcamp recording purchases (SSLCommerz only — gateway callbacks
-// finalize automatically; learners see their own via /my-purchases) ---
+// finalize automatically; learners see their own via /my-purchases; admins
+// manage/report on every purchase through the /purchases endpoints) ---
+router.get(
+    '/purchases/stats',
+    requireAuth,
+    requireAdmin,
+    validateRequest(adminBootcampPurchaseQuerySchema),
+    BootcampCatalogController.getBootcampPurchaseStats
+);
+
+router.get(
+    '/purchases',
+    requireAuth,
+    requireAdmin,
+    validateRequest(adminBootcampPurchaseQuerySchema),
+    BootcampCatalogController.listBootcampPurchases
+);
+
 router.get(
     '/my-purchases',
     requireAuth,
