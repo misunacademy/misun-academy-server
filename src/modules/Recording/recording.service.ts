@@ -214,20 +214,23 @@ const deleteRecording = async (recordingId: string): Promise<void> => {
     }
 };
 
-const incrementViewCount = async (recordingId: string, userId?: string): Promise<void> => {
+const incrementViewCount = async (recordingId: string, userId?: string, userRole?: string): Promise<void> => {
     const recording = await RecordingModel.findById(recordingId).lean();
     if (!recording) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Recording not found');
     }
+    // Staff preview their own content — only learners need batch enrollment.
+    const isStaff = userRole === Role.ADMIN || userRole === Role.SUPERADMIN || userRole === Role.INSTRUCTOR;
     // Only learners enrolled in the recording's batch count toward views.
-    if (userId && recording.batchId) {
+    // Mask as 404 (not 403) so recording IDs can't be probed for existence.
+    if (userId && recording.batchId && !isStaff) {
         const enrollment = await EnrollmentModel.findOne({
             userId,
             batchId: recording.batchId,
             status: EnrollmentStatus.Active,
         }).lean();
         if (!enrollment) {
-            throw new ApiError(StatusCodes.FORBIDDEN, 'You are not enrolled in this batch');
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Recording not found');
         }
     }
     await RecordingModel.findByIdAndUpdate(recordingId, {

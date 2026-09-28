@@ -25,10 +25,10 @@ const getBatchModules = catchAsync(async (req: Request, res: Response) => {
  * Get lessons for a module with progress
  */
 const getModuleLessons = catchAsync(async (req: Request, res: Response) => {
-    const { moduleId } = req.params as { moduleId: string };
+    const { batchId, moduleId } = req.params as { batchId: string; moduleId: string };
     const enrollment = (req as any).enrollment;
 
-    const result = await ContentService.getModuleLessons(enrollment._id, moduleId);
+    const result = await ContentService.getModuleLessons(enrollment._id, moduleId, batchId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -42,10 +42,10 @@ const getModuleLessons = catchAsync(async (req: Request, res: Response) => {
  * Get lesson details with video URL
  */
 const getLessonDetails = catchAsync(async (req: Request, res: Response) => {
-    const { moduleId, lessonId } = req.params as { moduleId: string; lessonId: string };
+    const { batchId, moduleId, lessonId } = req.params as { batchId: string; moduleId: string; lessonId: string };
     const enrollment = (req as any).enrollment;
 
-    const result = await ContentService.getLessonDetails(enrollment._id, moduleId, lessonId);
+    const result = await ContentService.getLessonDetails(enrollment._id, moduleId, lessonId, batchId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -62,7 +62,8 @@ const getModuleResources = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params as { moduleId: string };
     const enrollment = (req as any).enrollment;
 
-    const result = await ContentService.getModuleResources(enrollment._id, moduleId);
+    const { batchId: resourcesBatchId } = req.params as { batchId: string };
+    const result = await ContentService.getModuleResources(enrollment._id, moduleId, resourcesBatchId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -79,7 +80,8 @@ const getModuleQuizzes = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params as { moduleId: string };
     const enrollment = (req as any).enrollment;
 
-    const result = await ContentService.getModuleQuizzes(enrollment._id, moduleId);
+    const { batchId: quizzesBatchId } = req.params as { batchId: string };
+    const result = await ContentService.getModuleQuizzes(enrollment._id, moduleId, quizzesBatchId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -96,7 +98,8 @@ const getModuleCurriculum = catchAsync(async (req: Request, res: Response) => {
     const { moduleId } = req.params as { moduleId: string };
     const enrollment = (req as any).enrollment;
 
-    const result = await ContentService.getModuleCurriculum(enrollment._id, moduleId);
+    const { batchId: curriculumBatchId } = req.params as { batchId: string };
+    const result = await ContentService.getModuleCurriculum(enrollment._id, moduleId, curriculumBatchId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,

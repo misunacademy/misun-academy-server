@@ -101,6 +101,12 @@ const updateModule = async (moduleId: string, updateData: any) => {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Batch cannot be changed for a module');
     }
 
+    // A module belongs to its course: silently moving it across courses via
+    // update would orphan lessons/quizzes/progress. Use delete + recreate.
+    if (updateData.courseId && updateData.courseId.toString() !== module.courseId.toString()) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Course cannot be changed for a module');
+    }
+
     // Check order index conflict
     if (updateData.orderIndex !== undefined && updateData.orderIndex !== module.orderIndex) {
         const existingModule = await ModuleModel.findOne({

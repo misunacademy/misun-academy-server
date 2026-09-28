@@ -105,8 +105,12 @@ const updateLesson = async (lessonId: string, updateData: any) => {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found');
     }
 
-    if (updateData.orderIndex !== undefined && updateData.orderIndex !== oldLesson.orderIndex) {
-        const existingLesson = await LessonModel.findOne({
+    // A lesson belongs to its module: moving it across modules/batches via
+    // update would orphan progress rows. Use delete + recreate instead.
+    if (updateData.moduleId && updateData.moduleId.toString() !== (oldLesson as any).moduleId?.toString()) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Module cannot be changed for a lesson');
+    }
+    if (updateData.orderIndex !== undefined && updateData.orderIndex !== oldLesson.orderIndex) {        const existingLesson = await LessonModel.findOne({
             moduleId: oldLesson.moduleId,
             orderIndex: updateData.orderIndex,
             _id: { $ne: lessonId },
