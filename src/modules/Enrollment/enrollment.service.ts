@@ -126,6 +126,20 @@ const assignStudentIdIfMissing = async (
 };
 
 /**
+ * Resolve the human batch number for enrollment IDs. Prefers the numeric
+ * `batch.batchNumber` field; falls back to digits parsed from the title
+ * (legacy "Batch 3" convention). Never yields "undefined" counter IDs.
+ */
+const parseBatchNumber = (batch: any): string => {
+    const direct = Number(batch?.batchNumber);
+    if (Number.isFinite(direct) && direct > 0) {
+        return String(Math.floor(direct));
+    }
+    const fromTitle = String(batch?.title ?? '').match(/(\d+)/)?.[1];
+    return fromTitle ?? '0';
+};
+
+/**
  * Generate unique enrollment ID
  */
 const generateEnrollmentId = async (
@@ -186,7 +200,7 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
             // Ensure existing enrollment has an enrollmentId (required for SSLCommerz flow)
             if (!existingPendingEnrollment.enrollmentId) {
                 const batchObj = existingPendingEnrollment.batchId as any;
-                const batchNumber = batchObj?.title.split(' ')[1];
+                const batchNumber = parseBatchNumber(batchObj);
                 const generatedEnrollmentId = await generateEnrollmentId(
                     batchNumber,
                     deriveCourseBrand(batchObj?.courseId)
@@ -281,15 +295,17 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
         // Assign Student ID if not exists
         await assignStudentIdIfMissing(userId, session);
 
-        await session.commitTransaction();
-
-        // Generate enrollment ID and fire notification for new enrollments
-        const batchNumber = batch.title?.split(' ')[1];
+        // Generate the enrollment ID INSIDE the transaction: a crash between
+        // commit and a post-commit save used to leave rows with null
+        // enrollmentId, breaking the SSLCommerz lookup. The counter upsert is
+        // atomic on its own, so in-txn placement is safe.
         enrollment.enrollmentId = await generateEnrollmentId(
-            batchNumber,
+            parseBatchNumber(batch),
             deriveCourseBrand(batch.courseId as any)
         );
-        await enrollment.save();
+        await enrollment.save({ session });
+
+        await session.commitTransaction();
 
         setImmediate(async () => {
             try {
@@ -439,7 +455,10 @@ const enrollWithManualPayment = async (
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment period is not active');
     }
 
-    const submittedUtr = paymentData.transactionId.trim();
+    // Normalize identifiers: UTRs are case/whitespace-insensitive on the
+    // provider side — without this, "abc 123" vs "ABC123" bypasses dedupe.
+    const submittedUtr = paymentData.transactionId.replace(/\s+/g, '').toUpperCase();
+    const senderNumber = paymentData.senderNumber.replace(/[\s-]+/g, '');
     const duplicateUtrPayment = await PaymentModel.findOne({
         'gatewayResponse.phonePeTransactionId': submittedUtr,
     }).lean();
@@ -470,10 +489,9 @@ const enrollWithManualPayment = async (
 
         let enrollment = existingEnrollment;
 
-        // Prefer the stable batch number; fall back to the legacy "second
-        // word of the title" convention, never undefined.
-        const batchNumber =
-            (batch as any).batchNumber ?? batch.title?.split(' ')[1] ?? '';
+        // Prefer the stable numeric batch number; legacy title parsing as
+        // fallback, never undefined.
+        const batchNumber = parseBatchNumber(batch);
         const courseBrand = deriveCourseBrand(batch.courseId as any);
 
         // Create or reuse enrollment with a robust enrollmentId assignment.
@@ -539,23 +557,38 @@ const enrollWithManualPayment = async (
 
         const paymentTransactionId = generateTransactionId();
 
+        // Manual-channel currency follows the brand: EP collects via PhonePe
+        // India (INR), MA via bKash/Nagad (BDT). Storing INR amounts as BDT
+        // corrupts every revenue report downstream.
+        const manualCurrency = isEnglishCourse ? 'INR' : 'BDT';
+
         try {
             await PaymentModel.findOneAndUpdate(
                 { enrollmentId: enrollment.enrollmentId },
                 {
-                    userId,
-                    batchId,
-                    transactionId: paymentTransactionId,
-                    amount: manualPaymentAmount,
-                    currency: 'BDT',
-                    status: Status.Review,
-                    method: 'PhonePay',
-                    gatewayResponse: {
-                        senderNumber: paymentData.senderNumber,
-                        phonePeTransactionId: submittedUtr,
-                        submittedAt: new Date(),
+                    $set: {
+                        userId,
+                        batchId,
+                        transactionId: paymentTransactionId,
+                        amount: manualPaymentAmount,
+                        currency: manualCurrency,
+                        status: Status.Review,
+                        method: 'PhonePay',
+                        enrollmentId: enrollment.enrollmentId,
+                        // Dot-notation so the submissions history below survives.
+                        'gatewayResponse.senderNumber': senderNumber,
+                        'gatewayResponse.phonePeTransactionId': submittedUtr,
+                        'gatewayResponse.submittedAt': new Date(),
                     },
-                    enrollmentId: enrollment.enrollmentId,
+                    // Append-only submission history: a retry with a different
+                    // UTR must not destroy the originally submitted proof.
+                    $push: {
+                        'gatewayResponse.submissions': {
+                            senderNumber,
+                            phonePeTransactionId: submittedUtr,
+                            submittedAt: new Date(),
+                        },
+                    },
                 },
                 {
                     session,
@@ -621,7 +654,13 @@ const enrollWithManualPayment = async (
     }
 };
 
-const grantAccessByEmail = async (email: string, courseId: string, batchId: string) => {
+const grantAccessByEmail = async (
+    email: string,
+    courseId: string,
+    batchId: string,
+    actor?: { id: string; role?: string },
+    ip?: string
+) => {
     const normalizedEmail = email.trim().toLowerCase();
 
     if (!normalizedEmail) {
@@ -668,6 +707,20 @@ const grantAccessByEmail = async (email: string, courseId: string, batchId: stri
             );
         }
 
+        // Grants obey the same gates as paid enrollment: no free access into
+        // Draft/Cancelled/Completed batches (unreleased content + capacity).
+        const isEvergreen = (batch as any).isEvergreen === true || (batch as any).deliveryMode === 'recorded';
+        if (
+            !isEvergreen &&
+            batch.status !== BatchStatus.Upcoming &&
+            batch.status !== BatchStatus.Running
+        ) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'This batch is not accepting enrollments'
+            );
+        }
+
         let enrollment = await EnrollmentModel.findOne({
             userId: user._id,
             batchId: batch._id,
@@ -701,7 +754,7 @@ const grantAccessByEmail = async (email: string, courseId: string, batchId: stri
         const wasActive = false;
 
         if (!enrollment) {
-            const batchNumber = (batch as any).title?.split(' ')[1];
+            const batchNumber = parseBatchNumber(batch);
             const enrollmentId = await generateEnrollmentId(
                 batchNumber,
                 deriveCourseBrand(batch.courseId as any)
@@ -731,7 +784,7 @@ const grantAccessByEmail = async (email: string, courseId: string, batchId: stri
             }
 
             if (!enrollment.enrollmentId) {
-                const batchNumber = (batch as any).title?.split(' ')[1];
+                const batchNumber = parseBatchNumber(batch);
                 enrollment.enrollmentId = await generateEnrollmentId(
                     batchNumber,
                     deriveCourseBrand(batch.courseId as any)
@@ -771,6 +824,8 @@ const grantAccessByEmail = async (email: string, courseId: string, batchId: stri
         await session.commitTransaction();
 
         await recordAudit({
+            actor: actor?.id,
+            actorRole: actor?.role,
             action: 'enrollment.grant_access',
             targetType: 'Enrollment',
             targetId: enrollment._id?.toString(),
@@ -781,6 +836,7 @@ const grantAccessByEmail = async (email: string, courseId: string, batchId: stri
                 enrollmentId: enrollment.enrollmentId,
                 wasActive,
             },
+            ip,
         });
 
         if (!wasActive) {
@@ -843,10 +899,16 @@ const getAllEnrollments = async (params: {
 
     const matchStage: any = {};
     matchStage.enrollmentId = { $exists: true, $ne: null };
-    const requestedStatus =
-        typeof statusParam === 'string' && Object.values(EnrollmentStatus).includes(statusParam as EnrollmentStatus)
-            ? (statusParam as EnrollmentStatus)
-            : EnrollmentStatus.Active;
+    // Invalid statuses 400 loudly: silently defaulting to Active hides fraud
+    // hunts (pending/payment-pending/refunded searches returning Active rows).
+    // Absent status keeps the historical Active default for the admin UI.
+    let requestedStatus: EnrollmentStatus = EnrollmentStatus.Active;
+    if (statusParam !== undefined) {
+        if (typeof statusParam !== 'string' || !(Object.values(EnrollmentStatus) as string[]).includes(statusParam)) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid enrollment status');
+        }
+        requestedStatus = statusParam as EnrollmentStatus;
+    }
     matchStage.status = requestedStatus;
     if (batchId) {
         // Mirror the courseId guard below: an invalid id is a 400, not a
@@ -1056,9 +1118,33 @@ const getAllEnrollments = async (params: {
  * Admin: update an enrollment's status. Values are validated against
  * EnrollmentStatus (lowercase) — runs validators so capitalized/unknown
  * values are rejected instead of corrupting the row — and the optional
- * reason is persisted to statusChangeReason.
+ * reason is persisted to statusChangeReason. Transitions are constrained to
+ * a conservative state machine so Active↔Pending ping-pong, Completed
+ * resurrection, or finance-orphaning jumps can't happen from this endpoint
+ * (refunds/revokes move status through their own audited flows).
  */
+const ALLOWED_ENROLLMENT_TRANSITIONS: Record<string, string[]> = {
+    [EnrollmentStatus.Pending]: [EnrollmentStatus.Active, EnrollmentStatus.Suspended],
+    [EnrollmentStatus.PaymentPending]: [EnrollmentStatus.Active, EnrollmentStatus.Suspended],
+    [EnrollmentStatus.PaymentFailed]: [EnrollmentStatus.Pending],
+    [EnrollmentStatus.Active]: [EnrollmentStatus.Suspended, EnrollmentStatus.Completed, EnrollmentStatus.Refunded],
+    [EnrollmentStatus.Suspended]: [EnrollmentStatus.Active],
+    [EnrollmentStatus.Completed]: [],
+    [EnrollmentStatus.Refunded]: [],
+};
+
 const updateEnrollmentStatus = async (enrollmentId: string, status: EnrollmentStatus, reason?: string) => {
+    const current = await EnrollmentModel.findById(enrollmentId).select('status').lean();
+    if (!current) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+    }
+    const allowed = ALLOWED_ENROLLMENT_TRANSITIONS[current.status] ?? [];
+    if (current.status !== status && !allowed.includes(status)) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            `Cannot transition enrollment from ${current.status} to ${status}`
+        );
+    }
     // NOTE: update docs must use pure atomic operators — mixing a bare
     // `status` field with `$set` is rejected by MongoDB.
     const enrollment = await EnrollmentModel.findByIdAndUpdate(

@@ -308,10 +308,11 @@ const bootcampPaymentStatus = catchAsync(async (req: Request, res: Response) => 
 });
 
 const bootcampPaymentWebhook = catchAsync(async (req: Request, res: Response) => {
-    const { tran_id: transactionId, status: gatewayStatus, val_id: valId } = req.body as {
+    const { tran_id: transactionId, status: gatewayStatus, val_id: valId, k: callbackKey } = req.body as {
         tran_id?: string;
         status?: string;
         val_id?: string;
+        k?: string;
     };
 
     if (!transactionId || !gatewayStatus) {
@@ -322,6 +323,33 @@ const bootcampPaymentWebhook = catchAsync(async (req: Request, res: Response) =>
             data: null,
         });
         return;
+    }
+
+    // Unauthenticated webhook: a bare {tran_id, status:'failed'} POST must not
+    // be able to kill a Pending purchase. Require either a val_id (verified
+    // server-side against the SSLCommerz validation API in the service) or a
+    // valid HMAC callback key for failure/cancel reports without val_id.
+    if (!valId) {
+        const normalized = gatewayStatus.toLowerCase();
+        if (!['failed', 'cancel', 'cancelled', 'canceled'].includes(normalized)) {
+            sendResponse(res, {
+                statusCode: StatusCodes.BAD_REQUEST,
+                success: false,
+                message: 'Validation ID missing',
+                data: null,
+            });
+            return;
+        }
+        const expectedKey = BootcampCatalogService.getBootcampCallbackKey(transactionId);
+        if (!callbackKey || callbackKey !== expectedKey) {
+            sendResponse(res, {
+                statusCode: StatusCodes.FORBIDDEN,
+                success: false,
+                message: 'Invalid webhook callback key',
+                data: null,
+            });
+            return;
+        }
     }
 
     await BootcampCatalogService.finalizeBootcampSSLCommerz(

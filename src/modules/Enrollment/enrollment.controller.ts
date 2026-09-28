@@ -3,6 +3,7 @@ import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { EnrollmentService } from './enrollment.service.js';
+import { recordAudit } from '../../models/auditLog.model.js';
 import ApiError from '../../errors/ApiError.js';
 import { PaymentService } from '../Payment/payment.service.js';
 
@@ -64,10 +65,11 @@ const getMyEnrollments = catchAsync(async (req: Request, res: Response) => {
  * Get enrollment details
  */
 const getEnrollmentDetails = catchAsync(async (req: Request, res: Response) => {
-    const { id } = req.user as any;
+    const { id, role } = req.user as any;
     const { enrollmentId } = req.params as { enrollmentId: string };
+    const isStaff = role === 'admin' || role === 'superadmin' || role === 'instructor' || role === 'employee';
 
-    const enrollment = await EnrollmentService.getEnrollmentDetails(enrollmentId, id);
+    const enrollment = await EnrollmentService.getEnrollmentDetails(enrollmentId, id, isStaff);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -132,8 +134,19 @@ const getAllEnrollments = catchAsync(async (req: Request, res: Response) => {
 const updateEnrollmentStatus = catchAsync(async (req: Request, res: Response) => {
     const { enrollmentId } = req.params as { enrollmentId: string };
     const { status, reason } = req.body;
+    const admin = (req as any).user as { id: string; role: string } | undefined;
 
     const enrollment = await EnrollmentService.updateEnrollmentStatus(enrollmentId, status, reason);
+
+    await recordAudit({
+        actor: admin?.id,
+        actorRole: admin?.role,
+        action: 'enrollment.status_update',
+        targetType: 'Enrollment',
+        targetId: enrollmentId,
+        metadata: { status, reason },
+        ip: req.ip,
+    });
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -160,7 +173,8 @@ const grantAccessByEmail = catchAsync(async (req: Request, res: Response) => {
         );
     }
 
-    const result = await EnrollmentService.grantAccessByEmail(email, courseId, batchId);
+    const admin = (req as any).user as { id: string; role: string } | undefined;
+    const result = await EnrollmentService.grantAccessByEmail(email, courseId, batchId, admin, req.ip);
     const batch = result.batch as any;
     const course = (batch?.courseId as any) || {};
 
