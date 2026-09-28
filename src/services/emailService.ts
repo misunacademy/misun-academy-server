@@ -32,14 +32,43 @@ class EmailWorker {
     private isProcessing = false;
     private BATCH_SIZE = 5;
     private POLL_INTERVAL = 5000; // 5 seconds
+    private STALE_PROCESSING_MS = 10 * 60 * 1000; // crash recovery window
+    private timer: NodeJS.Timeout | null = null;
 
     constructor() {
         this.startWorker();
     }
 
     private startWorker() {
-        setInterval(() => this.processQueue(), this.POLL_INTERVAL);
+        // Crash recovery: jobs stuck in `processing` (crash after claim, before
+        // completion) would never be reaped — requeue them once at startup.
+        void this.requeueStaleProcessing().catch((error) => {
+            logger.error(`Email Worker requeue failed: ${error}`);
+        });
+        this.timer = setInterval(() => this.processQueue(), this.POLL_INTERVAL);
+        // Never keep the event loop alive for a background poller (lets
+        // `node --forceExit`-free shutdowns and tests exit cleanly).
+        this.timer.unref?.();
         logger.info('📧 Email Worker Started');
+    }
+
+    stopWorker() {
+        if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+        }
+    }
+
+    private async requeueStaleProcessing() {
+        if (mongoose.connection.readyState !== 1) return;
+        const cutoff = new Date(Date.now() - this.STALE_PROCESSING_MS);
+        const result = await EmailLogModel.updateMany(
+            { status: 'processing', updatedAt: { $lte: cutoff } },
+            { $set: { status: 'pending', nextAttemptAt: new Date() } }
+        );
+        if (result.modifiedCount > 0) {
+            logger.warn(`Email Worker: requeued ${result.modifiedCount} stale processing job(s)`);
+        }
     }
 
     /**
@@ -58,16 +87,25 @@ class EmailWorker {
         this.isProcessing = true;
 
         try {
-            // Find jobs: Pending OR (Failed but can retry AND time has passed)
-            // Prioritize HIGH priority first
-            const jobs = await EmailLogModel.find({
-                status: 'pending',
-                nextAttemptAt: { $lte: new Date() }
-            })
-                .sort({ priority: -1, createdAt: 1 }) // High priority first, then oldest
-                .limit(this.BATCH_SIZE);
+            // Atomic claim: flip pending -> processing in a single write so two
+            // dynos/instances can never double-send the same job.
+            const now = new Date();
+            const claimedIds: string[] = [];
+            for (let i = 0; i < this.BATCH_SIZE; i++) {
+                const claimed = await EmailLogModel.findOneAndUpdate(
+                    {
+                        status: 'pending',
+                        nextAttemptAt: { $lte: now },
+                    },
+                    { $set: { status: 'processing' } },
+                    { sort: { priority: -1, createdAt: 1 }, new: true }
+                );
+                if (!claimed) break;
+                claimedIds.push(String(claimed._id));
+            }
 
-            if (jobs.length > 0) {
+            if (claimedIds.length > 0) {
+                const jobs = await EmailLogModel.find({ _id: { $in: claimedIds } });
                 await Promise.all(jobs.map(job => this.sendJob(job)));
             }
 
@@ -82,16 +120,18 @@ class EmailWorker {
         const transporter = createTransporter();
 
         try {
-            // Mark as processing so other workers don't pick it up
-            job.status = 'processing';
-            await job.save();
-
             await transporter.sendMail({
                 from: env.EMAIL_FROM || `"Misun Academy" <${env.EMAIL_USER}>`,
                 to: job.to,
                 subject: job.subject,
                 html: job.html,
-                attachments: job.attachments
+                attachments: job.attachments,
+                // One-click unsubscribe (RFC 8058): required for bulk mail
+                // deliverability (Gmail/Yahoo bulk-sender rules).
+                headers: {
+                    'List-Unsubscribe': `<mailto:${env.EMAIL_USER}?subject=unsubscribe>`,
+                    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+                },
             });
 
             // Success
@@ -133,6 +173,11 @@ export const initializeEmailWorker = async () => {
     }
 };
 
+export const stopEmailWorker = () => {
+    worker?.stopWorker();
+    worker = null;
+};
+
 // ============================================================================
 // 3. PUBLIC API
 // ============================================================================
@@ -162,6 +207,25 @@ export const queueEmail = async (
             return;
         } catch (error) {
             logger.error(`Failed to send email immediately: ${error}`);
+            // Persist for retry instead of dropping OTPs/receipts: a
+            // long-running instance (or the next invocation's worker path)
+            // can pick the pending row up.
+            try {
+                await EmailLogModel.create({
+                    to,
+                    subject,
+                    html,
+                    priority: options.priority || 'normal',
+                    eventType: options.eventType,
+                    eventId: options.eventId,
+                    attachments: options.attachments,
+                    status: 'pending',
+                    maxRetries: Number(env.EMAIL_MAX_RETRIES) || 3,
+                    lastError: (error as Error)?.message,
+                });
+            } catch (dbError) {
+                logger.error(`Failed to persist failed serverless email: ${dbError}`);
+            }
             throw error;
         }
     }
@@ -189,7 +253,8 @@ export const queueEmail = async (
             eventType: options.eventType,
             eventId: options.eventId,
             attachments: options.attachments,
-            status: 'pending'
+            status: 'pending',
+            maxRetries: Number(env.EMAIL_MAX_RETRIES) || 3,
         });
     } catch (error) {
         logger.error(`Failed to queue email: ${error}`);
@@ -213,6 +278,10 @@ export const sendEmailImmediate = async (to: string, subject: string, html: stri
         from: env.EMAIL_FROM || `"Misun Academy" <${env.EMAIL_USER}>`,
         to,
         subject,
-        html
+        html,
+        headers: {
+            'List-Unsubscribe': `<mailto:${env.EMAIL_USER}?subject=unsubscribe>`,
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        },
     });
 };

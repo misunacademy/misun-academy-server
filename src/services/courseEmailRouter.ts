@@ -27,8 +27,10 @@ interface CourseEmailContext {
 }
 
 const resolveBrand = (context: CourseEmailContext): CourseBrand => {
-    if (context.brand === CourseBrand.EP) return CourseBrand.EP;
-    if (context.brand === CourseBrand.MA) return CourseBrand.MA;
+    // Normalize: stored brands may arrive lowercase from older docs/APIs.
+    const raw = (context.brand || '').toUpperCase();
+    if (raw === CourseBrand.EP) return CourseBrand.EP;
+    if (raw === CourseBrand.MA) return CourseBrand.MA;
     return isEnglishText(`${context.courseName || ''} ${context.courseSlug || ''}`)
         ? CourseBrand.EP
         : CourseBrand.MA;
@@ -60,12 +62,13 @@ export const sendCourseBatchStartReminderEmail = async (
     studentName: string,
     batchName: string,
     startDate: string,
+    eventId?: string,
 ) => {
     if (isEnglishCourse(context)) {
-        return sendEsunBatchStartReminderEmail(studentEmail, studentName, batchName, startDate);
+        return sendEsunBatchStartReminderEmail(studentEmail, studentName, batchName, startDate, eventId);
     }
 
-    return sendMisunBatchStartReminderEmail(studentEmail, studentName, batchName, startDate);
+    return sendMisunBatchStartReminderEmail(studentEmail, studentName, batchName, startDate, eventId);
 };
 
 export const sendCoursePaymentReviewEmail = async (

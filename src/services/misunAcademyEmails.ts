@@ -3,6 +3,7 @@
 // ============================================================================
 
 import env from "../config/env.js";
+import { escapeHtml } from "../utils/escapeHtml.js";
 import { SettingsService } from "../modules/Settings/settings.service.js";
 import { queueEmail } from "./emailService.js";
 import { isEnglishText } from '../utils/courseBrand.js';
@@ -12,6 +13,9 @@ const getDisplayCurrency = (currency: string, paymentMethod?: string) => {
 };
 
 const resolveGroupLinks = async (courseName: string) => {
+  // Secondary nicety only: the router already picked the MA/EP template file.
+  // Group links re-derive from the course name, so an MA course with
+  // "english" in its title shows EP groups (and vice versa) — cosmetic.
   const groupLinks = await SettingsService.getSocialGroupLinks();
   const isEnglishCourse = isEnglishText(courseName);
 
@@ -84,14 +88,14 @@ export const sendVerificationEmail = async (
   name: string,
   token: string,
 ) => {
-  const link = `${env.MA_FRONTEND_URL}/verify-email?token=${token}`;
+  const link = `${env.MA_FRONTEND_URL}/verify-email?token=${encodeURIComponent(token)}`;
   const html = getEmailTemplate(
     `
         <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
             <h1>Verify Your Email</h1>
         </div>
         <div class="content">
-            <p>Hi <strong>${name}</strong>,</p>
+            <p>Hi <strong>${escapeHtml(name)}</strong>,</p>
             <p>Welcome to Misun Academy! Please verify your email to activate your account.</p>
             <div style="text-align: center;">
                 <a href="${link}" class="button" style="background: #10b981;">Verify Now</a>
@@ -114,7 +118,7 @@ export const sendPasswordResetEmail = async (
   name: string,
   token: string,
 ) => {
-  const link = `${env.MA_FRONTEND_URL}/reset-password?token=${token}`;
+  const link = `${env.MA_FRONTEND_URL}/reset-password?token=${encodeURIComponent(token)}`;
 
   const html = getEmailTemplate(
     `
@@ -122,7 +126,7 @@ export const sendPasswordResetEmail = async (
             <h1>Reset Password</h1>
         </div>
         <div class="content">
-            <p>Hi ${name},</p>
+            <p>Hi ${escapeHtml(name)},</p>
             <p>We received a request to reset your password. Click below to proceed:</p>
             <div style="text-align: center;">
                 <a href="${link}" class="button" style="background: #ef4444;">Reset Password</a>
@@ -160,7 +164,7 @@ export const sendPaymentSuccessEmail = async (
             <h1>Payment Successful!</h1>
         </div>
         <div class="content">
-            <p>Dear <strong>${name}</strong>,</p>
+            <p>Dear <strong>${escapeHtml(name)}</strong>,</p>
             <p>We have received your payment for <strong>${courseName}</strong>.</p>
             
             <div class="highlight-box">
@@ -225,7 +229,7 @@ export const sendPaymentFailedEmail = async (
         <div class="content">
             <p>Dear ${student.name},</p>
             <p>Your payment for <strong>${courseName}</strong> could not be completed.</p>
-            <p><strong>Reason:</strong> ${reason}</p>
+            <p><strong>Reason:</strong> ${escapeHtml(reason)}</p>
             <p>Please try again or contact support.</p>
         </div>
     `,
@@ -283,7 +287,7 @@ export const sendEmployeeSalaryPaidEmail = async (params: {
             <h1>আপনার স্যালারি এসেছে 🎉</h1>
         </div>
         <div class="content">
-            <p>হ্যালো <strong>${name}</strong>,</p>
+            <p>হ্যালো <strong>${escapeHtml(name)}</strong>,</p>
             <p>ভালো খবর! আপনার স্যালারি সফলভাবে প্রসেস হয়েছে।</p>
             <p>আপনার দারুণ কাজের জন্য অনেক ধন্যবাদ! 🎉 ব্যাংক/ওয়ালেটে ক্রেডিট হতে সামান্য সময় লাগতে পারে—কোনো অমিল মনে হলে আমাদের জানাবেন, সমাধান করার চেষ্টা করবো।</p>
             <p>সংক্ষিপ্ত ডিটেইলস :</p>
@@ -387,6 +391,7 @@ export const sendBatchStartReminderEmail = async (
   studentName: string,
   batchName: string,
   startDate: string,
+  eventId?: string,
 ) => {
   const html = getEmailTemplate(
     `
@@ -405,7 +410,10 @@ export const sendBatchStartReminderEmail = async (
     "#3b82f6",
   );
 
-  await queueEmail(studentEmail, `Reminder: ${batchName} Starts Soon`, html);
+  await queueEmail(studentEmail, `Reminder: ${batchName} Starts Soon`, html, {
+    eventType: 'batch_start_reminder',
+    eventId,
+  });
 };
 
 export const sendCertificateApprovedEmail = async (
@@ -490,7 +498,7 @@ export const sendEnrollmentConfirmationEmail = async (
                         <td class="content-padding" style="padding: 40px 30px 20px 30px; color: #333333; line-height: 1.6;">
                             
                             <p style="font-size: 16px; margin-bottom: 20px; margin-top: 0;">
-                                <strong>Dear ${user.name},</strong>
+                                <strong>Dear ${escapeHtml(user.name)},</strong>
                             </p>
                             <p style="font-size: 16px; margin-bottom: 20px;">
                                 Congratulations! Your payment has been successfully processed, and you are officially enrolled in <strong>${courseName}</strong>.
@@ -517,7 +525,7 @@ export const sendEnrollmentConfirmationEmail = async (
                                 <tr>
                                     <td style="padding: 20px;">
                                         <h3 style="margin-top: 0; margin-bottom: 10px; font-size: 18px; color: #333333;">Payment & Enrollment Receipt</h3>
-                                        <p style="margin: 5px 0; font-size: 14px;"><strong>Student Name:</strong> ${user.name}</p>
+                                        <p style="margin: 5px 0; font-size: 14px;"><strong>Student Name:</strong> ${escapeHtml(user.name)}</p>
                                         <p style="margin: 5px 0; font-size: 14px;"><strong>Enrollment ID:</strong> ${enrollmentId}</p>
                                         <p style="margin: 5px 0; font-size: 14px;"><strong>Email:</strong> ${user.email}</p>
                                         <p style="margin: 5px 0; font-size: 14px;"><strong>Amount:</strong> ${paymentAmount} ${displayCurrency}</p>
@@ -595,7 +603,7 @@ export const sendEnrollmentReminderEmail = async (
             <h1>📚 Start Your Learning Journey!</h1>
         </div>
         <div class="content">
-            <p>Hi <strong>${name}</strong>,</p>
+            <p>Hi <strong>${escapeHtml(name)}</strong>,</p>
             <p>We noticed you registered with Misun Academy but haven't enrolled in any course yet.</p>
             
             <div class="highlight-box" style="border-color: #8b5cf6;">
@@ -638,13 +646,13 @@ export const sendNewsUpdateEmail = async (
   const html = getEmailTemplate(
     `
         <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
-            <h1>📢 ${subject}</h1>
+            <h1>📢 ${escapeHtml(subject)}</h1>
         </div>
         <div class="content">
-            <p>Hi <strong>${name}</strong>,</p>
+            <p>Hi <strong>${escapeHtml(name)}</strong>,</p>
             
             <div style="margin: 30px 0; font-size: 16px; line-height: 1.8;">
-                ${message}
+                ${escapeHtml(message)}
             </div>
             
             <div style="text-align: center; margin: 30px 0;">
@@ -674,20 +682,22 @@ export const sendAnnouncementEmail = async (
   ctaUrl: string,
   eventId?: string,
 ) => {
+  // CTA comes from admin input: allow http(s) only, escape the attribute.
+  const safeCtaUrl = /^https?:\/\//i.test(ctaUrl) ? ctaUrl : `${env.MA_FRONTEND_URL}/dashboard/notifications`;
   const html = getEmailTemplate(
     `
         <div class="header" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
-            <h1>📢 ${subject}</h1>
+            <h1>📢 ${escapeHtml(subject)}</h1>
         </div>
         <div class="content">
-            <p>Hi <strong>${name}</strong>,</p>
+            <p>Hi <strong>${escapeHtml(name)}</strong>,</p>
 
             <div style="margin: 30px 0; font-size: 16px; line-height: 1.8;">
-                ${message}
+                ${escapeHtml(message)}
             </div>
 
             <div style="text-align: center; margin: 30px 0;">
-                <a href="${ctaUrl}" class="button" style="background: #3b82f6;">View Details</a>
+                <a href="${escapeHtml(safeCtaUrl)}" class="button" style="background: #3b82f6;">View Details</a>
             </div>
 
             <p style="font-size: 14px; color: #666;">You are receiving this because an administrator published an announcement.</p>
@@ -861,7 +871,7 @@ export const sendBootcampRegistrationConfirmationEmail = async (
             <h1>Bootcamp Registration Received</h1>
         </div>
         <div class="content">
-            <p>Hi <strong>${name}</strong>,</p>
+            <p>Hi <strong>${escapeHtml(name)}</strong>,</p>
             <p>We received your registration for <strong>${title}</strong> at Misun Academy.</p>
             <div class="highlight-box" style="border-color: #f59e0b;">
                 <p>Our team is verifying your payment. Once confirmed, we will send you the live class link on email and WhatsApp.</p>
@@ -888,7 +898,7 @@ export const sendBootcampRegistrationVerifiedEmail = async (
             <h1>Bootcamp Registration Verified 🎉</h1>
         </div>
         <div class="content">
-            <p>Hi <strong>${name}</strong>,</p>
+            <p>Hi <strong>${escapeHtml(name)}</strong>,</p>
             <p>Your payment has been verified. You are now confirmed for <strong>${bootcampTitle}</strong>.</p>
             <div style="text-align: center;">
                 <a href="${env.MA_FRONTEND_URL}/bootcamp" class="button" style="background: #10b981;">Visit Bootcamp Page</a>
