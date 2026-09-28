@@ -8,6 +8,7 @@ import { ModuleModel } from "../Module/module.model.js";
 import { LessonProgressModel } from "../Progress/lessonProgress.model.js";
 import { ModuleProgressModel } from "../Progress/moduleProgress.model.js";
 import { BatchStatus, EnrollmentStatus, LessonProgressStatus, UserStatus } from "../../types/common.js";
+import { Role } from "../../types/role.js";
 import { getAuth } from "../../config/betterAuth.js";
 import { recordAudit } from "../../models/auditLog.model.js";
 import { logger } from "../../config/logger.js";
@@ -105,16 +106,17 @@ const getAllUsers = async (params: {
         enrolled,
     } = params;
 
-    const pageNumber = Number(page) || 1;
-    const limitNumber = Number(limit) || 10;
+    const pageNumber = Math.max(1, Number(page) || 1);
+    const limitNumber = Math.min(100, Math.max(1, Number(limit) || 10));
     const query: any = {};
 
     if (role) query.role = role;
     if (status) query.status = status;
     if (search) {
+        const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         query.$or = [
-            { name: { $regex: search, $options: 'i' } },
-            { email: { $regex: search, $options: 'i' } },
+            { name: { $regex: escaped, $options: 'i' } },
+            { email: { $regex: escaped, $options: 'i' } },
         ];
     }
 
@@ -213,11 +215,22 @@ const getUserById = async (id: string) => {
     return user;
 };
 
-const createAdmin = async (payload: { name: string; email: string; password: string; role?: string }) => {
+interface Actor {
+    id: string;
+    role: string;
+}
+
+const createAdmin = async (payload: { name: string; email: string; password: string; role?: string }, actor?: Actor) => {
     const { name, email, password, role } = payload;
 
     if (!password) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Password is required when creating a user');
+    }
+
+    // Privilege guard: only a superadmin may mint admin/superadmin accounts.
+    // A plain admin creating staff is limited to learner/instructor/employee.
+    if ((role === Role.ADMIN || role === Role.SUPERADMIN) && actor?.role !== Role.SUPERADMIN) {
+        throw new ApiError(StatusCodes.FORBIDDEN, 'Only superadmins can create admin accounts');
     }
 
     const auth = getAuth();
@@ -282,10 +295,36 @@ const revokeUserSessions = async (userId: string) => {
     });
 };
 
-const updateUser = async (id: string, updateData: Record<string, any>, actor?: string) => {
+const updateUser = async (id: string, updateData: Record<string, any>, actor?: string | Actor) => {
+    const actorId = typeof actor === 'string' ? actor : actor?.id;
+    const actorRole = typeof actor === 'string' ? undefined : actor?.role;
     const before = await UserModel.findById(id).select('role status name email').lean();
 
-    const user = await UserModel.findByIdAndUpdate(id, updateData, {
+    if (!before) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+    }
+
+    // Mass-assignment guard: only profile fields are editable here. `role`
+    // needs superadmin + no self-edit; `status` has its own audited endpoint;
+    // `password` must never flow through findByIdAndUpdate (pre-save bcrypt
+    // would be skipped → plaintext).
+    const { name, email, phone, role } = updateData ?? {};
+    const update: Record<string, any> = {};
+    if (name !== undefined) update.name = name;
+    if (email !== undefined) update.email = email;
+    if (phone !== undefined) update.phone = phone;
+
+    if (role !== undefined && role !== before.role) {
+        if (actorRole !== Role.SUPERADMIN) {
+            throw new ApiError(StatusCodes.FORBIDDEN, 'Only superadmins can change user roles');
+        }
+        if (actorId && id.toString() === actorId.toString()) {
+            throw new ApiError(StatusCodes.FORBIDDEN, 'You cannot change your own role');
+        }
+        update.role = role;
+    }
+
+    const user = await UserModel.findByIdAndUpdate(id, update, {
         new: true,
         runValidators: true,
     })
@@ -296,35 +335,27 @@ const updateUser = async (id: string, updateData: Record<string, any>, actor?: s
         throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
     }
 
-    if (actor && updateData.role && before && before.role !== updateData.role) {
+    if (actorId && update.role && before.role !== update.role) {
         await recordAudit({
-            actor,
+            actor: actorId,
             action: 'user.role_change',
             targetType: 'User',
             targetId: id,
-            metadata: { from: before.role, to: updateData.role },
+            metadata: { from: before.role, to: update.role },
         });
-    }
-
-    if (actor && updateData.status && before && before.status !== updateData.status) {
-        await recordAudit({
-            actor,
-            action: 'user.status_change',
-            targetType: 'User',
-            targetId: id,
-            metadata: { from: before.status, to: updateData.status },
-        });
-
-        if (updateData.status === UserStatus.Suspended) {
-            await revokeUserSessions(user._id.toString());
-            logger.warn(`Sessions revoked for suspended user ${user.email}`);
-        }
     }
 
     return user;
 };
 
 const updateUserStatus = async (id: string, status: string, actor?: string) => {
+    const actorId = typeof actor === 'string' ? actor : (actor as Actor | undefined)?.id;
+    // No self-suspend/self-delete: an admin locking their own account is an
+    // org lockout with no one left to reverse it.
+    if (actorId && id.toString() === actorId.toString() && status !== UserStatus.Active) {
+        throw new ApiError(StatusCodes.FORBIDDEN, 'You cannot change your own status');
+    }
+
     const before = await UserModel.findById(id).select('status').lean();
 
     const user = await UserModel.findByIdAndUpdate(
@@ -343,24 +374,60 @@ const updateUserStatus = async (id: string, status: string, actor?: string) => {
         return user;
     }
 
-    if (status === UserStatus.Suspended) {
+    // Keep Batch.currentEnrollment (used by topBatches sorting) honest: it
+    // counts Active seats, so move them out/in per batch on suspend/delete
+    // and reactivate respectively. Counts are always read BEFORE the flip.
+    const countActiveByBatch = async (): Promise<Map<string, number>> => {
+        const affected = await EnrollmentModel.find({ userId: id, status: EnrollmentStatus.Active })
+            .select('batchId')
+            .lean();
+        const perBatch = new Map<string, number>();
+        for (const e of affected) {
+            const key = e.batchId?.toString();
+            if (key) perBatch.set(key, (perBatch.get(key) ?? 0) + 1);
+        }
+        return perBatch;
+    };
+    const countSuspendedByBatch = async (): Promise<Map<string, number>> => {
+        const affected = await EnrollmentModel.find({ userId: id, status: EnrollmentStatus.Suspended })
+            .select('batchId')
+            .lean();
+        const perBatch = new Map<string, number>();
+        for (const e of affected) {
+            const key = e.batchId?.toString();
+            if (key) perBatch.set(key, (perBatch.get(key) ?? 0) + 1);
+        }
+        return perBatch;
+    };
+    const applyCounterDelta = async (perBatch: Map<string, number>, delta: -1 | 1) => {
+        await Promise.all(
+            [...perBatch.entries()].map(([batchId, count]) =>
+                BatchModel.findByIdAndUpdate(batchId, { $inc: { currentEnrollment: delta * count } })
+            )
+        );
+    };
+
+    if (status === UserStatus.Suspended || status === UserStatus.Deleted) {
+        await applyCounterDelta(await countActiveByBatch(), -1);
         await EnrollmentModel.updateMany(
             { userId: id, status: EnrollmentStatus.Active },
             { status: EnrollmentStatus.Suspended },
         );
         await revokeUserSessions(id);
-        logger.warn(`Sessions revoked for suspended user ${user.email}`);
+        logger.warn(`Sessions revoked for ${status} user ${user.email}`);
     }
 
     if (status === UserStatus.Active) {
+        const toReactivate = await countSuspendedByBatch();
         await EnrollmentModel.updateMany(
             { userId: id, status: EnrollmentStatus.Suspended },
             { status: EnrollmentStatus.Active },
         );
+        await applyCounterDelta(toReactivate, 1);
     }
 
     await recordAudit({
-        actor,
+        actor: actorId,
         action: 'user.status_change',
         targetType: 'User',
         targetId: id,
@@ -371,14 +438,44 @@ const updateUserStatus = async (id: string, status: string, actor?: string) => {
 };
 
 const deleteUser = async (id: string, actor?: string) => {
+    const actorId = typeof actor === 'string' ? actor : (actor as Actor | undefined)?.id;
+    if (actorId && id.toString() === actorId.toString()) {
+        throw new ApiError(StatusCodes.FORBIDDEN, 'You cannot delete your own account');
+    }
+
     const user = await UserModel.findByIdAndDelete(id);
 
     if (!user) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
     }
 
+    // Cleanup: revoke sessions (requireAuth blocks Deleted, but existing JWE
+    // cookie-cache + DB sessions stay valid until expiry otherwise) and drop
+    // the profile doc. Enrollments/payments are retained for finance history,
+    // but their seats leave the Active counters.
+    await revokeUserSessions(id);
+    const activeEnrollments = await EnrollmentModel.find({ userId: id, status: EnrollmentStatus.Active })
+        .select('batchId')
+        .lean();
+    const perBatch = new Map<string, number>();
+    for (const e of activeEnrollments) {
+        const key = (e as any).batchId?.toString();
+        if (key) perBatch.set(key, (perBatch.get(key) ?? 0) + 1);
+    }
+    await Promise.all(
+        [...perBatch.entries()].map(([batchId, count]) =>
+            BatchModel.findByIdAndUpdate(batchId, { $inc: { currentEnrollment: -count } })
+        )
+    );
+    try {
+        const { ProfileModel } = await import('../Profile/profile.model.js');
+        await ProfileModel.deleteOne({ user: id });
+    } catch (error) {
+        logger.error(error, `Failed to delete profile for deleted user ${id}`);
+    }
+
     await recordAudit({
-        actor,
+        actor: actorId,
         action: 'user.delete',
         targetType: 'User',
         targetId: id,
