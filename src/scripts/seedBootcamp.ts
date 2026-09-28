@@ -1,14 +1,15 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import env from '../config/env.js';
 import { BootcampCatalogModel } from '../modules/Bootcamp/bootcampCatalog.model.js';
 import { BootcampStatus, RecordedStatus } from '../modules/Bootcamp/bootcampCatalog.interface.js';
+import { isDirectRun, requireMigrationConfirm } from './runGuard.js';
 
 dotenv.config();
 
 const seed = async () => {
-    const uri = process.env.MONGODB_URI;
-    if (!uri) throw new Error('MONGODB_URI missing');
-    await mongoose.connect(uri);
+    // Validated env (Zod): typos fail fast with a clear schema error.
+    await mongoose.connect(env.MONGO_URI);
 
     const slug = 'paracetamol-for-photoshop-season-2';
     const existing = await BootcampCatalogModel.findOne({ slug }).lean();
@@ -65,7 +66,10 @@ const seed = async () => {
     await mongoose.disconnect();
 };
 
-seed().catch((e) => {
-    console.error(e);
-    process.exit(1);
-});
+if (isDirectRun(import.meta.url)) {
+    requireMigrationConfirm('seedBootcamp');
+    seed().catch((e) => {
+        console.error(e);
+        process.exit(1);
+    });
+}
