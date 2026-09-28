@@ -2,7 +2,7 @@ import { describe, it, expect } from '@jest/globals';
 import { submitQuizSchema } from '../../validations/attempt.validation.js';
 
 const body = (overrides: Record<string, unknown> = {}) => ({
-    answers: [{ questionId: 'q1', selectedAnswer: 'A' }],
+    answers: [{ questionId: '507f1f77bcf86cd799439011', selectedAnswer: 'A' }],
     ...overrides,
 });
 

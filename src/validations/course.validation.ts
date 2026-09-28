@@ -1,57 +1,58 @@
 import { z } from 'zod';
 
-// Helper: normalize enum strings like "advanced" -> "Advanced"
-const normalizeEnum = (v: unknown) => typeof v === 'string' ? (v.charAt(0).toUpperCase() + v.slice(1).toLowerCase()) : v;
-
-// Preprocess incoming body to accept alternate field names from client and
-// normalize enum casing so both "advanced" and "Advanced" are accepted.
+// Schemas mirror course.model.ts exactly: lowercase enums, model field names.
+// Client aliases (description/thumbnail/coverImageUrl) are mapped onto model
+// fields and then removed, so validateRequest's write-back never stores a
+// wrong-cased enum or a field the model doesn't know. Slugs are immutable
+// after create (changing them breaks links and can flip brand derivation).
 const normalizeBody = (body: any) => {
     if (body && typeof body === 'object') {
         const b = { ...body };
-        // Map client-side field names to server expectations
-        if (b.fullDescription && !b.description) b.description = b.fullDescription;
-        if (b.thumbnailImage && !b.thumbnail) b.thumbnail = b.thumbnailImage;
-        if (b.coverImage && !b.coverImageUrl) b.coverImageUrl = b.coverImage;
-
-        // Normalize enums (case-insensitive)
-        if (b.level) b.level = normalizeEnum(b.level);
-        if (b.status) b.status = normalizeEnum(b.status);
-
+        if (b.description && !b.fullDescription) b.fullDescription = b.description;
+        if (b.thumbnail && !b.thumbnailImage) b.thumbnailImage = b.thumbnail;
+        if (b.coverImageUrl && !b.coverImage) b.coverImage = b.coverImageUrl;
+        delete b.description;
+        delete b.thumbnail;
+        delete b.coverImageUrl;
+        for (const key of ['level', 'status'] as const) {
+            if (typeof b[key] === 'string') b[key] = b[key].toLowerCase();
+        }
         return b;
     }
     return body;
 };
 
+const levelEnum = z.enum(['beginner', 'intermediate', 'advanced']);
+const statusEnum = z.enum(['draft', 'published', 'archived']);
+
+const baseShape = {
+    title: z.string().min(3).max(200),
+    shortDescription: z.string().min(1).max(300),
+    fullDescription: z.string().min(10),
+    learningOutcomes: z.array(z.string()).min(1),
+    prerequisites: z.array(z.string()).optional(),
+    targetAudience: z.string().min(1),
+    thumbnailImage: z.string().url(),
+    coverImage: z.string().url().optional(),
+    durationEstimate: z.string().min(1),
+    level: levelEnum,
+    category: z.string().min(1),
+    tags: z.array(z.string()).optional(),
+    features: z.array(z.string()).optional(),
+    highlights: z.array(z.string()).optional(),
+    featured: z.boolean().optional(),
+    status: statusEnum.optional(),
+    isCertificateAvailable: z.boolean().optional(),
+};
+
+const optionalShape = Object.fromEntries(
+    Object.entries(baseShape).map(([key, schema]) => [key, schema.optional()])
+);
+
 export const createCourseSchema = z.object({
-    body: z.preprocess(normalizeBody, z.object({
-        title: z.string().min(3).max(200),
-        description: z.string().min(10),
-        shortDescription: z.string().max(500).optional(),
-        thumbnail: z.string().url().optional(),
-        coverImageUrl: z.string().url().optional(),
-        level: z.enum(['Beginner', 'Intermediate', 'Advanced']),
-        category: z.string(),
-        tags: z.array(z.string()).optional(),
-        prerequisites: z.array(z.string()).optional(),
-        learningOutcomes: z.array(z.string()),
-        status: z.enum(['Draft', 'Published', 'Archived']).optional(),
-        isCertificateAvailable: z.boolean().optional(),
-    })),
+    body: z.preprocess(normalizeBody, z.object(baseShape)),
 });
 
 export const updateCourseSchema = z.object({
-    body: z.preprocess(normalizeBody, z.object({
-        title: z.string().min(3).max(200).optional(),
-        description: z.string().min(10).optional(),
-        shortDescription: z.string().max(500).optional(),
-        thumbnail: z.string().url().optional(),
-        coverImageUrl: z.string().url().optional(),
-        level: z.enum(['Beginner', 'Intermediate', 'Advanced']).optional(),
-        category: z.string().optional(),
-        tags: z.array(z.string()).optional(),
-        prerequisites: z.array(z.string()).optional(),
-        learningOutcomes: z.array(z.string()).optional(),
-        status: z.enum(['Draft', 'Published', 'Archived']).optional(),
-        isCertificateAvailable: z.boolean().optional(),
-    })),
+    body: z.preprocess(normalizeBody, z.object(optionalShape as any)),
 });
