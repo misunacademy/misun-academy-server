@@ -1,8 +1,10 @@
 import { NextFunction, Response } from 'express';
+import mongoose from 'mongoose';
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../errors/ApiError.js';
 import { EnrollmentModel } from '../modules/Enrollment/enrollment.model.js';
 import { EnrollmentStatus } from '../types/common.js';
+import { Role } from '../types/role.js';
 
 /**
  * Middleware to verify that the user is enrolled in a specific batch
@@ -19,6 +21,15 @@ export const checkBatchEnrollment = async (req: any, res: Response, next: NextFu
 
         if (!batchId) {
             throw new ApiError(StatusCodes.BAD_REQUEST, 'Batch ID is required');
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(batchId)) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid batch ID');
+        }
+
+        // Staff preview their own content without enrolling.
+        if (req.user?.role === Role.ADMIN || req.user?.role === Role.SUPERADMIN) {
+            return next();
         }
 
         // Graduates keep lifetime access: approving a certificate flips the
