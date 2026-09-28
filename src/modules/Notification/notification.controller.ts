@@ -41,6 +41,14 @@ const markAsRead = catchAsync(async (req: Request, res: Response) => {
   const { notificationId } = req.params;
 
   const notification = await NotificationService.markAsRead(id, firstParam(notificationId));
+  if (!notification) {
+    return sendResponse(res, {
+      statusCode: StatusCodes.NOT_FOUND,
+      success: false,
+      message: 'Notification not found',
+      data: null,
+    });
+  }
 
   sendResponse(res, {
     statusCode: StatusCodes.OK,
@@ -67,6 +75,14 @@ const deleteNotification = catchAsync(async (req: Request, res: Response) => {
   const { notificationId } = req.params;
 
   const notification = await NotificationService.deleteNotification(id, firstParam(notificationId));
+  if (!notification) {
+    return sendResponse(res, {
+      statusCode: StatusCodes.NOT_FOUND,
+      success: false,
+      message: 'Notification not found',
+      data: null,
+    });
+  }
 
   sendResponse(res, {
     statusCode: StatusCodes.OK,

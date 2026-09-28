@@ -43,6 +43,20 @@ describe('UploadService validation (no Cloudinary network)', () => {
         );
     });
 
+    it('processSingleUpload rejects polyglot HTML renamed as PNG', async () => {
+        const file = fakeFile({ buffer: Buffer.from('<html><script>alert(1)</script>') });
+        await expect(UploadService.processSingleUpload(file)).rejects.toThrow(
+            /does not match an image format/i
+        );
+    });
+
+    it('processRestrictedUpload rejects non-image buffers', async () => {
+        const file = fakeFile({ buffer: Buffer.from('%PDF-1.4 fake') });
+        await expect(UploadService.processRestrictedUpload(file)).rejects.toThrow(
+            /does not match an image format/i
+        );
+    });
+
     it('generateSignedAssetUrl rejects empty publicId', () => {
         expect(() => UploadService.generateSignedAssetUrl('')).toThrow(
             /Asset reference is required/i

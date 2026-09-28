@@ -170,6 +170,27 @@ describe('ProfileService enrollment sync', () => {
         ).rejects.toThrow(/Student profile not found/i);
     });
 
+    it('getProfile self-heals a missing enrollment ref from an unsynced flow', async () => {
+        const user = await createUser({ email: `prof-${uniq()}@example.com` });
+        const course = await createCourse(admin._id);
+        const batchA = await createBatch(course._id);
+        const batchB = await createBatch(course._id, { batchNumber: 2, title: `Batch Two ${uniq()}` });
+        const e1 = await createEnrollmentWithId(user._id, batchA._id);
+        const e2 = await createEnrollmentWithId(user._id, batchB._id);
+
+        // Only e1 went through the sync (e2 simulates a seed/manual insert
+        // that bypassed createOrUpdateProfileAfterEnrollment).
+        await ProfileService.createOrUpdateProfileAfterEnrollment(
+            user._id.toString(),
+            e1.enrollmentId as string
+        );
+
+        const fetched: any = await ProfileService.getProfile(user._id.toString());
+        const ids = (fetched.enrollments || []).map((e: any) => e.enrollmentId || e.studentId);
+        expect(ids).toContain(e1.enrollmentId);
+        expect(ids).toContain(e2.enrollmentId);
+    });
+
     it('syncAllUserEnrollmentsToProfile backfills missing refs and drops stale ones', async () => {
         const user = await createUser({ email: `prof-${uniq()}@example.com` });
         const course = await createCourse(admin._id);

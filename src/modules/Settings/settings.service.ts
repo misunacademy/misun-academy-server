@@ -14,13 +14,14 @@ const getSettings = async (): Promise<ISettings | null> => {
 };
 
 const updateSettings = async (payload: Partial<ISettings>): Promise<ISettings | null> => {
-  let settings = await Settings.findOne();
-  if (!settings) {
-    settings = new Settings(payload);
-  } else {
-    Object.assign(settings, payload);
+  // Atomic singleton upsert: findOne()+save() races into duplicate Settings
+  // docs under concurrent first-writes, and getSettings() then reads a coin
+  // flip. Strip undefined so partial updates can't null out stored values.
+  const set: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload ?? {})) {
+    if (value !== undefined) set[key] = value;
   }
-  return await settings.save();
+  return Settings.findOneAndUpdate({}, { $set: set }, { new: true, upsert: true, runValidators: true }).lean();
 };
 
 const getSocialGroupLinks = async (): Promise<ISocialGroupLinks> => {

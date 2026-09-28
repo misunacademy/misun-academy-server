@@ -3,6 +3,7 @@ import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { EmployeeService } from './employee.service.js';
+import { recordAudit } from '../../models/auditLog.model.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  PROFILE
@@ -137,6 +138,13 @@ const getAllSalariesAdmin = catchAsync(async (req: Request, res: Response) => {
 /** POST /employee/admin/salaries */
 const addSalary = catchAsync(async (req: Request, res: Response) => {
     const result = await EmployeeService.addSalary(req.body);
+    const actor = (req as any).user as { id: string; role: string } | undefined;
+    await recordAudit({
+        actor: actor?.id, actorRole: actor?.role, action: 'salary.create',
+        targetType: 'Salary', targetId: (result as any)?._id?.toString(),
+        metadata: { amount: (result as any)?.amount, month: (result as any)?.month, year: (result as any)?.year },
+        ip: req.ip,
+    });
     sendResponse(res, {
         statusCode: StatusCodes.CREATED,
         success: true,
@@ -150,6 +158,13 @@ const updateSalaryStatus = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.params as { id: string };
     const { status } = req.body as { status: 'Paid' | 'Pending' };
     const result = await EmployeeService.updateSalaryStatus(id, status);
+    const actor = (req as any).user as { id: string; role: string } | undefined;
+    await recordAudit({
+        actor: actor?.id, actorRole: actor?.role, action: 'salary.status_change',
+        targetType: 'Salary', targetId: id,
+        metadata: { status },
+        ip: req.ip,
+    });
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
@@ -162,6 +177,12 @@ const updateSalaryStatus = catchAsync(async (req: Request, res: Response) => {
 const updateSalary = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.params as { id: string };
     const result = await EmployeeService.updateSalary(id, req.body);
+    const actor = (req as any).user as { id: string; role: string } | undefined;
+    await recordAudit({
+        actor: actor?.id, actorRole: actor?.role, action: 'salary.update',
+        targetType: 'Salary', targetId: id,
+        ip: req.ip,
+    });
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
@@ -174,6 +195,12 @@ const updateSalary = catchAsync(async (req: Request, res: Response) => {
 const deleteSalary = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.params as { id: string };
     const result = await EmployeeService.deleteSalary(id);
+    const actor = (req as any).user as { id: string; role: string } | undefined;
+    await recordAudit({
+        actor: actor?.id, actorRole: actor?.role, action: 'salary.delete',
+        targetType: 'Salary', targetId: id,
+        ip: req.ip,
+    });
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,

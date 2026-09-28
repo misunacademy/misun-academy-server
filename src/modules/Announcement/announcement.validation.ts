@@ -1,7 +1,16 @@
 import { z } from 'zod';
 
+const withSaneWindow = <T extends z.ZodRawShape>(shape: T) =>
+  z.object(shape).refine(
+    (b: any) => {
+      if (!b.publishAt || !b.expireAt) return true;
+      return new Date(b.expireAt).getTime() > new Date(b.publishAt).getTime();
+    },
+    { message: 'expireAt must be after publishAt', path: ['expireAt'] }
+  );
+
 export const createAnnouncementSchema = z.object({
-  body: z.object({
+  body: withSaneWindow({
     title: z.string().trim().min(3).max(150),
     message: z.string().trim().min(10).max(2000),
     type: z.enum(['info', 'success', 'warning', 'critical']).optional(),
@@ -17,7 +26,7 @@ export const createAnnouncementSchema = z.object({
 
 export const updateAnnouncementSchema = z.object({
   params: z.object({ id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid id') }),
-  body: z.object({
+  body: withSaneWindow({
     title: z.string().trim().min(3).max(150).optional(),
     message: z.string().trim().min(10).max(2000).optional(),
     type: z.enum(['info', 'success', 'warning', 'critical']).optional(),
