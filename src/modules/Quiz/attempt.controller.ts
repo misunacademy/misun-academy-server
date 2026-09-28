@@ -89,13 +89,32 @@ const getAttemptById = catchAsync(async (req: Request, res: Response) => {
 const getQuizInfo = catchAsync(async (req: Request, res: Response) => {
     const { quizId } = req.params as { quizId: string };
 
-    const quiz = await QuizService.getQuizById(quizId);
+    const quiz = await QuizService.getQuizInfo(quizId);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
         message: 'Quiz info retrieved successfully',
         data: quiz,
+    });
+});
+
+const resetUserAttempts = catchAsync(async (req: Request, res: Response) => {
+    const { quizId, userId: targetUserId } = req.params as { quizId: string; userId: string };
+    const user = req.user as any;
+
+    const result = await AttemptService.resetUserAttempts(
+        quizId,
+        targetUserId,
+        { id: user.id, role: user.role },
+        req.ip
+    );
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: `Attempts reset successfully (${result.deletedAttempts} removed)`,
+        data: result,
     });
 });
 
@@ -106,4 +125,5 @@ export const AttemptController = {
     getUserAttempts,
     getAttemptById,
     getQuizInfo,
+    resetUserAttempts,
 };

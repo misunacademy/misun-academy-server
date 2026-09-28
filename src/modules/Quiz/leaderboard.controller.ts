@@ -4,6 +4,45 @@ import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { LeaderboardService } from './leaderboard.service.js';
 import { GamificationService } from './gamification.service.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { BatchModel } from '../Batch/batch.model.js';
+import { EnrollmentStatus } from '../../types/common.js';
+import ApiError from '../../errors/ApiError.js';
+
+const STAFF_ROLES = ['admin', 'superadmin', 'instructor', 'employee'];
+
+// Batch/course leaderboards expose class rosters — restrict to members
+// (active/completed enrollment) and staff. Global board stays public to auth.
+const assertBoardAccess = async (user: any, type: 'course' | 'batch', referenceId: string) => {
+    if (!referenceId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Reference ID is required');
+    }
+    if (user?.role && STAFF_ROLES.includes(user.role)) return;
+
+    if (type === 'batch') {
+        const mine = await EnrollmentModel.exists({
+            userId: user.id,
+            batchId: referenceId,
+            status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] },
+        });
+        if (!mine) {
+            throw new ApiError(StatusCodes.FORBIDDEN, 'Leaderboard not available for this batch');
+        }
+        return;
+    }
+
+    const batchIds = await BatchModel.find({ courseId: referenceId }).select('_id').lean();
+    const mine = batchIds.length
+        ? await EnrollmentModel.exists({
+            userId: user.id,
+            batchId: { $in: batchIds.map((b) => b._id) },
+            status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] },
+        })
+        : null;
+    if (!mine) {
+        throw new ApiError(StatusCodes.FORBIDDEN, 'Leaderboard not available for this course');
+    }
+};
 
 const parsePeriod = (value: unknown): 'all_time' | 'monthly' =>
     value === 'monthly' ? 'monthly' : 'all_time';
@@ -32,10 +71,13 @@ const getGlobalLeaderboard = catchAsync(async (req: Request, res: Response) => {
 const getCourseLeaderboard = catchAsync(async (req: Request, res: Response) => {
     const { courseId } = req.params;
     const { period, month, year, page, limit } = req.query;
+    const refId = Array.isArray(courseId) ? courseId[0] : courseId;
+
+    await assertBoardAccess(req.user, 'course', refId as string);
 
     const result = await LeaderboardService.getLeaderboard({
         type: 'course',
-        referenceId: Array.isArray(courseId) ? courseId[0] : courseId,
+        referenceId: refId,
         period: parsePeriod(period),
         month: month ? Number(month) : undefined,
         year: year ? Number(year) : undefined,
@@ -55,10 +97,13 @@ const getCourseLeaderboard = catchAsync(async (req: Request, res: Response) => {
 const getBatchLeaderboard = catchAsync(async (req: Request, res: Response) => {
     const { batchId } = req.params;
     const { period, month, year, page, limit } = req.query;
+    const refId = Array.isArray(batchId) ? batchId[0] : batchId;
+
+    await assertBoardAccess(req.user, 'batch', refId as string);
 
     const result = await LeaderboardService.getLeaderboard({
         type: 'batch',
-        referenceId: Array.isArray(batchId) ? batchId[0] : batchId,
+        referenceId: refId,
         period: parsePeriod(period),
         month: month ? Number(month) : undefined,
         year: year ? Number(year) : undefined,

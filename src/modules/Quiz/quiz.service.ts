@@ -84,6 +84,16 @@ const getQuizById = async (quizId: string) => {
     return quiz;
 };
 
+// Learner-facing quiz info: drafts are masked as not-found so unpublished
+// titles/descriptions/instructions can't be enumerated.
+const getQuizInfo = async (quizId: string) => {
+    const quiz = await QuizModel.findById(quizId).lean();
+    if (!quiz || quiz.status !== 'published') {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Quiz not found');
+    }
+    return quiz;
+};
+
 const getQuizBySlug = async (slug: string) => {
     const quiz = await QuizModel.findOne({ slug }).populate('moduleId').lean();
     if (!quiz) {
@@ -352,6 +362,7 @@ export const QuizService = {
     createQuiz,
     getModuleQuizzes,
     getQuizById,
+    getQuizInfo,
     getQuizBySlug,
     updateQuiz,
     deleteQuiz,

@@ -268,3 +268,102 @@ describe('AttemptService — server-side timed quiz expiry', () => {
         expect(ok.attempt.status).toBe('in_progress');
     });
 });
+
+describe('AttemptService.resetUserAttempts', () => {
+    const wrongAnswersFor = (questions: { _id: mongoose.Types.ObjectId }[]) =>
+        questions.map((q) => ({ questionId: q._id.toString(), selectedAnswer: '__wrong__' }));
+
+    const failOnce = async (seed: Awaited<ReturnType<typeof seedTimedQuiz>>) => {
+        const started = await AttemptService.startAttempt(
+            seed.quiz._id.toString(),
+            seed.user._id.toString(),
+            seed.enrollment._id.toString()
+        );
+        const result = await AttemptService.submitAttempt(
+            started.attempt._id.toString(),
+            seed.user._id.toString(),
+            wrongAnswersFor(seed.questions)
+        );
+        expect(result.passed).toBe(false);
+    };
+
+    it('deletes failed attempts so a stuck learner can retry', async () => {
+        const seed = await seedTimedQuiz({ maxAttempts: 2 });
+        await failOnce(seed);
+        await failOnce(seed);
+
+        const before = await QuizAttemptModel.countDocuments({ quizId: seed.quiz._id });
+        expect(before).toBe(2);
+
+        // Max attempts reached — the learner is locked out.
+        await expect(
+            AttemptService.startAttempt(
+                seed.quiz._id.toString(),
+                seed.user._id.toString(),
+                seed.enrollment._id.toString()
+            )
+        ).rejects.toThrow(/maximum number of attempts/i);
+
+        const admin = await createAdmin({ email: `resetter-${Date.now()}@example.com` });
+        const reset = await AttemptService.resetUserAttempts(
+            seed.quiz._id.toString(),
+            seed.user._id.toString(),
+            { id: admin._id.toString(), role: 'admin' }
+        );
+        expect(reset.deletedAttempts).toBe(2);
+
+        const after = await QuizAttemptModel.countDocuments({ quizId: seed.quiz._id });
+        expect(after).toBe(0);
+
+        // And the learner can start again.
+        const retry = await AttemptService.startAttempt(
+            seed.quiz._id.toString(),
+            seed.user._id.toString(),
+            seed.enrollment._id.toString()
+        );
+        expect(retry.attempt.status).toBe('in_progress');
+    });
+
+    it('refuses when the student already passed (nothing to recover)', async () => {
+        const seed = await seedTimedQuiz();
+        const started = await AttemptService.startAttempt(
+            seed.quiz._id.toString(),
+            seed.user._id.toString(),
+            seed.enrollment._id.toString()
+        );
+        const result = await AttemptService.submitAttempt(
+            started.attempt._id.toString(),
+            seed.user._id.toString(),
+            answersFor(seed.questions)
+        );
+        expect(result.passed).toBe(true);
+
+        const admin = await createAdmin({ email: `resetter-passed-${Date.now()}@example.com` });
+        await expect(
+            AttemptService.resetUserAttempts(
+                seed.quiz._id.toString(),
+                seed.user._id.toString(),
+                { id: admin._id.toString(), role: 'admin' }
+            )
+        ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('404s on unknown quiz or user, 400s with no attempts', async () => {
+        const seed = await seedTimedQuiz();
+        const admin = await createAdmin({ email: `resetter-missing-${Date.now()}@example.com` });
+        const actor = { id: admin._id.toString(), role: 'admin' };
+        const missingId = new mongoose.Types.ObjectId().toString();
+
+        await expect(
+            AttemptService.resetUserAttempts(missingId, seed.user._id.toString(), actor)
+        ).rejects.toMatchObject({ statusCode: 404 });
+
+        await expect(
+            AttemptService.resetUserAttempts(seed.quiz._id.toString(), missingId, actor)
+        ).rejects.toMatchObject({ statusCode: 404 });
+
+        await expect(
+            AttemptService.resetUserAttempts(seed.quiz._id.toString(), seed.user._id.toString(), actor)
+        ).rejects.toMatchObject({ statusCode: 400 });
+    });
+});

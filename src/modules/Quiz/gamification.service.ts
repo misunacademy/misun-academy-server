@@ -26,6 +26,28 @@ const getCurrentBalance = async (userId: string, courseId?: string, batchId?: st
     return lastTx?.balanceAfter || 0;
 };
 
+// Per-user award serialization (single instance): balanceBefore is
+// read-then-written, so two concurrent submits would fork the ledger.
+// The per-quizAttemptId unique index already makes double-submits of the
+// SAME attempt safe; this closes the concurrent-retake window on one dyno.
+const awardChains = new Map<string, Promise<unknown>>();
+const withUserLock = async <T>(userId: string, fn: () => Promise<T>): Promise<T> => {
+    const prev = awardChains.get(userId) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const current = prev.then(() => gate);
+    awardChains.set(userId, current);
+    await prev;
+    try {
+        return await fn();
+    } finally {
+        release();
+        if (awardChains.get(userId) === current) {
+            awardChains.delete(userId);
+        }
+    }
+};
+
 const awardZames = async (params: AwardZamesParams) => {
     const { userId, quizAttemptId, quizId, points, source = ZamesSource.Quiz, metadata = {} } = params;
 
@@ -33,6 +55,7 @@ const awardZames = async (params: AwardZamesParams) => {
         return { pointsEarned: 0, newBalance: await getCurrentBalance(userId) };
     }
 
+    return withUserLock(userId, async () => {
     const quiz = await QuizModel.findById(quizId).lean();
     const attempt = await QuizAttemptModel.findById(quizAttemptId).lean();
 
@@ -79,6 +102,7 @@ const awardZames = async (params: AwardZamesParams) => {
     await updateLeaderboardEntry(userId, quizId, points, attempt, courseId, batchId);
 
     return { pointsEarned: points, newBalance: balanceAfter, transaction: tx };
+    });
 };
 
 const updateLeaderboardEntry = async (
