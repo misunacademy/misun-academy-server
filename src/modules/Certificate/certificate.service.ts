@@ -78,8 +78,21 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
         throw new ApiError(StatusCodes.FORBIDDEN, 'Access denied');
     }
 
-    // Check if already has certificate (pending or active)
-    const existingCertificate = await CertificateModel.findOne({ enrollmentId }).lean();
+    // Check if already has certificate (pending or active). A Revoked row is
+    // reaped first: revocation already reset the enrollment flags below, and
+    // the blanket unique index on enrollmentId would otherwise strand the
+    // learner forever. Revocation history survives in the audit log.
+    const revoked = await CertificateModel.findOne({
+        enrollmentId,
+        status: CertificateStatus.Revoked,
+    }).lean();
+    if (revoked) {
+        await CertificateModel.deleteOne({ _id: revoked._id });
+    }
+    const existingCertificate = await CertificateModel.findOne({
+        enrollmentId,
+        status: { $in: [CertificateStatus.Pending, CertificateStatus.Active] },
+    }).lean();
     if (existingCertificate) {
         if (existingCertificate.status === CertificateStatus.Pending) {
             throw new ApiError(StatusCodes.CONFLICT, 'Certificate request is pending admin approval');
@@ -111,19 +124,28 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
     const frontendBaseUrl = process.env.MA_FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:3000';
     const verificationUrl = `${frontendBaseUrl}/verify-certificate/${certificateId}`;
 
-    // Create PENDING certificate awaiting admin approval
-    const certificate = await CertificateModel.create({
-        enrollmentId,
-        userId,
-        batchId: enrollment.batchId,
-        courseId: (batch.courseId as any)._id,
-        certificateId,
-        issueDate: new Date(),
-        certificateUrl: verificationUrl,
-        verificationUrl,
-        status: CertificateStatus.Pending,  // Awaiting admin approval
-        issuedBy: userId,  // Requested by student
-    });
+    // Create PENDING certificate awaiting admin approval. Unique index on
+    // enrollmentId backstops concurrent double-clicks — map 11000 to 409.
+    let certificate;
+    try {
+        certificate = await CertificateModel.create({
+            enrollmentId,
+            userId,
+            batchId: enrollment.batchId,
+            courseId: (batch.courseId as any)._id,
+            certificateId,
+            issueDate: new Date(),
+            certificateUrl: verificationUrl,
+            verificationUrl,
+            status: CertificateStatus.Pending,  // Awaiting admin approval
+            issuedBy: userId,  // Requested by student
+        });
+    } catch (error: any) {
+        if (error?.code === 11000) {
+            throw new ApiError(StatusCodes.CONFLICT, 'Certificate request already exists for this enrollment');
+        }
+        throw error;
+    }
 
     const courseName = (course as any)?.title || 'Course';
     setImmediate(async () => {
@@ -433,6 +455,14 @@ const revokeCertificate = async (
     (certificate as any).revokedBy = revokedBy;
     await certificate.save();
 
+    // Unstrand the learner: revocation clears the issued/completed flags so
+    // the enrollment returns to Active and a fresh request is possible.
+    // (requestCertificate ignores Revoked rows — see above.)
+    await EnrollmentModel.findOneAndUpdate(
+        { _id: certificate.enrollmentId, status: EnrollmentStatus.Completed },
+        { $set: { certificateIssued: false, status: EnrollmentStatus.Active }, $unset: { completedAt: 1 } }
+    );
+
     await recordAudit({
         actor: revokedBy,
         action: 'certificate.revoke',
@@ -498,7 +528,7 @@ const getAllCertificates = async (params?: { status?: string; page?: number; lim
     const query = statusFilter ? { status: statusFilter } : {};
 
     const safePage = Math.max(1, page || 1);
-    const safeLimit = Math.max(1, limit || 10);
+    const safeLimit = Math.min(100, Math.max(1, limit || 10));
     const skip = (safePage - 1) * safeLimit;
 
     const total = await CertificateModel.countDocuments(query);

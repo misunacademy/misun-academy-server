@@ -11,8 +11,15 @@ cloudinary.config({
 
 // Validate Cloudinary configuration
 const validateCloudinaryConfig = () => {
-    const required = ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'];
-    const missing = required.filter(key => !process.env[key]);
+    const missing = (
+        [
+            ['CLOUDINARY_CLOUD_NAME', env.CLOUDINARY_CLOUD_NAME],
+            ['CLOUDINARY_API_KEY', env.CLOUDINARY_API_KEY],
+            ['CLOUDINARY_API_SECRET', env.CLOUDINARY_API_SECRET],
+        ] as const
+    )
+        .filter(([, value]) => !value)
+        .map(([key]) => key);
 
     if (missing.length > 0) {
         logger.warn('Cloudinary credentials not configured. Image uploads will fail.');
@@ -20,7 +27,10 @@ const validateCloudinaryConfig = () => {
         return false;
     }
 
-    // Test the configuration
+    // Test the configuration (skip in tests: no network in unit runs).
+    if (env.NODE_ENV === 'test') {
+        return true;
+    }
     try {
         cloudinary.api.ping((error) => {
             if (error) {

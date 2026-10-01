@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { LessonModel } from '../modules/Lesson/lesson.model.js';
 import { normalizeVideoId } from '../utils/video.utils.js';
 import config from '../config/env.js';
+import { isDirectRun, requireMigrationConfirm } from './runGuard.js';
 
 /**
  * One-off repair for lessons created before video-id normalization:
@@ -37,4 +38,7 @@ const backfillVideoIds = async () => {
     }
 };
 
-backfillVideoIds();
+if (isDirectRun(import.meta.url)) {
+    requireMigrationConfirm('backfillVideoIds');
+    backfillVideoIds();
+}

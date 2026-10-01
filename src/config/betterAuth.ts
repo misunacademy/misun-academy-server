@@ -44,6 +44,8 @@ export const initializeAuth = async () => {
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
+      minPasswordLength: 8,
+      maxPasswordLength: 128,
       // Password reset configuration
       resetPasswordTokenExpiresIn: 60 * 60, // 1 hour
       sendResetPassword: async ({ user, token }: { user: any; url: string; token: string }) => {
@@ -52,6 +54,9 @@ export const initializeAuth = async () => {
           logger.info('Password reset email sent successfully');
         } catch (error) {
           logger.error(error, 'Failed to send password reset email');
+          // Never report success when the mail never left: the user would
+          // wait for a token that does not exist with no recourse.
+          throw error;
         }
       },
     },
@@ -65,6 +70,7 @@ export const initializeAuth = async () => {
           logger.info('Verification email sent successfully');
         } catch (error) {
           logger.error(error, 'Failed to send verification email');
+          throw error;
         }
       },
     },
@@ -73,9 +79,9 @@ export const initializeAuth = async () => {
       google: {
         clientId: process.env.GOOGLE_CLIENT_ID!,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-        // Always get refresh token and prompt for account selection
-        accessType: 'offline',
-        prompt: 'select_account consent',
+        // Least privilege: the app never calls Google APIs, so no offline
+        // refresh tokens — account selection prompt only.
+        prompt: 'select_account',
         redirectURI: `${process.env.BETTER_AUTH_URL}/callback/google`,
       },
     },
@@ -108,6 +114,12 @@ export const initializeAuth = async () => {
           type: 'string',
           required: false,
           input: true, // Users CAN set this field
+        },
+        agreedToTerms: {
+          type: 'boolean',
+          defaultValue: false,
+          required: false,
+          input: true, // Legal evidence of ToS consent at signup
         },
       },
     },
@@ -177,7 +189,7 @@ export const initializeAuth = async () => {
           { projection: { status: 1 } }
         );
 
-        if (user?.status === UserStatus.Suspended) {
+        if (user?.status === UserStatus.Suspended || user?.status === UserStatus.Deleted) {
           await db.collection('sessions').deleteMany({
             userId: { $in: [newSession.user.id, new mongoose.Types.ObjectId(newSession.user.id)] },
           });
@@ -186,11 +198,13 @@ export const initializeAuth = async () => {
           try {
             deleteSessionCookie(ctx);
           } catch (e) {
-            logger.warn(`Failed to expire session cookies after suspended sign-in: ${String(e)}`);
+            logger.warn(`Failed to expire session cookies after ${user?.status} sign-in: ${String(e)}`);
           }
-          logger.warn(`Blocked sign-in for suspended user ${newSession.user.email}`);
+          logger.warn(`Blocked sign-in for ${user?.status} user ${newSession.user.email}`);
           throw new APIError('FORBIDDEN', {
-            message: 'Your account has been suspended. Please contact support.',
+            message: user?.status === UserStatus.Deleted
+              ? 'Your account is no longer active. Please contact support.'
+              : 'Your account has been suspended. Please contact support.',
           });
         }
       }),

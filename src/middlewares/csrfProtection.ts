@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
+import env from '../config/env.js';
 
 const COOKIE_NAME = 'XSRF-TOKEN';
 const TOKEN_LENGTH = 32;
@@ -10,15 +11,22 @@ function generateToken(): string {
 
 function getSharedDomain(hostname: string): string | undefined {
   const parts = hostname.split('.');
-  if (parts.length < 3) return undefined;
-  return '.' + parts.slice(-3).join('.');
+  // IP / localhost / single-label hosts can't share cookies — no domain attr.
+  if (parts.length < 2 || parts.some((p) => p === '')) return undefined;
+  // Skip raw IPs (v4) — a domain attribute would be rejected by browsers.
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) return undefined;
+  // Two-label apex (example.com) is already shareable as-is.
+  if (parts.length === 2) return '.' + hostname;
+  // Three+ labels: share the registrable parent (last two labels), NOT three.
+  // app.misunacademy.com -> .misunacademy.com (was: .app.misunacademy.com).
+  return '.' + parts.slice(-2).join('.');
 }
 
 const getTrustedOrigins = (): string[] => {
   return [
-    process.env.MA_FRONTEND_URL,
-    process.env.EP_FRONTEND_URL,
-    process.env.CLIENT_URL,
+    env.MA_FRONTEND_URL,
+    env.EP_FRONTEND_URL,
+    env.CLIENT_URL,
     'http://localhost:3000',
     'http://localhost:3001',
   ].filter((s): s is string => Boolean(s));
@@ -40,8 +48,8 @@ function setCsrfCookie(req: Request, res: Response): void {
 
   res.cookie(COOKIE_NAME, token, {
     httpOnly: false,
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
+    secure: env.NODE_ENV === 'production',
     path: '/',
     ...(sharedDomain ? { domain: sharedDomain } : {}),
   });

@@ -106,8 +106,11 @@ const recalculateModuleProgress = async (enrollmentId: string, moduleId: string)
         (p) => p.status === LessonProgressStatus.Completed
     ).length;
 
+    // Only PASSED quizzes count toward module completion. A submitted-but-
+    // failed attempt records progress (QuizProgress.passed=false) without
+    // unlocking modules or feeding certificate eligibility.
     const completedQuizzes = quizProgress.filter(
-        (p) => p.status === 'completed'
+        (p) => p.status === 'completed' && (p as any).passed === true
     ).length;
 
     const completedItems = completedLessons + completedQuizzes;

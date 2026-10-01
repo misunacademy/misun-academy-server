@@ -7,6 +7,28 @@ on:
 
 env:
   NODE_ENV: test
+  # Dummy values so env.ts Zod validation passes in CI. Tests use
+  # mongodb-memory-server and never touch these services.
+  MONGO_URI: mongodb://127.0.0.1:27017/ci
+  SUPER_ADMIN_EMAIL: ci@example.com
+  SUPER_ADMIN_PASSWORD: CiTestPassword123!
+  BETTER_AUTH_SECRET: ci-test-secret-min-32-characters-long
+  BETTER_AUTH_URL: http://localhost:5000/api/v1/auth
+  GOOGLE_CLIENT_ID: ci
+  GOOGLE_CLIENT_SECRET: ci
+  SSL_STORE_ID: ci
+  SSL_STORE_PASSWORD: ci
+  SSL_IS_LIVE: "false"
+  SSL_VALIDATION_API: https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php
+  SERVER_URL: http://localhost:5000
+  MA_FRONTEND_URL: http://localhost:3000
+  EP_FRONTEND_URL: http://localhost:3001
+  EMAIL_USER: ci@example.com
+  EMAIL_PASS: ci
+  ADMIN_EMAIL: ci@example.com
+  CLOUDINARY_CLOUD_NAME: ci
+  CLOUDINARY_API_KEY: ci
+  CLOUDINARY_API_SECRET: ci
 
 jobs:
   verify:
@@ -16,7 +38,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -30,6 +52,9 @@ jobs:
 
       - name: Generate OpenAPI spec
         run: npm run docs:generate
+
+      - name: Fail if openapi.json is stale
+        run: git diff --exit-code -- openapi.json
 
       - name: Test
         run: npm test

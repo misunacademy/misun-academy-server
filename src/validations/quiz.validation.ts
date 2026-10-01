@@ -15,7 +15,7 @@ export const createQuizSchema = z.object({
         description: z.string().optional(),
         instructions: z.string().optional(),
         passingPercentage: z.number().min(0).max(100).default(50),
-        timeLimit: z.number().positive().optional(),
+        timeLimit: z.number().positive().max(86400).optional(),
         shuffleQuestions: z.boolean().default(false),
         shuffleOptions: z.boolean().default(false),
         maxAttempts: z.number().int().min(0).default(1),
@@ -32,7 +32,7 @@ export const updateQuizSchema = z.object({
         description: z.string().optional(),
         instructions: z.string().optional(),
         passingPercentage: z.number().min(0).max(100).optional(),
-        timeLimit: z.number().positive().optional().nullable(),
+        timeLimit: z.number().positive().max(86400).optional().nullable(),
         shuffleQuestions: z.boolean().optional(),
         shuffleOptions: z.boolean().optional(),
         maxAttempts: z.number().int().min(0).optional(),
@@ -46,7 +46,7 @@ export const updateQuizSchema = z.object({
 export const reorderQuizzesSchema = z.object({
     body: z.object({
         quizOrders: z.array(z.object({
-            quizId: z.string(),
+            quizId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid ID'),
             orderIndex: z.number().int().min(0),
         })),
     }),
@@ -60,7 +60,7 @@ export const createQuestionSchema = z.object({
         correctAnswer: z.string().min(1),
         explanation: contentBlockSchema.optional(),
         marks: z.number().min(0).default(1),
-        zamesPoints: z.number().min(0).default(1),
+        zamesPoints: z.number().min(0).max(100).default(1),
         orderIndex: z.number().int().min(0).optional(),
     }),
 });
@@ -73,7 +73,7 @@ export const updateQuestionSchema = z.object({
         correctAnswer: z.string().optional(),
         explanation: contentBlockSchema.optional().nullable(),
         marks: z.number().min(0).optional(),
-        zamesPoints: z.number().min(0).optional(),
+        zamesPoints: z.number().min(0).max(100).optional(),
         orderIndex: z.number().int().min(0).optional(),
     }),
 });
@@ -81,7 +81,7 @@ export const updateQuestionSchema = z.object({
 export const reorderQuestionsSchema = z.object({
     body: z.object({
         questionOrders: z.array(z.object({
-            questionId: z.string(),
+            questionId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid ID'),
             orderIndex: z.number().int().min(0),
         })),
     }),

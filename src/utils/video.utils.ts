@@ -15,7 +15,12 @@ export function extractYouTubeId(input: string | null | undefined): string | nul
     for (let depth = 0; depth < 2; depth++) {
         const vMatch = value.match(/[?&]v=([^&#?]+)/);
         if (vMatch) {
-            const inner = decodeURIComponent(vMatch[1]);
+            let inner: string;
+            try {
+                inner = decodeURIComponent(vMatch[1]);
+            } catch {
+                return null;
+            }
             if (YOUTUBE_ID_RE.test(inner)) return inner;
             if (/^https?:\/\//i.test(inner) || inner.includes('youtu')) {
                 if (/[?&]v=|\/(embed|shorts|live|v)\/|youtu\.be\//i.test(inner)) {
@@ -101,10 +106,17 @@ export function normalizeVideoId(source: string | undefined, raw: string | null 
     if (!raw) return '';
     const value = clean(String(raw));
     if (!value) return '';
-    if (source === 'googledrive') {
-        return extractDriveId(value) ?? value;
+    const extracted = source === 'googledrive'
+        ? extractDriveId(value)
+        : extractYouTubeId(value);
+    if (extracted) return extracted;
+    // Extraction failed: if the input was clearly a pasted URL, reject it
+    // (persisting `watch?v=<url>` produces an unplayable player). Bare
+    // non-URL tokens pass through for legacy/custom IDs.
+    if (/^https?:\/\//i.test(value) || /youtu\.?be|youtube|drive\.google|^[?&]v=/i.test(value)) {
+        return '';
     }
-    return extractYouTubeId(value) ?? value;
+    return value;
 }
 
 export function buildYouTubeWatchUrl(videoId: string): string {

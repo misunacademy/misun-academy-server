@@ -715,6 +715,7 @@ const checkPaymentStatus = async (transactionId: string) => {
 
 const validateSSLCommerzPayment = async (valId: string) => {
     const { data } = await axios.get(env.SSL_VALIDATION_API, {
+        timeout: 10000,
         params: {
             val_id: valId,
             store_id: env.SSL_STORE_ID,
@@ -1172,7 +1173,9 @@ const verifyWebhookSignature = (params: {
         .createHash('md5')
         .update(concatString)
         .digest('hex');
-    return params.verify_sign === expectedSign;
+    const a = Buffer.from(params.verify_sign);
+    const b = Buffer.from(expectedSign);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 
 // ─── SSLCOMMERZ GATEWAY STATUS MAPPER ───

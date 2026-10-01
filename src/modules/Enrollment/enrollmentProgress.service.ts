@@ -124,8 +124,11 @@ export const getUserEnrollments = async (userId: string, status?: EnrollmentStat
     });
 };
 
-export const getEnrollmentDetails = async (enrollmentId: string, userId: string) => {
-    const enrollment = await EnrollmentModel.findOne({ _id: enrollmentId, userId })
+export const getEnrollmentDetails = async (enrollmentId: string, userId: string, isStaff = false) => {
+    // Staff (admin/support debugging) may view any enrollment; learners are
+    // scoped to their own rows.
+    const filter: Record<string, unknown> = isStaff ? { _id: enrollmentId } : { _id: enrollmentId, userId };
+    const enrollment = await EnrollmentModel.findOne(filter)
         .populate({
             path: 'batchId',
             populate: [

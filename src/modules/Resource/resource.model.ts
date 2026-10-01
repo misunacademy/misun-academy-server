@@ -52,4 +52,13 @@ resourceSchema.index({ lessonId: 1 });
 resourceSchema.index({ moduleId: 1 });
 resourceSchema.index({ type: 1 });
 
+// A resource must attach to at least one parent — otherwise it is an orphan
+// no listing query will ever return.
+resourceSchema.pre('validate', function (next) {
+    if (!this.lessonId && !this.moduleId) {
+        return next(new Error('Resource must belong to a lesson or a module'));
+    }
+    next();
+});
+
 export const ResourceModel = model<IResource>('Resource', resourceSchema);

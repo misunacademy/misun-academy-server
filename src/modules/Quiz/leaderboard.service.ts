@@ -29,6 +29,11 @@ const getLeaderboard = async (query: LeaderboardQuery) => {
         limit = 50,
     } = query;
 
+    // Clamp pagination: unbounded limits turn a ranking read into a full
+    // collection scan + user-table join.
+    const safePage = Math.max(1, Math.floor(Number(page) || 1));
+    const safeLimit = Math.min(100, Math.max(1, Math.floor(Number(limit) || 50)));
+
     const matchFilter: Record<string, any> = { period };
 
     if (period === 'monthly') {
@@ -43,7 +48,7 @@ const getLeaderboard = async (query: LeaderboardQuery) => {
         matchFilter.batchId = referenceId as any;
     }
 
-    const skip = (page - 1) * limit;
+    const skip = (safePage - 1) * safeLimit;
 
     if (type === 'global') {
         const [entries, total] = await Promise.all([
@@ -61,7 +66,7 @@ const getLeaderboard = async (query: LeaderboardQuery) => {
                 },
                 { $sort: { totalZames: -1 } },
                 { $skip: skip },
-                { $limit: limit },
+                { $limit: safeLimit },
                 {
                     $lookup: {
                         from: 'users',
@@ -77,8 +82,7 @@ const getLeaderboard = async (query: LeaderboardQuery) => {
                         userId: {
                             _id: '$_id',
                             name: '$user.name',
-                            email: '$user.email',
-                            avatar: '$user.avatar',
+                                                        avatar: '$user.avatar',
                             image: '$user.image',
                         },
                         totalZames: 1,
@@ -109,10 +113,10 @@ const getLeaderboard = async (query: LeaderboardQuery) => {
         return {
             data: rankedEntries,
             meta: {
-                page,
-                limit,
+                page: safePage,
+                limit: safeLimit,
                 total: total[0]?.total || 0,
-                totalPages: Math.ceil((total[0]?.total || 0) / limit),
+                totalPages: Math.ceil((total[0]?.total || 0) / safeLimit),
             },
         };
     }
@@ -121,8 +125,8 @@ const getLeaderboard = async (query: LeaderboardQuery) => {
         LeaderboardEntryModel.find(matchFilter)
             .sort({ totalZames: -1 })
             .skip(skip)
-            .limit(limit)
-            .populate<{ userId: LeaderboardUser }>('userId', 'name email avatar image')
+            .limit(safeLimit)
+            .populate<{ userId: LeaderboardUser }>('userId', 'name avatar image')
             .lean(),
         LeaderboardEntryModel.countDocuments(matchFilter),
     ]);
@@ -140,10 +144,10 @@ const getLeaderboard = async (query: LeaderboardQuery) => {
     return {
         data: rankedEntries,
         meta: {
-            page,
-            limit,
+            page: safePage,
+            limit: safeLimit,
             total,
-            totalPages: Math.ceil(total / limit),
+            totalPages: Math.ceil(total / safeLimit),
         },
     };
 };

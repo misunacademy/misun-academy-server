@@ -32,6 +32,11 @@ async function initializeDatabase() {
 
 async function startServer() {
     try {
+        if (env.NODE_ENV === 'production' && !env.CRON_SECRET) {
+            logger.warn(
+                'CRON_SECRET is not set — Vercel cron calls to batch auto-transition will 401. Set CRON_SECRET in production.'
+            );
+        }
         await initializeDatabase();
 
         server = http.createServer(app);

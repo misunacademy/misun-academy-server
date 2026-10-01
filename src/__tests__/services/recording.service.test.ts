@@ -371,13 +371,23 @@ describe('RecordingService.incrementViewCount', () => {
         ).rejects.toThrow(/Recording not found/i);
     });
 
-    it('throws FORBIDDEN for a user not enrolled in the batch', async () => {
+    it('throws NOT_FOUND (masked) for a user not enrolled in the batch', async () => {
         const outsider = await createUser();
         const { recording } = await seedRecording();
         await expect(
             RecordingService.incrementViewCount(recording._id.toString(), outsider._id.toString())
-        ).rejects.toThrow(/not enrolled/i);
+        ).rejects.toThrow(/Recording not found/i);
         const updated = await RecordingModel.findById(recording._id).lean();
         expect(updated?.viewCount).toBe(0);
+    });
+
+    it('allows staff to preview without enrollment', async () => {
+        const staff = await createAdmin();
+        const { recording } = await seedRecording();
+        await RecordingService.incrementViewCount(
+            recording._id.toString(), staff._id.toString(), 'admin'
+        );
+        const updated = await RecordingModel.findById(recording._id).lean();
+        expect(updated?.viewCount).toBe(1);
     });
 });

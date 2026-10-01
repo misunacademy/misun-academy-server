@@ -56,7 +56,9 @@ describe('LeaderboardService.getLeaderboard (global)', () => {
         expect(result.data).toHaveLength(3);
         expect(result.data.map((e) => e.totalZames)).toEqual([100, 60, 30]);
         expect(result.data.map((e) => e.rank)).toEqual([1, 2, 3]);
-        expect((result.data[0].userId as any).email).toBe(u2.email);
+        expect((result.data[0].userId as any).name).toBe(u2.name);
+        // PII guard: emails must never appear on leaderboards.
+        expect((result.data[0].userId as any).email).toBeUndefined();
         expect(result.meta.total).toBe(3);
     });
 
@@ -103,7 +105,8 @@ describe('LeaderboardService.getLeaderboard (scoped)', () => {
         const onlyA = await LeaderboardService.getLeaderboard({ type: 'batch', referenceId: batchA._id.toString() });
         expect(onlyA.data).toHaveLength(1);
         expect(onlyA.data[0].totalZames).toBe(50);
-        expect((onlyA.data[0].userId as any).email).toBe(u1.email);
+        // PII guard: emails must never appear on leaderboards.
+        expect((onlyA.data[0].userId as any).email).toBeUndefined();
     });
 
     it('filters course leaderboards by referenceId', async () => {

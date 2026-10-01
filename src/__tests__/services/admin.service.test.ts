@@ -142,13 +142,13 @@ describe('AdminService.getUserById', () => {
 
 describe('AdminService.updateUser / updateUserStatus / deleteUser', () => {
     it('updateUser applies changes and audits role changes', async () => {
-        const actor = await createUser({ email: `actor-${uniq()}@example.com`, role: 'admin' });
+        const actor = await createUser({ email: `actor-${uniq()}@example.com`, role: 'superadmin' });
         const user = await createUser({ email: `u-${uniq()}@example.com`, role: 'learner' });
 
         const updated: any = await AdminService.updateUser(
             user._id.toString(),
             { role: 'instructor', name: 'Promoted' },
-            actor._id.toString()
+            { id: actor._id.toString(), role: 'superadmin' }
         );
 
         expect(updated.role).toBe('instructor');
@@ -157,6 +157,31 @@ describe('AdminService.updateUser / updateUserStatus / deleteUser', () => {
         const audit = await AuditLogModel.findOne({ action: 'user.role_change' }).lean();
         expect(audit).toBeDefined();
         expect((audit?.metadata as any)?.to).toBe('instructor');
+    });
+
+    it('updateUser rejects role changes by non-superadmins', async () => {
+        const actor = await createUser({ email: `actor-${uniq()}@example.com`, role: 'admin' });
+        const user = await createUser({ email: `u-${uniq()}@example.com`, role: 'learner' });
+
+        await expect(
+            AdminService.updateUser(
+                user._id.toString(),
+                { role: 'instructor' },
+                { id: actor._id.toString(), role: 'admin' }
+            )
+        ).rejects.toThrow(/Only superadmins can change user roles/i);
+    });
+
+    it('updateUser rejects self role changes', async () => {
+        const actor = await createUser({ email: `actor-${uniq()}@example.com`, role: 'superadmin' });
+
+        await expect(
+            AdminService.updateUser(
+                actor._id.toString(),
+                { role: 'admin' },
+                { id: actor._id.toString(), role: 'superadmin' }
+            )
+        ).rejects.toThrow(/own role/i);
     });
 
     it('updateUser throws NOT_FOUND for unknown id', async () => {

@@ -1,4 +1,4 @@
-import { FilterQuery, Types } from 'mongoose';
+import mongoose, { FilterQuery, Types } from 'mongoose';
 import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
 import SSLCommerzPayment from 'sslcommerz-lts';
@@ -505,15 +505,21 @@ const generateBootcampTransactionId = (): string => {
     return `BC${timestamp}${random}`;
 };
 
-const getBootcampCallbackKey = (transactionId: string): string =>
-    crypto
-        .createHmac('sha256', config.SSL_STORE_PASSWORD || config.BETTER_AUTH_SECRET || 'fallback')
+const getBootcampCallbackKey = (transactionId: string): string => {
+    const secret = config.SSL_STORE_PASSWORD || config.BETTER_AUTH_SECRET;
+    if (!secret) {
+        throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Payment callback secret is not configured');
+    }
+    return crypto
+        .createHmac('sha256', secret)
         .update(transactionId)
         .digest('hex')
         .slice(0, 32);
+};
 
 const validateBootcampSSLCommerzPayment = async (valId: string): Promise<any> => {
     const { data } = await axios.get<any>(config.SSL_VALIDATION_API, {
+        timeout: 10000,
         params: {
             val_id: valId,
             store_id: config.SSL_STORE_ID,
@@ -683,6 +689,11 @@ const finalizeBootcampSSLCommerz = async (transactionId: string, status: string,
     }
 
     if (status === 'failed' || status === 'cancel') {
+        // Gateway-reported failure/cancel for a Pending purchase. Non-pending
+        // purchases are left untouched to avoid regressing a Paid row.
+        if (purchase.status !== BootcampPurchaseStatus.Pending) {
+            return purchase;
+        }
         await BootcampPurchaseModel.findByIdAndUpdate(purchase._id, {
             $set: {
                 status:
@@ -703,34 +714,62 @@ const finalizeBootcampSSLCommerz = async (transactionId: string, status: string,
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Validation ID missing');
     }
 
+    // Gateway validation is network I/O — never inside the DB transaction.
     const validation = await validateBootcampSSLCommerzPayment(valId);
     if (validation?.status !== 'VALID' && validation?.status !== 'VALIDATED') {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Payment validation failed');
     }
 
-    if (Number(validation.amount) < purchase.amount) {
+    if (
+        String(validation.tran_id) !== String(transactionId) ||
+        String(validation.currency).toUpperCase() !== 'BDT' ||
+        Number(validation.amount) !== Number(purchase.amount)
+    ) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Payment amount mismatch');
     }
 
-    const updated = await BootcampPurchaseModel.findByIdAndUpdate(
-        purchase._id,
-        {
-            $set: {
-                status: BootcampPurchaseStatus.Paid,
-                gatewayResponse: {
-                    ...(purchase.gatewayResponse as object),
-                    validatedAt: new Date(),
-                    valId,
-                    gatewayStatus: validation.status,
-                    bankTranId: validation.bank_tran_id,
-                    cardType: validation.card_type,
+    // Serialise concurrent webhook + status-redirect finalizations inside a
+    // transaction with a Paid re-check so only one writer wins.
+    const session = await mongoose.startSession();
+    try {
+        await session.startTransaction();
+        const locked = await BootcampPurchaseModel.findById(purchase._id).session(session);
+        if (!locked) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Bootcamp purchase not found');
+        }
+        if (locked.status === BootcampPurchaseStatus.Paid) {
+            await session.commitTransaction();
+            return locked;
+        }
+        const updated = await BootcampPurchaseModel.findByIdAndUpdate(
+            purchase._id,
+            {
+                $set: {
+                    status: BootcampPurchaseStatus.Paid,
+                    gatewayResponse: {
+                        ...(purchase.gatewayResponse as object),
+                        validatedAt: new Date(),
+                        valId,
+                        gatewayStatus: validation.status,
+                        bankTranId: validation.bank_tran_id,
+                        cardType: validation.card_type,
+                    },
                 },
             },
-        },
-        { new: true }
-    );
-
-    return updated;
+            { new: true, session }
+        );
+        await session.commitTransaction();
+        return updated;
+    } catch (error) {
+        try {
+            await session.abortTransaction();
+        } catch {
+            // ignore abort errors — original error is what matters
+        }
+        throw error;
+    } finally {
+        session.endSession();
+    }
 };
 
 const checkBootcampPaymentStatus = async (transactionId: string, userId?: string) => {

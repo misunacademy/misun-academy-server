@@ -2,6 +2,7 @@ import { Server as HTTPServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import { fromNodeHeaders } from 'better-auth/node';
 import { getAuth } from '../config/betterAuth.js';
+import env from '../config/env.js';
 import { UserStatus } from '../types/common.js';
 
 const eventRateLimit = new Map<string, { count: number; resetAt: number }>();
@@ -26,8 +27,9 @@ export const initializeSocketIO = (httpServer: HTTPServer) => {
   if (io) return io;
 
   const allowedOrigins = [
-    process.env.MA_FRONTEND_URL,
-    process.env.EP_FRONTEND_URL,
+    env.MA_FRONTEND_URL,
+    env.EP_FRONTEND_URL,
+    env.CLIENT_URL,
     'http://localhost:3000',
     'http://localhost:3001',
   ].filter(Boolean) as string[];
@@ -109,9 +111,13 @@ const clearExpiredRateLimits = () => {
     if (now > record.resetAt) eventRateLimit.delete(key);
   }
 };
-setInterval(clearExpiredRateLimits, 60000);
+const sweeper = setInterval(clearExpiredRateLimits, 60000);
+// A background sweeper must never keep the process (or Jest) alive on its own.
+(sweeper as any).unref?.();
 
 export const closeSocketIO = () => {
+  clearInterval(sweeper);
+  eventRateLimit.clear();
   if (io) {
     io.close();
     io = null;

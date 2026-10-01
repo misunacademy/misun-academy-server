@@ -10,11 +10,13 @@ const chat = catchAsync(async (req: Request, res: Response) => {
 
   const result = await ChatService.chat(messages, userName);
 
+  // Token usage stays server-side (logged in the service) — returning it
+  // aids cost-probing and serves no client purpose.
   sendResponse(res, {
     statusCode: StatusCodes.OK,
     success: true,
     message: 'Chat response generated successfully',
-    data: result,
+    data: { reply: result.reply },
   });
 });
 

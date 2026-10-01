@@ -4,6 +4,7 @@ import catchAsync from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
 import { UploadService } from './upload.service.js';
 import { UploadAssetModel } from '../../models/uploadAsset.model.js';
+import { recordAudit } from '../../models/auditLog.model.js';
 import ApiError from '../../errors/ApiError.js';
 import { logger } from '../../config/logger.js';
 
@@ -113,10 +114,12 @@ const uploadRestricted = catchAsync(async (req: Request, res: Response) => {
  * record can only be removed by admins.
  */
 const deleteImage = catchAsync(async (req: Request, res: Response) => {
-    const { publicId } = req.params as { publicId: string };
+    // Splat route: `req.params.splat` preserves `/` inside Cloudinary IDs.
+    const rawSplat = (req.params as Record<string, unknown>).splat;
+    const publicId = Array.isArray(rawSplat) ? rawSplat.join('/') : (rawSplat as string | undefined);
     const user = (req as any).user as { id: string; role: string } | undefined;
 
-    if (!publicId) {
+    if (!publicId || publicId.length > 255 || !/^[\w\-./]+$/.test(publicId)) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Public ID is required');
     }
 
@@ -135,6 +138,14 @@ const deleteImage = catchAsync(async (req: Request, res: Response) => {
     try {
         await UploadService.deleteImage(publicId);
         await UploadAssetModel.deleteOne({ publicId });
+        await recordAudit({
+            actor: user?.id,
+            actorRole: user?.role,
+            action: 'upload.delete',
+            targetType: 'UploadAsset',
+            targetId: publicId,
+            ip: req.ip,
+        });
 
         sendResponse(res, {
             statusCode: StatusCodes.OK,
@@ -162,16 +173,24 @@ const uploadWithData = catchAsync(async (req: Request, res: Response) => {
         const imageResult = await UploadService.processSingleUpload(req.file);
         await recordUploadAsset(imageResult.publicId, (req as any).user?.id, 'public');
 
-        // Extract additional form data
-        const { title, description, category } = req.body;
+        // Multipart bodies skip validateRequest — bound lengths here to block
+        // oversized / stored-XSS payloads.
+        const asText = (v: unknown, max: number): string => {
+            const s = typeof v === 'string' ? v : '';
+            if (s.length > max) {
+                throw new ApiError(StatusCodes.BAD_REQUEST, `Field exceeds ${max} characters`);
+            }
+            return s;
+        };
+        const { title, description, category } = req.body as Record<string, unknown>;
 
         // You can save this data to your database here
         const responseData = {
             image: imageResult,
             metadata: {
-                title: title || 'Untitled',
-                description: description || '',
-                category: category || 'general',
+                title: asText(title, 200) || 'Untitled',
+                description: asText(description, 2000),
+                category: asText(category, 100) || 'general',
             },
             uploadedBy: (req as any).user?.id || 'anonymous',
         };

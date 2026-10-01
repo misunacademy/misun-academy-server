@@ -62,7 +62,11 @@ describe('BootcampService.registerBootcampRegistration', () => {
             regPayload({ email: `  UPPER-${uniq()}@EXAMPLE.com  ` })
         );
         expect(created.status).toBe(BootcampRegistrationStatus.Pending);
-        expect(created.email).toBe(created.email.toLowerCase().trim());
+        expect(created._id).toBeDefined();
+        // Receipt must not echo PII/payment fragments.
+        expect(created.email).toBeUndefined();
+        expect(created.paymentLast4).toBeUndefined();
+        expect(created.registrationIp).toBeUndefined();
     });
 
     it('strips unexpected fields (e.g. status) from the payload', async () => {

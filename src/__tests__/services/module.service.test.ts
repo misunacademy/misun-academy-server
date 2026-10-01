@@ -208,6 +208,17 @@ describe('ModuleService.updateModule', () => {
             ModuleService.updateModule(new mongoose.Types.ObjectId().toString(), { title: 'X' })
         ).rejects.toThrow(/Module not found/i);
     });
+
+    it('allows publishing a draft module via update', async () => {
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const mod = await createModule(course._id, batch._id, 1);
+
+        expect(mod.status).toBe('draft');
+        const updated = await ModuleService.updateModule(mod._id.toString(), { status: 'published' });
+        expect(updated.status).toBe('published');
+    });
 });
 
 describe('ModuleService.deleteModule', () => {

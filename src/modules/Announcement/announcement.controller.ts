@@ -150,8 +150,14 @@ const getAnnouncementStats = catchAsync(async (_req: Request, res: Response) => 
 });
 
 const getLiveAnnouncements = catchAsync(async (req: Request, res: Response) => {
-  const role = ((req.user as any)?.role as string) || AnnouncementAudience.All;
-  const audience = (req.query.audience as string) || role;
+  // Authenticated callers see their own role's announcements — the query
+  // param is only a hint for guests (who get 'all'). Never trust a
+  // client-supplied audience for an authed user (?audience=admin attack).
+  // Superadmins read the admin channel.
+  const role = ((req.user as any)?.role as string) || null;
+  const audience = role
+    ? (role === 'superadmin' ? AnnouncementAudience.Admin : role)
+    : AnnouncementAudience.All;
   const limit = req.query.limit ? Number(req.query.limit) : 5;
   const items = await AnnouncementService.getLiveAnnouncements(audience, limit);
   sendResponse(res, {

@@ -8,6 +8,7 @@ import {
     createBatch,
     createModule,
     createEnrollment,
+    createActiveEnrollment,
 } from '../helpers/factories.js';
 import { CourseService } from '../../modules/Course/course.service.js';
 import { CourseModel } from '../../modules/Course/course.model.js';
@@ -147,11 +148,31 @@ describe('CourseService.getCourseById — curriculum assembly', () => {
             videoSource: 'youtube', videoId: 'abc123XYZ', videoDuration: 600,
         });
 
-        const result = await CourseService.getCourseById(course._id.toString());
-        const media = result?.curriculum[0].lessons[0].media;
+        const result = await CourseService.getCourseById(course._id.toString(), { includeContent: true });
+        const media = (result?.curriculum[0].lessons[0] as any)?.media;
 
         expect(media).not.toBeNull();
         expect(media?.url).toContain('abc123XYZ');
+    });
+
+    it('strips watchable content on the public path', async () => {
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const m1 = await createModule(course._id, batch._id, 1);
+        await LessonModel.create({
+            moduleId: m1._id, title: 'YT', type: LessonType.Video, orderIndex: 1,
+            videoSource: 'youtube', videoId: 'abc123XYZ', videoDuration: 600,
+            content: 'paid content', resources: [],
+        });
+
+        const result = await CourseService.getCourseById(course._id.toString());
+        const lesson = result?.curriculum[0].lessons[0] as any;
+
+        expect(lesson.title).toBe('YT');
+        expect(lesson.media).toBeUndefined();
+        expect(lesson.content).toBeUndefined();
+        expect(lesson.resources).toBeUndefined();
     });
 
     it('scopes curriculum by batchId when provided', async () => {
@@ -177,13 +198,17 @@ describe('CourseService.getCourseById — curriculum assembly', () => {
 });
 
 describe('CourseService.getCourseBySlug / updateCourse / deleteCourse', () => {
-    it('finds a course by slug', async () => {
+    it('finds a published course by slug and hides drafts', async () => {
         const admin = await createAdmin();
         const slug = `findme-${uniq()}`;
-        await createCourse(admin._id, { slug });
+        await createCourse(admin._id, { slug, status: 'published' });
 
         const found = await CourseService.getCourseBySlug(slug);
         expect(found?.slug).toBe(slug);
+
+        const draftSlug = `draft-${uniq()}`;
+        await createCourse(admin._id, { slug: draftSlug, status: 'draft' });
+        expect(await CourseService.getCourseBySlug(draftSlug)).toBeNull();
 
         const missing = await CourseService.getCourseBySlug(`nope-${uniq()}`);
         expect(missing).toBeNull();
@@ -212,6 +237,17 @@ describe('CourseService.getCourseBySlug / updateCourse / deleteCourse', () => {
         await CourseService.deleteCourse(course._id.toString());
 
         expect(await CourseModel.findById(course._id)).toBeNull();
+    });
+
+    it('refuses to delete a course that still has batches', async () => {
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        await createBatch(course._id);
+
+        await expect(
+            CourseService.deleteCourse(course._id.toString())
+        ).rejects.toThrow(/batches/i);
+        expect(await CourseModel.findById(course._id)).not.toBeNull();
     });
 });
 
@@ -284,5 +320,37 @@ describe('CourseService.getCourses — studentsCount via batches', () => {
         const byId = new Map(result.data.map((c: any) => [c._id.toString(), c.studentsCount]));
         expect(byId.get((courseA._id as any).toString())).toBe(2);
         expect(byId.get((courseB._id as any).toString())).toBe(1);
+    });
+});
+
+describe('CourseService.getClassroomCourse — enrollment gate', () => {
+    it('returns full content for an enrolled learner', async () => {
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const m1 = await createModule(course._id, batch._id, 1);
+        await LessonModel.create({
+            moduleId: m1._id, title: 'YT', type: LessonType.Video, orderIndex: 1,
+            videoSource: 'youtube', videoId: 'abc123XYZ', videoDuration: 600,
+        });
+        const user = await createUser();
+        await createActiveEnrollment(user._id, batch._id);
+
+        const result: any = await CourseService.getClassroomCourse(
+            user._id.toString(), course._id.toString(), batch._id.toString()
+        );
+        expect(result.curriculum).toHaveLength(1);
+        expect(result.curriculum[0].lessons[0].media?.url).toContain('abc123XYZ');
+    });
+
+    it('throws FORBIDDEN for unenrolled callers', async () => {
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const outsider = await createUser();
+
+        await expect(
+            CourseService.getClassroomCourse(outsider._id.toString(), course._id.toString(), batch._id.toString())
+        ).rejects.toThrow(/not enrolled/i);
     });
 });

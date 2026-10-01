@@ -81,12 +81,13 @@ const isLiveNow = (doc: { status?: string; publishAt?: Date | null; expireAt?: D
   return true;
 };
 
-const audienceRoleMap: Record<AnnouncementAudience, string | null> = {
+const audienceRoleMap: Record<AnnouncementAudience, string | string[] | null> = {
   [AnnouncementAudience.All]: null,
   [AnnouncementAudience.Learner]: 'learner',
   [AnnouncementAudience.Instructor]: 'instructor',
   [AnnouncementAudience.Employee]: 'employee',
-  [AnnouncementAudience.Admin]: 'admin',
+  // Staff announcements reach both admin tiers.
+  [AnnouncementAudience.Admin]: ['admin', 'superadmin'],
 };
 
 const buildCtaUrl = (link?: string | null): string => {

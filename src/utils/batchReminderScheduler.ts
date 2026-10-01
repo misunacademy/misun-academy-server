@@ -74,12 +74,17 @@ export const sendBatchStartReminders = async () => {
                         ? courseData?.slug || ''
                         : '';
 
+                    // Idempotent per batch+day: overlapping scheduler ticks or
+                    // multi-dyno runs dedupe on (eventType, eventId, to).
+                    const dayKey = batch.startDate.toISOString().slice(0, 10);
+                    const eventId = `batch-start:${(batch._id as any).toString()}:${dayKey}`;
                     await sendCourseBatchStartReminderEmail(
                         { courseName, courseSlug },
                         user.email,
                         user.name,
                         batch.title,
-                        batch.startDate.toLocaleDateString()
+                        batch.startDate.toLocaleDateString(),
+                        eventId
                     );
                     return user.email as string;
                 })

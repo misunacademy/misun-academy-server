@@ -10,6 +10,9 @@ const router = express.Router();
 // Public routes
 router.get('/', CourseController.getAllCourses);
 router.get('/slug/:slug', CourseController.getCourseBySlug);
+// Classroom assembly (watchable content): enrolled learners only. Two
+// segments, so no collision with GET /:id above.
+router.get('/:id/classroom', requireAuth, CourseController.getClassroomCourse);
 router.get('/:id', CourseController.getCourseById);
 
 // Admin routes (only Admins and SuperAdmins can create and edit courses)

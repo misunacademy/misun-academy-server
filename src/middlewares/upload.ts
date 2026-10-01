@@ -19,12 +19,17 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
     }
 };
 
-// Configure multer with memory storage
+// Configure multer with memory storage. Totals are capped alongside the
+// per-file size: upload.array('images', 10) at 5MB/file would otherwise
+// buffer 50MB+ in the Node heap per request (OOM DoS).
 export const upload = multer({
     storage: multer.memoryStorage(),
     fileFilter: fileFilter,
     limits: {
         fileSize: MAX_FILE_SIZE,
+        files: 11,
+        fields: 20,
+        parts: 33,
     },
 });
 

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import { ProfileService } from './profile.service.js';
+import { recordAudit } from '../../models/auditLog.model.js';
 import  ApiError  from '../../errors/ApiError.js';
 import  catchAsync  from '../../utils/catchAsync.js';
 import sendResponse from '../../utils/sendResponse.js';
@@ -64,6 +65,14 @@ const deleteProfile = catchAsync(async (req: Request, res: Response) => {
 
   const userId = req.user.id;
   const result = await ProfileService.deleteProfile(userId);
+
+  await recordAudit({
+    actor: userId,
+    action: 'profile.delete',
+    targetType: 'Profile',
+    targetId: userId,
+    ip: req.ip,
+  });
 
   sendResponse(res, {
     statusCode: StatusCodes.OK,

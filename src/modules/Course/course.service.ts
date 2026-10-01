@@ -1,6 +1,8 @@
-import { FilterQuery, Types } from 'mongoose';
+import mongoose, { FilterQuery, Types } from 'mongoose';
 import { CourseModel } from './course.model.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { BatchModel } from '../Batch/batch.model.js';
+import { EnrollmentStatus } from '../../types/common.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { LessonModel } from '../Lesson/lesson.model.js';
 import { QuizModel } from '../Quiz/quiz.model.js';
@@ -66,7 +68,7 @@ export const CourseService = {
         return { data: coursesWithCount, meta: { page, limit: perPage, total, totalPages: Math.ceil(total / perPage) } };
     },
 
-    async getCourseById(id: string, opts: { batchId?: string } = {}) {
+    async getCourseById(id: string, opts: { batchId?: string; includeContent?: boolean } = {}) {
         const course = await CourseModel.findById(id)
             .populate('instructorId', 'name email image')
             .lean();
@@ -79,13 +81,38 @@ export const CourseService = {
 
         const modules = await ModuleModel.find(moduleQuery).sort({ orderIndex: 1 }).lean();
 
+        // Public storefront must never receive watchable content: lessons are
+        // filtered to published and stripped to syllabus metadata unless the
+        // caller explicitly opts into full content (gated classroom paths).
+        // Batch the per-module lesson/quiz reads into two grouped queries
+        // instead of N×2 round trips.
+        const moduleIds = modules.map((m: any) => m._id);
+        const [allLessons, allQuizzes] = await Promise.all([
+            moduleIds.length
+                ? LessonModel.find({ moduleId: { $in: moduleIds }, ...(opts.includeContent ? {} : { isPublished: true }) })
+                    .sort({ orderIndex: 1 }).lean()
+                : [],
+            moduleIds.length
+                ? QuizModel.find({ moduleId: { $in: moduleIds }, status: 'published' }).sort({ orderIndex: 1 }).lean()
+                : [],
+        ]);
+        const lessonsByModule = new Map<string, any[]>();
+        for (const lesson of allLessons) {
+            const key = (lesson as any).moduleId?.toString();
+            if (!lessonsByModule.has(key)) lessonsByModule.set(key, []);
+            lessonsByModule.get(key)!.push(lesson);
+        }
+        const quizzesByModule = new Map<string, any[]>();
+        for (const quiz of allQuizzes) {
+            const key = (quiz as any).moduleId?.toString();
+            if (!quizzesByModule.has(key)) quizzesByModule.set(key, []);
+            quizzesByModule.get(key)!.push(quiz);
+        }
+
         // Fetch lessons and quizzes for each module
-        const curriculum = await Promise.all(
-            modules.map(async (module: any) => {
-                const [lessons, quizzes] = await Promise.all([
-                    LessonModel.find({ moduleId: module._id }).sort({ orderIndex: 1 }).lean(),
-                    QuizModel.find({ moduleId: module._id, status: 'published' }).sort({ orderIndex: 1 }).lean(),
-                ]);
+        const curriculum = modules.map((module: any) => {
+                const lessons = lessonsByModule.get(module._id.toString()) ?? [];
+                const quizzes = quizzesByModule.get(module._id.toString()) ?? [];
 
                 return {
                     moduleId: module._id.toString(),
@@ -112,20 +139,24 @@ export const CourseService = {
                             if (driveId) videoUrl = buildDrivePreviewUrl(driveId);
                         }
 
-                        return {
+                        const base = {
                             lessonId: lesson._id.toString(),
                             title: lesson.title,
                             description: lesson.description,
                             duration: lesson.videoDuration,
                             order: lesson.orderIndex,
                             type: lesson.type,
+                            isMandatory: lesson.isMandatory,
+                        };
+                        if (!opts.includeContent) return base;
+                        return {
+                            ...base,
                             media: videoUrl ? {
                                 url: videoUrl,
                                 type: lesson.videoSource || 'youtube',
                                 videoId: videoId || lesson.videoId,
                             } : null,
                             content: lesson.content,
-                            isMandatory: lesson.isMandatory,
                             resources: lesson.resources || [],
                         };
                     }),
@@ -140,7 +171,7 @@ export const CourseService = {
                     })),
                 };
             })
-        );
+        ;
 
         return {
             ...course,
@@ -149,12 +180,61 @@ export const CourseService = {
     },
 
     async getCourseBySlug(slug: string) {
-        return await CourseModel.findOne({ slug }).lean();
+        // Public storefront: drafts must not be enumerable via slug.
+        return await CourseModel.findOne({ slug, status: 'published' }).lean();
+    },
+
+    /**
+     * Classroom assembly: same as getCourseById but WITH watchable content,
+     * gated on an Active/Completed enrollment of the caller. Unenrolled
+     * callers get 403 — the public getCourseById (syllabus-only) is the
+     * storefront path.
+     */
+    async getClassroomCourse(userId: string, courseIdOrSlug: string, batchId?: string) {
+        const course = mongoose.isValidObjectId(courseIdOrSlug)
+            ? await CourseModel.findById(courseIdOrSlug).select('_id').lean()
+            : await CourseModel.findOne({ slug: courseIdOrSlug }).select('_id').lean();
+        if (!course) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Course not found');
+        }
+        const courseId = (course._id as Types.ObjectId).toString();
+
+        let enrollment;
+        if (batchId) {
+            if (!mongoose.isValidObjectId(batchId)) {
+                throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid batch ID');
+            }
+            enrollment = await EnrollmentModel.findOne({
+                userId,
+                batchId,
+                status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] },
+            }).lean();
+        } else {
+            const batchIds = await BatchModel.find({ courseId }).distinct('_id');
+            enrollment = batchIds.length
+                ? await EnrollmentModel.findOne({
+                    userId,
+                    batchId: { $in: batchIds },
+                    status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] },
+                }).lean()
+                : null;
+        }
+        if (!enrollment) {
+            throw new ApiError(StatusCodes.FORBIDDEN, 'You are not enrolled in this course');
+        }
+
+        return this.getCourseById(courseId, {
+            batchId: (enrollment.batchId as Types.ObjectId).toString(),
+            includeContent: true,
+        });
     },
 
     async updateCourse(id: string, data: any) {
         const oldCourse = await CourseModel.findById(id).lean();
-        const updated = await CourseModel.findByIdAndUpdate(id, data, { new: true });
+        // Slugs are immutable (links + brand derivation depend on them);
+        // runValidators keeps enum/casing honest on updates.
+        const { slug: _droppedSlug, ...safeData } = data ?? {};
+        const updated = await CourseModel.findByIdAndUpdate(id, safeData, { new: true, runValidators: true });
 
         if (updated && oldCourse && oldCourse.status !== 'published' && updated.status === 'published') {
             setImmediate(async () => {
@@ -192,6 +272,22 @@ export const CourseService = {
     },
 
     async deleteCourse(id: string) {
+        // Hard delete orphans batches/modules/lessons/enrollments. Refuse
+        // while dependents exist — archive the course instead.
+        const batchCount = await BatchModel.countDocuments({ courseId: id });
+        if (batchCount > 0) {
+            throw new ApiError(
+                StatusCodes.CONFLICT,
+                'Cannot delete a course with batches. Archive it or delete its batches first.'
+            );
+        }
+        const moduleCount = await ModuleModel.countDocuments({ courseId: id });
+        if (moduleCount > 0) {
+            throw new ApiError(
+                StatusCodes.CONFLICT,
+                'Cannot delete a course with modules. Archive it or delete its modules first.'
+            );
+        }
         return await CourseModel.findByIdAndDelete(id);
     },
 

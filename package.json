@@ -77,7 +77,7 @@
     "sslcommerz-lts": "^1.1.0",
     "sslcommerz-lts-types": "^1.0.1",
     "uuid": "^11.1.0",
-    "vercel": "^57.0.0",
+    "vercel": "^59.25.4",
     "zod": "^3.24.2"
   }
 }

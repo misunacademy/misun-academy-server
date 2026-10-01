@@ -91,32 +91,23 @@ const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
     const expectedKey = PaymentService.getStatusCallbackKey(transactionId);
 
     if (!callbackKey || callbackKey !== expectedKey) {
-      logger.warn(
-        { transactionId },
-        'Status callback without val_id rejected: missing or invalid callback key'
-      );
-    } else if (callbackStatus) {
+      throw new ApiError(StatusCodes.FORBIDDEN, "Invalid status callback key");
+    }
+    if (callbackStatus) {
       try {
         const callbackPayload = Object.keys(req.body || {}).length > 0 ? req.body : req.query;
 
-        if (callbackStatus === Status.Pending) {
-          await PaymentService.updatePaymentWithEnrollStatus(transactionId, Status.Failed, callbackPayload);
-        } else {
+        // Never auto-fail on a bare status redirect with no explicit gateway
+        // status. A page refresh / crawler GET must be read-only; only an
+        // explicit failed/cancelled gateway status may mutate.
+        if (callbackStatus !== Status.Pending) {
           await PaymentService.updatePaymentWithEnrollStatus(transactionId, callbackStatus, callbackPayload);
         }
       } catch (error) {
         logger.error(error, 'Failed to update payment from status callback');
       }
-    } else {
-      try {
-        const statusCheck = await PaymentService.checkPaymentStatus(transactionId);
-        if (statusCheck.payment?.status === Status.Pending && statusCheck.payment.status !== undefined) {
-          await PaymentService.updatePaymentWithEnrollStatus(transactionId, Status.Failed);
-        }
-      } catch (error) {
-        logger.error(error, 'Failed to cleanup pending payment without explicit callback status');
-      }
     }
+    // No val_id + no explicit gateway status => read-only redirect below.
   }
 
   const result = await PaymentService.checkPaymentStatus(transactionId);

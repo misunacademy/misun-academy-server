@@ -12,6 +12,7 @@ import {
     updateSalaryStatusSchema,
     createLeaveRequestSchema,
     updateLeaveStatusSchema,
+    updateMyProfileSchema,
 } from '../../validations/employee.validation.js';
 
 const router = express.Router();
@@ -40,10 +41,10 @@ router.patch('/admin/leave/:id/status',    requireAuth, requireAdmin, validateRe
 
 // Profile
 router.get('/profile',   requireAuth, requireEmployee, EmployeeController.getMyProfile);
-router.patch('/profile', requireAuth, requireEmployee, EmployeeController.updateMyProfile);
+router.patch('/profile', requireAuth, requireEmployee, validateRequest(updateMyProfileSchema), EmployeeController.updateMyProfile);
 
 // Restricted NID document delivery (employee: own assets; admin/superadmin: any)
-router.get('/nid-photo', requireAuth, EmployeeController.getNidPhotoUrl);
+router.get('/nid-photo', requireAuth, requireEmployee, EmployeeController.getNidPhotoUrl);
 
 // Salaries
 router.get('/salaries', requireAuth, requireEmployee, EmployeeController.getMySalaries);

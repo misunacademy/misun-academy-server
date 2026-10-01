@@ -12,6 +12,8 @@ import { ProgressService } from '../Progress/progress.service.js';
 import ApiError from '../../errors/ApiError.js';
 import { AttemptStatus, EnrollmentStatus } from '../../types/common.js';
 import { NotificationService } from '../Notification/notification.service.js';
+import { UserModel } from '../User/user.model.js';
+import { recordAudit } from '../../models/auditLog.model.js';
 import { logger } from '../../config/logger.js';
 
 export const shuffleArray = <T>(arr: T[]): T[] => {
@@ -232,10 +234,13 @@ const submitAttempt = async (attemptId: string, userId: string, answers: QuizAns
 
     const result = ScoringEngine.evaluate(questions, answers, quiz.passingPercentage);
 
-    if (timeTaken === undefined && quiz.timeLimit) {
-        const elapsed = Math.floor((Date.now() - new Date(attempt.startedAt).getTime()) / 1000);
-        timeTaken = elapsed;
-    }
+    // Time is measured server-side from the trusted startedAt — never from the
+    // client-supplied timeTaken (spoofable leaderboard/analytics input).
+    const serverElapsed = Math.max(
+        0,
+        Math.floor((Date.now() - new Date(attempt.startedAt).getTime()) / 1000)
+    );
+    timeTaken = serverElapsed;
 
     const updatedAttempt = await QuizAttemptModel.findOneAndUpdate(
         {
@@ -264,7 +269,10 @@ const submitAttempt = async (attemptId: string, userId: string, answers: QuizAns
         throw new ApiError(StatusCodes.CONFLICT, 'This attempt has already been submitted');
     }
 
-    if (result.zamesEarned > 0) {
+    // Zames are minted only for PASSED attempts — otherwise every failed
+    // submit (including blank retries) would farm points and inflate the
+    // leaderboard.
+    if (result.zamesEarned > 0 && result.passed) {
         await GamificationService.awardZames({
             userId,
             quizAttemptId: attemptId,
@@ -339,8 +347,21 @@ const getAttemptResult = async (attemptId: string, userId: string) => {
 
     const motivationalMessage = getMotivationalMessage(attempt.percentage);
 
+    // Per-answer correctness (isCorrect/marksAwarded) is only visible when the
+    // quiz explicitly allows showing correct answers — otherwise a single
+    // submit becomes a correctness oracle for the whole bank.
+    const safeAttempt = quiz?.showCorrectAnswers
+        ? attempt
+        : {
+            ...attempt,
+            answers: ((attempt as any).answers ?? []).map((a: any) => ({
+                questionId: a.questionId,
+                selectedAnswer: a.selectedAnswer,
+            })),
+        };
+
     return {
-        attempt,
+        attempt: safeAttempt,
         motivationalMessage,
         questions: quiz?.showCorrectAnswers
             ? questions.map(q => ({
@@ -375,6 +396,83 @@ const getUserAttempts = async (quizId: string, userId: string) => {
     return attempts;
 };
 
+/**
+ * Reset a student's attempts for one quiz so a learner stuck after
+ * exhausting maxAttempts without ever passing can try again.
+ *
+ * Guardrails (keep the recovery narrow):
+ * - Refuses when the student already passed (nothing to recover; a reset
+ *   would also orphan earned Zames/leaderboard rows, which failed attempts
+ *   never create — Zames are awarded on pass only).
+ * - Failed attempts carry no Zames/leaderboard writes, so deleting them is
+ *   side-effect free beyond reopening the quiz.
+ */
+interface ResetActor {
+    id: string;
+    role?: string;
+}
+
+const resetUserAttempts = async (
+    quizId: string,
+    targetUserId: string,
+    actor?: ResetActor,
+    ip?: string
+) => {
+    if (!Types.ObjectId.isValid(quizId) || !Types.ObjectId.isValid(targetUserId)) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid quizId or userId');
+    }
+
+    const quiz = await QuizModel.findById(quizId).select('_id title').lean();
+    if (!quiz) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Quiz not found');
+    }
+
+    const targetUser = await UserModel.findById(targetUserId).select('_id name email').lean();
+    if (!targetUser) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+    }
+
+    const attempts = await QuizAttemptModel.find({
+        quizId: quizId as any,
+        userId: targetUserId as any,
+    })
+        .select('_id passed status')
+        .lean();
+
+    if (attempts.length === 0) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'This student has no attempts to reset');
+    }
+
+    if (attempts.some((a) => (a as { passed?: boolean }).passed === true)) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'This student already passed the quiz — no reset needed'
+        );
+    }
+
+    const { deletedCount = 0 } = await QuizAttemptModel.deleteMany({
+        quizId: quizId as any,
+        userId: targetUserId as any,
+    });
+
+    await recordAudit({
+        actor: actor?.id,
+        actorRole: actor?.role,
+        action: 'quiz.reset_attempts',
+        targetType: 'Quiz',
+        targetId: quizId,
+        metadata: {
+            targetUserId,
+            targetEmail: (targetUser as { email?: string }).email,
+            quizTitle: (quiz as { title?: string }).title,
+            deletedAttempts: deletedCount,
+        },
+        ip,
+    });
+
+    return { quizId, userId: targetUserId, deletedAttempts: deletedCount };
+};
+
 const getAttemptById = async (attemptId: string, userId: string) => {
     const attempt = await QuizAttemptModel.findById(attemptId).lean();
     if (!attempt) {
@@ -383,7 +481,19 @@ const getAttemptById = async (attemptId: string, userId: string) => {
     if (attempt.userId.toString() !== userId) {
         throw new ApiError(StatusCodes.FORBIDDEN, 'This attempt does not belong to you');
     }
-    return attempt;
+    // Same oracle guard as getAttemptResult: hide per-answer correctness
+    // unless the quiz shows correct answers.
+    const quiz = await QuizModel.findById(attempt.quizId).select('showCorrectAnswers').lean();
+    if (quiz?.showCorrectAnswers) {
+        return attempt;
+    }
+    return {
+        ...attempt,
+        answers: ((attempt as any).answers ?? []).map((a: any) => ({
+            questionId: a.questionId,
+            selectedAnswer: a.selectedAnswer,
+        })),
+    };
 };
 
 interface MotivationalMessage {
@@ -441,4 +551,5 @@ export const AttemptService = {
     getUserAttempts,
     getAttemptById,
     getMotivationalMessage,
+    resetUserAttempts,
 };

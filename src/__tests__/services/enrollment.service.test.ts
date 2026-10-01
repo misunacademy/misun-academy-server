@@ -203,12 +203,34 @@ describe('EnrollmentService.updateEnrollmentStatus', () => {
 
         await expect(
             (EnrollmentService.updateEnrollmentStatus as any)(enrollment._id.toString(), 'Active')
-        ).rejects.toThrow(/validation failed/i);
+        ).rejects.toThrow(/Cannot transition|validation failed/i);
 
         const untouched: any = await EnrollmentService.getEnrollmentDetails(
             enrollment._id.toString(),
             user._id.toString()
         );
         expect(untouched.status).toBe(EnrollmentStatus.Active);
+    });
+
+    it('enforces the status state machine', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const enrollment = await createActiveEnrollment(user._id, batch._id);
+
+        await expect(
+            EnrollmentService.updateEnrollmentStatus(enrollment._id.toString(), EnrollmentStatus.Pending)
+        ).rejects.toThrow(/Cannot transition/i);
+
+        const suspended: any = await EnrollmentService.updateEnrollmentStatus(
+            enrollment._id.toString(), EnrollmentStatus.Suspended
+        );
+        expect(suspended.status).toBe(EnrollmentStatus.Suspended);
+
+        const reactivated: any = await EnrollmentService.updateEnrollmentStatus(
+            enrollment._id.toString(), EnrollmentStatus.Active
+        );
+        expect(reactivated.status).toBe(EnrollmentStatus.Active);
     });
 });

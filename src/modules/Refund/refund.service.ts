@@ -3,12 +3,14 @@ import { RefundModel } from './refund.model.js';
 import { RefundChannel, RefundStatus } from './refund.interface.js';
 import { PaymentModel } from '../Payment/payment.model.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { BatchModel } from '../Batch/batch.model.js';
 import { UserModel } from '../User/user.model.js';
 import { Status, EnrollmentStatus } from '../../types/common.js';
 import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
 import { recordAudit } from '../../models/auditLog.model.js';
 import { NotificationService } from '../Notification/notification.service.js';
+import { escapeRegExp } from '../../utils/escapeRegExp.js';
 import { Role } from '../../types/role.js';
 import env from '../../config/env.js';
 
@@ -57,38 +59,56 @@ const assertChecker = (
 };
 
 const resolveSslBaseUrl = (): string =>
-  env.SSL_IS_LIVE === 'true' ? 'https://live.sslcommerz.com' : 'https://sandbox.sslcommerz.com';
+  env.SSL_IS_LIVE === 'true' ? 'https://securepay.sslcommerz.com' : 'https://sandbox.sslcommerz.com';
 
 interface SslRefundResult {
+  APIConnect?: string;
   status?: string;
+  refund_ref_id?: string;
   refund_ref?: string;
   errorReason?: string;
 }
 
+/**
+ * Initiate a refund through SSLCommerz (documented Refund API — v4 docs):
+ * GET {base}/validator/api/merchantTransIDvalidationAPI.php with
+ * bank_tran_id, refund_amount, refund_remarks, store_id, store_passwd plus
+ * the mandatory refund_trans_id (unique per request, introduced 24/02/2025).
+ * Success is `status: "success"` with a `refund_ref_id`.
+ */
 const requestGatewayRefund = async (
   bankTranId: string,
   amount: number,
   remarks: string
 ): Promise<SslRefundResult | null> => {
-  const body = new URLSearchParams({
-    store_id: env.SSL_STORE_ID,
-    store_passwd: env.SSL_STORE_PASSWORD,
+  const params = new URLSearchParams({
     bank_tran_id: bankTranId,
     refund_amount: amount.toFixed(2),
     refund_remarks: remarks,
+    store_id: env.SSL_STORE_ID,
+    store_passwd: env.SSL_STORE_PASSWORD,
+    refund_trans_id: `RFD${Date.now()}${Math.floor(Math.random() * 1e6)}`,
+    format: 'json',
+    v: '1',
   });
 
   try {
-    const res = await fetch(`${resolveSslBaseUrl()}/merchant/api/refund/api.php`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-    });
+    const res = await fetch(
+      `${resolveSslBaseUrl()}/validator/api/merchantTransIDvalidationAPI.php?${params.toString()}`,
+      { method: 'GET' }
+    );
     return (await res.json()) as SslRefundResult;
   } catch {
     return null;
   }
 };
+
+const isGatewayRefundSuccess = (result: SslRefundResult | null | undefined): boolean =>
+  !!result &&
+  result.APIConnect === 'DONE' &&
+  typeof result.status === 'string' &&
+  result.status.toLowerCase() === 'success' &&
+  !!(result.refund_ref_id ?? result.refund_ref);
 
 const createRefund = async (payload: CreateRefundPayload, actor: Actor, ip?: string) => {
   const payment = await PaymentModel.findOne({ transactionId: payload.transactionId });
@@ -109,10 +129,21 @@ const createRefund = async (payload: CreateRefundPayload, actor: Actor, ip?: str
 
   const activeRefund = await RefundModel.findOne({
     transactionId: payload.transactionId,
-    status: { $in: [RefundStatus.Pending, RefundStatus.Approved, RefundStatus.Completed] },
+    status: { $in: [RefundStatus.Pending, RefundStatus.Approved, RefundStatus.Processing] },
   });
   if (activeRefund) {
     throw new ApiError(StatusCodes.CONFLICT, 'An active refund already exists for this transaction');
+  }
+
+  // Partial-refund accounting: completed refunds consume the paid amount, so a
+  // second refund is allowed only for the remaining balance.
+  const completedRefunds = await RefundModel.find({
+    transactionId: payload.transactionId,
+    status: RefundStatus.Completed,
+  }).select('amount').lean();
+  const alreadyRefunded = completedRefunds.reduce((sum, r) => sum + (r.amount || 0), 0);
+  if (amount > payment.amount - alreadyRefunded) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Refund amount exceeds the remaining refundable balance');
   }
 
   const bankTranId = getBankTranId(payment.gatewayResponse);
@@ -158,7 +189,9 @@ const createRefund = async (payload: CreateRefundPayload, actor: Actor, ip?: str
 };
 
 const listRefunds = async (query: ListQuery) => {
-  const { status, search, page = 1, limit = 10 } = query;
+  const { status, search } = query;
+  const page = Math.max(1, Math.floor(Number(query.page) || 1));
+  const limit = Math.min(100, Math.max(1, Math.floor(Number(query.limit) || 10)));
 
   const filters: Record<string, unknown> = {};
   if (status) filters.status = status;
@@ -166,9 +199,9 @@ const listRefunds = async (query: ListQuery) => {
   const searchFilter: Record<string, unknown> | null = search
     ? {
         $or: [
-          { 'matchedUser.name': { $regex: search, $options: 'i' } },
-          { 'matchedUser.email': { $regex: search, $options: 'i' } },
-          { transactionId: { $regex: search, $options: 'i' } },
+          { 'matchedUser.name': { $regex: escapeRegExp(search), $options: 'i' } },
+          { 'matchedUser.email': { $regex: escapeRegExp(search), $options: 'i' } },
+          { transactionId: { $regex: escapeRegExp(search), $options: 'i' } },
         ],
       }
     : null;
@@ -326,7 +359,11 @@ const approveRefund = async (id: string, note: string | undefined, actor: Actor,
     action: 'refund.approve',
     targetType: 'Refund',
     targetId: id,
-    metadata: { transactionId: refund.transactionId, amount: refund.amount },
+    metadata: {
+      transactionId: refund.transactionId,
+      amount: refund.amount,
+      selfApproved: existing.requestedBy?.toString() === actor.id,
+    },
     ip,
   });
 
@@ -419,7 +456,7 @@ const completeRefund = async (id: string, actor: Actor, ip?: string) => {
     }
 
     const result = await requestGatewayRefund(bankTranId, claimed.amount, `Refund for ${claimed.transactionId}`);
-    if (!result || result.status !== 'SUCCESS') {
+    if (!isGatewayRefundSuccess(result)) {
       await RefundModel.findOneAndUpdate(
         { _id: id, status: RefundStatus.Processing },
         { $set: { status: RefundStatus.Approved, gatewayResponse: result ?? { error: 'no response from SSLCommerz' } } }
@@ -430,7 +467,7 @@ const completeRefund = async (id: string, actor: Actor, ip?: string) => {
       );
     }
     gatewayResponse = result;
-    gatewayRef = result.refund_ref;
+    gatewayRef = result?.refund_ref_id ?? result?.refund_ref;
   }
 
   const session = await mongoose.startSession();
@@ -454,22 +491,55 @@ const completeRefund = async (id: string, actor: Actor, ip?: string) => {
       throw new ApiError(StatusCodes.CONFLICT, 'Refund changed state during completion');
     }
 
-    await PaymentModel.findOneAndUpdate(
-      { transactionId: claimed.transactionId },
-      { status: Status.Refunded, updatedAt: new Date() },
-      { session }
-    );
-
-    if (claimed.enrollmentId) {
-      await EnrollmentModel.findOneAndUpdate(
-        { enrollmentId: claimed.enrollmentId },
-        { status: EnrollmentStatus.Refunded },
+    // Full refund only: a PARTIAL refund must not revoke the student's access
+    // or corrupt finance state — the payment stays successful with a reduced
+    // refundable balance.
+    const fullPayment = await PaymentModel.findOne({ transactionId: claimed.transactionId }).session(session);
+    const isFullRefund = !!fullPayment && claimed.amount >= fullPayment.amount;
+    if (isFullRefund) {
+      await PaymentModel.findOneAndUpdate(
+        { transactionId: claimed.transactionId },
+        { status: Status.Refunded, updatedAt: new Date() },
         { session }
       );
+
+      if (claimed.enrollmentId) {
+        await EnrollmentModel.findOneAndUpdate(
+          { enrollmentId: claimed.enrollmentId },
+          { status: EnrollmentStatus.Refunded },
+          { session }
+        );
+      }
+
+      // The seat is gone: keep Batch.currentEnrollment honest.
+      if (claimed.batchId) {
+        await BatchModel.findByIdAndUpdate(
+          claimed.batchId,
+          { $inc: { currentEnrollment: -1 } },
+          { session }
+        );
+      }
     }
 
     await session.commitTransaction();
     session.endSession();
+
+    await recordAudit({
+      actor: actor.id,
+      actorRole: actor.role,
+      action: 'refund.complete',
+      targetType: 'Refund',
+      targetId: id,
+      metadata: {
+        transactionId: claimed.transactionId,
+        amount: claimed.amount,
+        channel: claimed.channel,
+        gatewayRef,
+        partial: !isFullRefund,
+        selfApproved: claimed.requestedBy?.toString() === actor.id,
+      },
+      ip,
+    });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -490,21 +560,6 @@ const completeRefund = async (id: string, actor: Actor, ip?: string) => {
       // notification is best-effort
     }
   }
-
-  await recordAudit({
-    actor: actor.id,
-    actorRole: actor.role,
-    action: 'refund.complete',
-    targetType: 'Refund',
-    targetId: id,
-    metadata: {
-      transactionId: claimed.transactionId,
-      amount: claimed.amount,
-      channel: claimed.channel,
-      gatewayRef,
-    },
-    ip,
-  });
 
   return RefundModel.findById(id).lean();
 };

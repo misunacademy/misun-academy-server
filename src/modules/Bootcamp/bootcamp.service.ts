@@ -137,7 +137,15 @@ const registerBootcampRegistration = async (
             }
         });
 
-        return registration;
+        // Public receipt: confirm without echoing PII/payment fragments back.
+        // The registrant already knows what they submitted; the response must
+        // not become a PII oracle.
+        const receipt = {
+            _id: (registration as any)._id,
+            status: registration.status,
+            createdAt: (registration as any).createdAt,
+        };
+        return receipt as unknown as typeof registration;
     } catch (error) {
         if ((error as { code?: number })?.code === 11000) {
             throw new ApiError(
@@ -151,7 +159,6 @@ const registerBootcampRegistration = async (
 
 const getAllBootcampRegistrations = async (params?: BootcampQuery) => {
     const { status, search, page = 1, limit = 10 } = params ?? {};
-
     const query: FilterQuery<IBootcampRegistration> = {};
 
     if (status) {
@@ -169,7 +176,7 @@ const getAllBootcampRegistrations = async (params?: BootcampQuery) => {
     }
 
     const safePage = Math.max(1, page || 1);
-    const safeLimit = Math.max(1, limit || 10);
+    const safeLimit = Math.min(100, Math.max(1, limit || 10));
     const skip = (safePage - 1) * safeLimit;
 
     const total = await BootcampRegistrationModel.countDocuments(query);

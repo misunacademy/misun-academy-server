@@ -38,6 +38,24 @@ const uploadBufferToCloudinary = (
     });
 
 /**
+ * Magic-byte sniffing: mimetype/extension are client-controlled, so a
+ * polyglot HTML/SVG renamed to image/png would pass the filter and become
+ * stored XSS via CDN delivery. The buffer never lies.
+ */
+const assertImageMagicBytes = (file: Express.Multer.File): void => {
+    const buf: Buffer = file.buffer;
+    if (!buf || buf.length < 12) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid image file');
+    }
+    const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
+    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    const isWebp = buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP';
+    if (!isJpeg && !isPng && !isWebp) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid image file: content does not match an image format');
+    }
+};
+
+/**
  * Process single uploaded file from Multer buffer to Cloudinary
  */
 const processSingleUpload = async (file: Express.Multer.File): Promise<IUploadResult> => {
@@ -48,6 +66,8 @@ const processSingleUpload = async (file: Express.Multer.File): Promise<IUploadRe
     if (!file.buffer) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'File buffer not available');
     }
+
+    assertImageMagicBytes(file);
 
     if (!isCloudinaryConfigured) {
         throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Image upload service is not configured. Please check Cloudinary credentials.');
@@ -96,6 +116,8 @@ const processRestrictedUpload = async (file: Express.Multer.File): Promise<IUplo
     if (!file.buffer) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'File buffer not available');
     }
+
+    assertImageMagicBytes(file);
 
     if (!isCloudinaryConfigured) {
         throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Image upload service is not configured. Please check Cloudinary credentials.');

@@ -1,7 +1,18 @@
+import mongoose from 'mongoose';
 import { AuditLogModel } from '../../models/auditLog.model.js';
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 20;
+
+// Query allowlist: arbitrary keys (and $-operators, depending on the query
+// parser) must never reach the Mongo filter.
+const ALLOWED_STRING_FILTERS = ['action', 'targetType'] as const;
+
+const toValidDate = (value?: string): Date | undefined => {
+    if (!value) return undefined;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? undefined : d;
+};
 
 const getAuditLogs = async (query: Record<string, string>) => {
     const page = Math.max(1, parseInt(query.page || '1', 10) || 1);
@@ -9,14 +20,19 @@ const getAuditLogs = async (query: Record<string, string>) => {
 
     const filter: Record<string, unknown> = {};
 
-    if (query.action) filter.action = query.action;
-    if (query.targetType) filter.targetType = query.targetType;
-    if (query.actor) filter.actor = query.actor;
+    for (const key of ALLOWED_STRING_FILTERS) {
+        if (query[key]) filter[key] = query[key];
+    }
+    if (query.actor && mongoose.Types.ObjectId.isValid(query.actor)) {
+        filter.actor = new mongoose.Types.ObjectId(query.actor);
+    }
 
-    if (query.from || query.to) {
+    const from = toValidDate(query.from);
+    const to = toValidDate(query.to);
+    if (from || to) {
         filter.createdAt = {} as Record<string, Date>;
-        if (query.from) (filter.createdAt as Record<string, Date>).$gte = new Date(query.from);
-        if (query.to) (filter.createdAt as Record<string, Date>).$lte = new Date(query.to);
+        if (from) (filter.createdAt as Record<string, Date>).$gte = from;
+        if (to) (filter.createdAt as Record<string, Date>).$lte = to;
     }
 
     const [items, total] = await Promise.all([

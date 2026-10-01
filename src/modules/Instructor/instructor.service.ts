@@ -11,26 +11,33 @@ import { LessonModel } from '../Lesson/lesson.model.js';
 import { QuizModel } from '../Quiz/quiz.model.js';
 import { QuestionModel } from '../Quiz/question.model.js';
 import { QuestionService } from '../Quiz/question.service.js';
+import { AttemptService } from '../Quiz/attempt.service.js';
 import { QuizAttemptModel } from '../Quiz/attempt.model.js';
 import { AttemptStatus, EnrollmentStatus } from '../../types/common.js';
 
 /**
- * Resolve a userId string to a User doc with role=instructor.
- * Throws 404 if not found.
+ * Resolve a userId string to a User doc with a content role (instructor, or
+ * admin/superadmin previewing instructor content). Throws 404 if not found.
  */
 const resolveInstructor = async (userId: string) => {
-    const user = await UserModel.findOne({ _id: userId, role: 'instructor' }).lean();
+    const user = await UserModel.findOne({
+        _id: userId,
+        role: { $in: ['instructor', 'admin', 'superadmin'] },
+    }).lean();
     if (!user) throw new ApiError(StatusCodes.NOT_FOUND, 'Instructor not found');
     return user;
 };
 
 /**
  * Helper: verify that userId is the assigned instructor for courseId.
+ * Admins/superadmins always pass (support preview/delegation).
  */
 const verifyInstructorCourseAccess = async (
     userId: string,
     courseId: string
 ): Promise<boolean> => {
+    const user = await UserModel.findById(userId).select('role').lean();
+    if (user?.role === 'admin' || user?.role === 'superadmin') return true;
     const course = await CourseModel.findOne({
         _id: courseId,
         instructorId: new Types.ObjectId(userId),
@@ -197,9 +204,11 @@ const reorderCourseModulesForInstructor = async (
         throw new ApiError(StatusCodes.BAD_REQUEST, 'moduleOrders must be an array');
     }
 
+    // Scope every write to this course+batch: unconstrained findByIdAndUpdate
+    // would let an instructor rewrite orderIndex on anyone's modules.
     await Promise.all(
         moduleOrders.map(({ moduleId, orderIndex }) =>
-            ModuleModel.findByIdAndUpdate(moduleId, { orderIndex })
+            ModuleModel.findOneAndUpdate({ _id: moduleId, courseId, batchId }, { orderIndex })
         )
     );
 
@@ -490,9 +499,19 @@ const reorderQuestionsForInstructor = async (userId: string, quizId: string, que
     return QuestionService.reorderQuestions(quizId, questionOrders);
 };
 
+const resetQuizAttemptsForInstructor = async (
+    userId: string,
+    quizId: string,
+    targetUserId: string,
+    actor?: { id: string; role?: string },
+    ip?: string
+) => {
+    await verifyQuizAccess(userId, quizId);
+    return AttemptService.resetUserAttempts(quizId, targetUserId, actor ?? { id: userId }, ip);
+};
+
 const getQuizAnalyticsForInstructor = async (userId: string, quizId: string) => {
     await verifyQuizAccess(userId, quizId);
-
     const [attemptStats, questionStats, questions] = await Promise.all([
         QuizAttemptModel.aggregate([
             { $match: { quizId: new Types.ObjectId(quizId), status: AttemptStatus.Completed } },
@@ -556,46 +575,62 @@ const getQuizAnalyticsForInstructor = async (userId: string, quizId: string) => 
 const getInstructorEnrolledStudents = async (userId: string, query: any) => {
     await resolveInstructor(userId);
 
-    const { page = 1, limit = 10, search, status, courseId, batchId } = query;
-    const skip = (Number(page) - 1) * Number(limit);
+    const rawPage = Number(query.page) || 1;
+    const rawLimit = Number(query.limit) || 10;
+    const page = Math.max(1, Math.floor(rawPage));
+    const limit = Math.min(100, Math.max(1, Math.floor(rawLimit)));
+    const { search, status, courseId, batchId } = query;
+    const skip = (page - 1) * limit;
 
     // 1. Get allowed courses for this instructor
     const courseQuery: any = { instructorId: new Types.ObjectId(userId) };
     if (courseId && courseId !== 'all') {
+        if (!Types.ObjectId.isValid(courseId)) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid course ID');
+        }
         courseQuery._id = new Types.ObjectId(courseId);
     }
     const courses = await CourseModel.find(courseQuery).select('_id title').lean();
     const courseIds = courses.map(c => c._id);
 
     if (courseIds.length === 0) {
-        return { meta: { total: 0, page: Number(page), limit: Number(limit), totalPages: 0 }, data: [] };
+        return { meta: { total: 0, page, limit, totalPages: 0 }, data: [] };
     }
 
     // 2. Get allowed batches
     const batchQuery: any = { courseId: { $in: courseIds } };
     if (batchId && batchId !== 'all') {
+        if (!Types.ObjectId.isValid(batchId)) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid batch ID');
+        }
         batchQuery._id = new Types.ObjectId(batchId);
     }
     const batches = await BatchModel.find(batchQuery).select('_id title courseId').lean();
     const batchIds = batches.map(b => b._id);
 
     if (batchIds.length === 0) {
-        return { meta: { total: 0, page: Number(page), limit: Number(limit), totalPages: 0 }, data: [] };
+        return { meta: { total: 0, page, limit, totalPages: 0 }, data: [] };
     }
 
     // 3. Construct enrollment query
     const enrollmentQuery: any = { batchId: { $in: batchIds } };
-    
+
     if (status && status !== 'all') {
-        enrollmentQuery.status = new RegExp(`^${status}$`, 'i');
+        // Allowlist, never raw regex: unescaped input here was ReDoS-able.
+        const allowed = ['active', 'completed', 'suspended', 'pending', 'payment-pending', 'payment-failed', 'refunded'];
+        if (!allowed.includes(String(status).toLowerCase())) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid enrollment status');
+        }
+        enrollmentQuery.status = String(status).toLowerCase();
     }
 
     // If there is a search term, we need to find matching users first
     if (search) {
+        const escaped = String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const matchingUsers = await UserModel.find({
             $or: [
-                { name: { $regex: search, $options: 'i' } },
-                { email: { $regex: search, $options: 'i' } }
+                { name: { $regex: escaped, $options: 'i' } },
+                { email: { $regex: escaped, $options: 'i' } }
             ]
         }).select('_id').lean();
         const userIds = matchingUsers.map(u => u._id);
@@ -662,4 +697,5 @@ export const InstructorService = {
     reorderQuestionsForInstructor,
     getInstructorEnrolledStudents,
     getQuizAnalyticsForInstructor,
+    resetQuizAttemptsForInstructor,
 };
