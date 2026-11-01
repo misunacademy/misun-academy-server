@@ -30,6 +30,9 @@ const enrollmentSchema = new Schema<IEnrollment>(
         statusChangeReason: {
             type: String,
         },
+        archivedAt: {
+            type: Date,
+        },
         accessType: {
             type: String,
             enum: ['standard', 'special'],
@@ -51,6 +54,20 @@ const enrollmentSchema = new Schema<IEnrollment>(
         },
         // Lifetime access - no expiry field needed
         // Access is only revoked if user/enrollment is suspended by admin
+        deferUntil: {
+            type: Date,
+        },
+        accessExtendedUntil: {
+            type: Date,
+        },
+        transferredToBatchId: {
+            type: Schema.Types.ObjectId,
+            ref: 'Batch',
+        },
+        transferredFromBatchId: {
+            type: Schema.Types.ObjectId,
+            ref: 'Batch',
+        },
     },
     {
         timestamps: true,
@@ -61,6 +78,25 @@ const enrollmentSchema = new Schema<IEnrollment>(
 enrollmentSchema.index({ enrollmentId: 1 }, { unique: true, sparse: true });
 enrollmentSchema.index({ userId: 1, status: 1 });
 enrollmentSchema.index({ batchId: 1, status: 1 });
-enrollmentSchema.index({ userId: 1, batchId: 1 }, { unique: true });
+// Only one non-terminal enrollment may exist for a learner/batch pair.
+// Terminal payment records are retained for audit/support and must not block
+// a later checkout attempt.
+enrollmentSchema.index(
+    { userId: 1, batchId: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            status: {
+                $in: [
+                    EnrollmentStatus.Pending,
+                    EnrollmentStatus.PaymentPending,
+                    EnrollmentStatus.Active,
+                    EnrollmentStatus.Completed,
+                    EnrollmentStatus.Suspended,
+                ],
+            },
+        },
+    }
+);
 
 export const EnrollmentModel = model<IEnrollment>('Enrollment', enrollmentSchema);

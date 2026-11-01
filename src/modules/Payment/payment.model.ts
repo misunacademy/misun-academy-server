@@ -13,6 +13,7 @@ export interface IPayment {
     gatewayResponse?: any;
     verifiedAt?: Date;
     verifiedBy?: Types.ObjectId;
+    archivedAt?: Date;
     createdAt?: Date;
     updatedAt?: Date;
 }
@@ -32,7 +33,7 @@ const paymentSchema = new Schema<IPayment>(
         enrollmentId: {
             type: String,
             unique: true,
-            // sparse: true,
+            sparse: true,
         },
         transactionId: {
             type: String,
@@ -54,7 +55,7 @@ const paymentSchema = new Schema<IPayment>(
         },
         method: {
             type: String,
-            enum: ["SSLCommerz", "PhonePay"],
+            enum: ["SSLCommerz", "PhonePay", "complimentary", "manual"],
             required: true,
         },
         gatewayResponse: {
@@ -66,6 +67,9 @@ const paymentSchema = new Schema<IPayment>(
         verifiedBy: {
             type: Schema.Types.ObjectId,
             ref: "User",
+        },
+        archivedAt: {
+            type: Date,
         },
     },
     {

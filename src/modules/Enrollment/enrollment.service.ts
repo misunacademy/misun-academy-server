@@ -723,12 +723,17 @@ const grantAccessByEmail = async (
     courseId: string,
     batchId: string,
     actor?: { id: string; role?: string },
+    reason?: string,
     ip?: string
 ) => {
     const normalizedEmail = email.trim().toLowerCase();
 
     if (!normalizedEmail) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Student email is required');
+    }
+
+    if (!reason?.trim()) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Reason is required for admin grant');
     }
 
     if (!mongoose.Types.ObjectId.isValid(courseId)) {
@@ -838,10 +843,34 @@ const grantAccessByEmail = async (
         if (enrollment.enrollmentId) {
             await ProfileService.createOrUpdateProfileAfterEnrollment(
                 user._id.toString(),
-                enrollment.enrollmentId,
-                session
+                enrollment.enrollmentId
             );
         }
+
+        // Complimentary payment record so revenue reports stay correct.
+        // Admin grants are free (amount 0, method complimentary) and audited.
+        await PaymentModel.create(
+            [
+                {
+                    userId: user._id,
+                    batchId: batch._id,
+                    transactionId: `COMPLIMENTARY-${enrollment.enrollmentId}`,
+                    enrollmentId: enrollment.enrollmentId,
+                    amount: 0,
+                    currency: 'BDT',
+                    status: Status.Success,
+                    method: 'complimentary',
+                    gatewayResponse: {
+                        source: 'admin_grant',
+                        reason: reason.trim(),
+                        grantedBy: actor?.id,
+                        grantedAt: new Date(),
+                    },
+                    paidAt: new Date(),
+                },
+            ],
+            { session }
+        );
 
         await session.commitTransaction();
 
@@ -911,6 +940,261 @@ const ensureStudentIdForUser = async (
     await assignStudentIdIfMissing(userId, session);
 };
 
+/**
+ * Transfer an enrollment from one batch to another (same course).
+ * No payment change — the learner keeps their paid status.
+ * Writes status history for both the deactivation and activation.
+ */
+const transferEnrollment = async (
+    enrollmentId: string,
+    newBatchId: string,
+    reason: string,
+    actor?: { id: string; role?: string }
+) => {
+    const session = await mongoose.startSession();
+    try {
+        session.startTransaction();
+
+        const enrollment = await EnrollmentModel.findById(enrollmentId)
+            .session(session)
+            .lean();
+        if (!enrollment) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+        }
+
+        if (enrollment.status !== EnrollmentStatus.Active) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'Only active enrollments can be transferred'
+            );
+        }
+
+        const newBatch = await BatchModel.findById(newBatchId)
+            .populate('courseId')
+            .session(session)
+            .lean();
+        if (!newBatch) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Target batch not found');
+        }
+
+        const oldBatch = await BatchModel.findById(enrollment.batchId)
+            .populate('courseId')
+            .session(session)
+            .lean();
+        if (!oldBatch) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Source batch not found');
+        }
+
+        const newBatchCourseId =
+            (newBatch.courseId as any)?._id?.toString() ??
+            (newBatch.courseId as any)?.toString();
+        const oldBatchCourseId =
+            (oldBatch.courseId as any)?._id?.toString() ??
+            (oldBatch.courseId as any)?.toString();
+        if (newBatchCourseId !== oldBatchCourseId) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'Target batch does not belong to the same course'
+            );
+        }
+
+        // Deactivate old enrollment (suspended, not active)
+        await EnrollmentModel.findByIdAndUpdate(
+            enrollmentId,
+            {
+                $set: {
+                    status: EnrollmentStatus.Suspended,
+                    statusChangeReason: `Transferred to batch ${newBatch._id}: ${reason}`,
+                    transferredAt: new Date(),
+                    transferredToBatchId: newBatchId,
+                },
+            },
+            { session }
+        );
+
+        // Create new active enrollment in target batch
+        const newEnrollment = await EnrollmentModel.create(
+            [
+                {
+                    userId: enrollment.userId,
+                    batchId: newBatchId,
+                    status: EnrollmentStatus.Active,
+                    accessType: enrollment.accessType || 'standard',
+                    enrolledAt: new Date(),
+                    transferredFromBatchId: enrollment.batchId,
+                },
+            ],
+            { session }
+        );
+
+        // Status history for both
+        await EnrollmentStatusHistoryModel.create(
+            [
+                {
+                    enrollmentId: enrollment._id,
+                    userId: enrollment.userId,
+                    batchId: enrollment.batchId as mongoose.Types.ObjectId,
+                    from: EnrollmentStatus.Active,
+                    to: EnrollmentStatus.Suspended,
+                    actorType: actor?.role ? 'admin' : 'system',
+                    actorId: actor?.id ? new mongoose.Types.ObjectId(actor.id) : undefined,
+                    reason: `Transferred out: ${reason}`,
+                    source: 'transferEnrollment',
+                },
+                {
+                    enrollmentId: newEnrollment[0]._id,
+                    userId: enrollment.userId,
+                    batchId: new mongoose.Types.ObjectId(newBatchId as unknown as string),
+                    from: EnrollmentStatus.Pending,
+                    to: EnrollmentStatus.Active,
+                    actorType: actor?.role ? 'admin' : 'system',
+                    actorId: actor?.id ? new mongoose.Types.ObjectId(actor.id) : undefined,
+                    reason: `Transferred in: ${reason}`,
+                    source: 'transferEnrollment',
+                },
+            ],
+            { session, ordered: true }
+        );
+
+        await session.commitTransaction();
+        return newEnrollment[0];
+    } catch (error) {
+        await session.abortTransaction();
+        throw error;
+    } finally {
+        session.endSession();
+    }
+};
+
+/**
+ * Defer an enrollment: suspend it with a deferUntil date.
+ * The learner loses access until reactivated.
+ */
+const deferEnrollment = async (
+    enrollmentId: string,
+    deferUntil: Date,
+    reason: string,
+    actor?: { id: string; role?: string }
+) => {
+    const enrollment = await EnrollmentModel.findById(enrollmentId).lean();
+    if (!enrollment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+    }
+
+    if (enrollment.status !== EnrollmentStatus.Active) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'Only active enrollments can be deferred'
+        );
+    }
+
+    await EnrollmentService.transitionEnrollment(
+        enrollmentId,
+        EnrollmentStatus.Active,
+        EnrollmentStatus.Suspended,
+        actor,
+        `Deferred until ${deferUntil.toISOString()}: ${reason}`
+    );
+
+    // Set deferUntil field
+    const updated = await EnrollmentModel.findByIdAndUpdate(
+        enrollmentId,
+        { $set: { deferUntil } },
+        { new: true }
+    );
+
+    return updated as any;
+};
+
+/**
+ * Extend access for an enrollment: set accessExtendedUntil date.
+ */
+const extendAccess = async (
+    enrollmentId: string,
+    accessExtendedUntil: Date,
+    reason: string,
+    actor?: { id: string; role?: string }
+) => {
+    const enrollment = await EnrollmentModel.findById(enrollmentId).lean();
+    if (!enrollment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+    }
+
+    if (![EnrollmentStatus.Active, EnrollmentStatus.Completed].includes(enrollment.status)) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'Only active or completed enrollments can be extended'
+        );
+    }
+
+    const updated = await EnrollmentModel.findByIdAndUpdate(
+        enrollmentId,
+        {
+            $set: {
+                accessExtendedUntil,
+                statusChangeReason: `Access extended: ${reason}`,
+            },
+        },
+        { new: true }
+    );
+
+    await recordAudit({
+        actor: actor?.id,
+        actorRole: actor?.role,
+        action: 'enrollment.access_extend',
+        targetType: 'Enrollment',
+        targetId: enrollmentId,
+        metadata: { accessExtendedUntil, reason },
+    });
+
+    return updated;
+};
+
+/**
+ * Find stuck enrollments in a batch:
+ * - paidNotActive: success payment but enrollment not active
+ * - activeNoPayment: active enrollment but no success payment
+ */
+const getStuckEnrollments = async (batchId: string) => {
+    // Paid but not active
+    const paidPayments = await PaymentModel.find({
+        batchId,
+        status: Status.Success,
+    }).lean();
+
+    const paidNotActive: any[] = [];
+    for (const p of paidPayments) {
+        const enrollment = await EnrollmentModel.findOne({
+            enrollmentId: p.enrollmentId,
+        }).lean();
+        if (!enrollment || enrollment.status !== EnrollmentStatus.Active) {
+            paidNotActive.push(enrollment || { _id: p._id, enrollmentId: p.enrollmentId, status: 'no_enrollment' });
+        }
+    }
+
+    // Active but no payment
+    const activeEnrollments = await EnrollmentModel.find({
+        batchId,
+        status: EnrollmentStatus.Active,
+    }).lean();
+
+    const activeNoPayment: any[] = [];
+    for (const e of activeEnrollments) {
+        const payment = await PaymentModel.findOne({
+            enrollmentId: e.enrollmentId,
+            status: Status.Success,
+        }).lean();
+        if (!payment) {
+            activeNoPayment.push(e);
+        }
+    }
+
+    return { paidNotActive, activeNoPayment };
+};
+
+/**
+ * Get all enrollments with optional filtering and pagination.
+ */
 const getAllEnrollments = async (params: {
     batchId?: string;
     courseId?: string;
@@ -1347,6 +1631,10 @@ export const EnrollmentService = {
     createEnrollment,
     transitionEnrollment,
     countActiveEnrollments,
+    transferEnrollment,
+    deferEnrollment,
+    extendAccess,
+    getStuckEnrollments,
     initializeModuleProgress,
     generateEnrollmentId,
     ensureStudentIdForUser,

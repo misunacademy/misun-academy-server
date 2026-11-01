@@ -5,6 +5,7 @@ import { createUser, createAdmin, createCourse, createBatch, createEnrollment, c
 import { EnrollmentService } from '../../modules/Enrollment/enrollment.service.js';
 import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
 import { EnrollmentStatusHistoryModel } from '../../modules/Enrollment/enrollmentStatusHistory.model.js';
+import { PaymentModel } from '../../modules/Payment/payment.model.js';
 import { EnrollmentStatus, BatchStatus, Status } from '../../types/common.js';
 import { EmailLogModel } from '../../models/email.model.js';
 
@@ -523,7 +524,8 @@ describe('EnrollmentService.updateEnrollmentStatus', () => {
             await expect(
                 EnrollmentService.grantAccessByEmail(
                     user.email, course._id.toString(), batch._id.toString(),
-                    { id: admin._id.toString(), role: 'admin' }
+                    { id: admin._id.toString(), role: 'admin' },
+                    'Suspended user should not be granted access'
                 )
             ).rejects.toThrow(/not active/i);
         });
@@ -809,5 +811,209 @@ describe('Fix 9: Transactional outbox — emails via queueEmail, idempotent', ()
 
         const count = await EmailLogModel.countDocuments({ eventId: 'evt-commit-1' });
         expect(count).toBe(1);
+    });
+});
+
+describe('Fix 12: Admin and support tools', () => {
+    it('grantAccessByEmail requires reason field', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id, {
+            enrollmentEndDate: new Date('2027-01-01'),
+        });
+
+        await expect(
+            EnrollmentService.grantAccessByEmail(
+                user.email,
+                course._id.toString(),
+                batch._id.toString()
+            )
+        ).rejects.toThrow(/reason is required/i);
+    });
+
+    it('grantAccessByEmail creates complimentary payment record', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id, {
+            enrollmentEndDate: new Date('2027-01-01'),
+        });
+
+        const result = await EnrollmentService.grantAccessByEmail(
+            user.email,
+            course._id.toString(),
+            batch._id.toString(),
+            { id: admin._id.toString(), role: 'admin' },
+            'Complimentary access for scholarship student'
+        );
+
+        expect(result.enrollment.status).toBe(EnrollmentStatus.Active);
+        expect(result.enrollment.accessType).toBe('special');
+
+        // Complimentary payment record should exist
+        const payment = await PaymentModel.findOne({
+            enrollmentId: result.enrollment.enrollmentId,
+        }).lean();
+        expect(payment).not.toBeNull();
+        expect(payment?.status).toBe(Status.Success);
+        expect(payment?.method).toBe('complimentary');
+        expect(payment?.amount).toBe(0);
+    });
+
+    it('transferEnrollment moves learner between batches', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch1 = await createBatch(course._id, {
+            enrollmentEndDate: new Date('2027-01-01'),
+            batchNumber: 1,
+        });
+        const batch2 = await createBatch(course._id, {
+            enrollmentEndDate: new Date('2027-02-01'),
+            batchNumber: 2,
+        });
+
+        // Enroll in batch1
+        const enrollment = await EnrollmentService.initiateEnrollment(
+            user._id.toString(),
+            batch1._id.toString()
+        );
+        await EnrollmentService.transitionEnrollment(
+            enrollment.enrollment._id.toString(),
+            EnrollmentStatus.Pending,
+            EnrollmentStatus.Active,
+            { id: user._id.toString(), role: 'learner' },
+            'Payment confirmed'
+        );
+
+        // Transfer to batch2
+        const transferred = await EnrollmentService.transferEnrollment(
+            enrollment.enrollment._id.toString(),
+            batch2._id.toString(),
+            'Schedule conflict',
+            { id: admin._id.toString(), role: 'admin' }
+        );
+
+        expect(transferred.batchId.toString()).toBe(batch2._id.toString());
+        expect(transferred.status).toBe(EnrollmentStatus.Active);
+
+        // Original batch1 enrollment should be suspended (not deleted)
+        const remaining = await EnrollmentModel.findOne({
+            userId: user._id,
+            batchId: batch1._id,
+        }).lean();
+        expect(remaining).not.toBeNull();
+        expect(remaining.status).toBe(EnrollmentStatus.Suspended);
+    });
+
+    it('deferEnrollment suspends and sets deferUntil', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id, {
+            enrollmentEndDate: new Date('2027-01-01'),
+        });
+
+        const enrollment = await EnrollmentService.initiateEnrollment(
+            user._id.toString(),
+            batch._id.toString()
+        );
+        await EnrollmentService.transitionEnrollment(
+            enrollment.enrollment._id.toString(),
+            EnrollmentStatus.Pending,
+            EnrollmentStatus.Active,
+            { id: user._id.toString(), role: 'learner' },
+            'Payment confirmed'
+        );
+
+        const deferUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        const deferred = await EnrollmentService.deferEnrollment(
+            enrollment.enrollment._id.toString(),
+            deferUntil,
+            'Medical leave',
+            { id: admin._id.toString(), role: 'admin' }
+        );
+
+        expect(deferred.status).toBe(EnrollmentStatus.Suspended);
+        expect(deferred.deferUntil).toEqual(deferUntil);
+    });
+
+    it('extendAccess extends enrollment access period', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id, {
+            enrollmentEndDate: new Date('2027-01-01'),
+        });
+
+        const enrollment = await EnrollmentService.initiateEnrollment(
+            user._id.toString(),
+            batch._id.toString()
+        );
+        await EnrollmentService.transitionEnrollment(
+            enrollment.enrollment._id.toString(),
+            EnrollmentStatus.Pending,
+            EnrollmentStatus.Active,
+            { id: user._id.toString(), role: 'learner' },
+            'Payment confirmed'
+        );
+
+        const extended = await EnrollmentService.extendAccess(
+            enrollment.enrollment._id.toString(),
+            new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
+            'Course extended',
+            { id: admin._id.toString(), role: 'admin' }
+        );
+
+        expect(extended).not.toBeNull();
+        expect(extended?.accessExtendedUntil).toBeDefined();
+    });
+
+    it('getStuckEnrollments identifies paid-not-active and active-no-payment', async () => {
+        const user1 = await createUser();
+        const user2 = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id, {
+            enrollmentEndDate: new Date('2027-01-01'),
+        });
+
+        // Paid but not active: success payment, enrollment still pending
+        const enrollment1 = await EnrollmentService.initiateEnrollment(
+            user1._id.toString(),
+            batch._id.toString()
+        );
+        await PaymentModel.create({
+            userId: user1._id,
+            batchId: batch._id,
+            enrollmentId: enrollment1.enrollment.enrollmentId,
+            transactionId: 'TXN-PAID-NO-ACTIVE',
+            amount: 5000,
+            currency: 'BDT',
+            status: Status.Success,
+            method: 'SSLCommerz',
+        });
+
+        // Active but no payment: active enrollment, no payment record
+        const enrollment2 = await EnrollmentService.initiateEnrollment(
+            user2._id.toString(),
+            batch._id.toString()
+        );
+        await EnrollmentService.transitionEnrollment(
+            enrollment2.enrollment._id.toString(),
+            EnrollmentStatus.Pending,
+            EnrollmentStatus.Active,
+            { id: user2._id.toString(), role: 'learner' },
+            'Payment confirmed'
+        );
+
+        const stuck = await EnrollmentService.getStuckEnrollments(batch._id.toString());
+
+        const paidNotActive = stuck.paidNotActive.map((e) => e._id.toString());
+        const activeNoPayment = stuck.activeNoPayment.map((e) => e._id.toString());
+
+        expect(paidNotActive).toContain(enrollment1.enrollment._id.toString());
+        expect(activeNoPayment).toContain(enrollment2.enrollment._id.toString());
     });
 });

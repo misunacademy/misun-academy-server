@@ -27,6 +27,7 @@ export const grantAccessSchema = z.object({
         email: z.string().email(),
         courseId: objectId,
         batchId: objectId,
+        reason: z.string().trim().min(1, 'Reason is required').max(500),
     }),
 });
 
