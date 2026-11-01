@@ -18,6 +18,7 @@ import { BootcampPurchaseModel } from '../modules/Bootcamp/bootcampPurchase.mode
 import { PaymentAttemptModel } from '../modules/Payment/paymentAttempt.model.js';
 import { EnrollmentStatus, Status, CertificateStatus, UserStatus } from '../types/common.js';
 import config from '../config/env.js';
+import * as Sentry from '@sentry/node';
 
 const DEFAULT_EXPIRY_HOURS = 48;
 
@@ -341,6 +342,23 @@ export const runEnrollmentInvariants = async (): Promise<InvariantResult[]> => {
     // ──────────────────────────────────────────────────────────────
     // Skipped — requires access log / hasPaidPurchase reverse lookup.
     // Placeholder: returning empty.
+
+    // Report any invariant violations to Sentry for alerting
+    const totalViolations = results.reduce((sum, r) => sum + r.count, 0);
+    if (totalViolations > 0) {
+        Sentry.captureMessage('Enrollment/Payment invariant violations detected', {
+            level: 'warning',
+            tags: { event: 'enrollment.invariant_violation' },
+            extra: {
+                totalViolations,
+                checks: results.filter(r => r.count > 0).map(r => ({
+                    checkId: r.checkId,
+                    description: r.description,
+                    count: r.count,
+                })),
+            },
+        });
+    }
 
     return results;
 };

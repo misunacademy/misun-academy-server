@@ -991,6 +991,14 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
                 },
                 'Payment anti-tamper mismatch between stored record and gateway validation'
             );
+            Sentry.captureMessage('Payment data mismatch', {
+                level: 'warning',
+                tags: { tran_id: locked.transactionId, event: 'payment.data_mismatch' },
+                extra: {
+                    expected: { amount: locked.amount, currency: locked.currency },
+                    received: { tran_id: validation.tran_id, amount: validation.amount, currency: validation.currency },
+                },
+            });
             throw new ApiError(StatusCodes.BAD_REQUEST, 'Payment data mismatch detected');
         }
 

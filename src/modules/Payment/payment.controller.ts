@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { Request, Response } from "express";
 import catchAsync from "../../utils/catchAsync.js";
 import sendResponse from "../../utils/sendResponse.js";
@@ -175,6 +176,11 @@ export const sslCommerzWebhook = catchAsync(
     });
 
     if (!isValid) {
+      Sentry.captureMessage('SSLCommerz webhook signature validation failed', {
+        level: 'warning',
+        tags: { tran_id, event: 'webhook_signature_failure' },
+        extra: { val_id, tran_id, sslStatus },
+      });
       return sendResponse(res, {
         statusCode: StatusCodes.UNAUTHORIZED,
         success: false,
@@ -194,6 +200,11 @@ export const sslCommerzWebhook = catchAsync(
       });
     } catch (error) {
       logger.error(error, "SSLCommerz webhook error");
+      Sentry.captureException(error as Error, {
+        level: 'error',
+        tags: { tran_id, event: 'webhook_processing_failure' },
+        extra: { val_id, error: error instanceof Error ? error.message : String(error) },
+      });
       throw error;
     }
   }
