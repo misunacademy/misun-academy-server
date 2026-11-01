@@ -11,7 +11,6 @@ export interface IPayment {
     status: Status;
     method: string;
     gatewayResponse?: any;
-    // idempotencyKey?: string;
     verifiedAt?: Date;
     verifiedBy?: Types.ObjectId;
     createdAt?: Date;
@@ -61,10 +60,6 @@ const paymentSchema = new Schema<IPayment>(
         gatewayResponse: {
             type: Schema.Types.Mixed,
         },
-        // idempotencyKey: {
-        //     type: String,
-        //     unique: true,
-        // },
         verifiedAt: {
             type: Date,
         },

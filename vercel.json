@@ -19,6 +19,10 @@
     {
       "path": "/api/v1/batches/auto-transition/run",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/v1/payments/maintenance/run",
+      "schedule": "30 0 * * *"
     }
   ]
 }

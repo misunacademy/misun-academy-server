@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/glo
 import mongoose from 'mongoose';
 import { connectTestDB, disconnectTestDB, clearTestDB } from '../helpers/db.js';
 import { createUser, createAdmin, createCourse, createBatch, createPayment } from '../helpers/factories.js';
-import { PaymentService } from '../../modules/Payment/payment.service.js';
+import { PaymentService, recordGatewayPaymentAttempt } from '../../modules/Payment/payment.service.js';
+import { PaymentModel } from '../../modules/Payment/payment.model.js';
 import { Status } from '../../types/common.js';
 
 let adminId: mongoose.Types.ObjectId;
@@ -97,5 +98,82 @@ describe('PaymentService.getPaymentHistory — student phone', () => {
 
     expect(result.data).toHaveLength(1);
     expect(result.data[0].student.phone).toBe('01700000000');
+  });
+});
+
+describe('recordGatewayPaymentAttempt — re-initiating an abandoned payment', () => {
+  it('supersedes the previous tran id without a conflicting-update error', async () => {
+    const user = await createUser();
+    const course = await createCourse(adminId);
+    const batch = await createBatch(course._id);
+    const enrollmentId = `MA-1${new Date().getFullYear()}00001`;
+
+    await createPayment(user._id, batch._id, {
+      enrollmentId,
+      transactionId: 'MA_FIRST_ATTEMPT',
+      status: Status.Pending,
+      gatewayResponse: {
+        submissions: [{ senderNumber: '01700000000', phonePeTransactionId: 'UTR1' }],
+      },
+    });
+
+    // Regression: the old implementation wrote `$set: { gatewayResponse }`
+    // together with `$addToSet: { 'gatewayResponse.supersededTranIds' }`,
+    // which MongoDB rejects (code 40) — every retry after the first click
+    // returned a generic 500.
+    await expect(
+      recordGatewayPaymentAttempt({
+        userId: user._id.toString(),
+        batch: batch as any,
+        enrollmentId,
+        transactionId: 'MA_SECOND_ATTEMPT',
+      })
+    ).resolves.toBeTruthy();
+
+    const payment = await PaymentModel.findOne({ enrollmentId }).lean();
+    expect(payment?.transactionId).toBe('MA_SECOND_ATTEMPT');
+    expect(payment?.status).toBe(Status.Pending);
+    expect((payment?.gatewayResponse as any)?.supersededTranIds).toEqual(['MA_FIRST_ATTEMPT']);
+    // The audit trail must survive a retry.
+    expect((payment?.gatewayResponse as any)?.submissions).toHaveLength(1);
+  });
+
+  it('keeps every superseded tran id across repeated retries', async () => {
+    const user = await createUser();
+    const course = await createCourse(adminId);
+    const batch = await createBatch(course._id);
+    const enrollmentId = `MA-1${new Date().getFullYear()}00002`;
+
+    for (const transactionId of ['MA_A', 'MA_B', 'MA_C']) {
+      await recordGatewayPaymentAttempt({
+        userId: user._id.toString(),
+        batch: batch as any,
+        enrollmentId,
+        transactionId,
+      });
+    }
+
+    const payment = await PaymentModel.findOne({ enrollmentId }).lean();
+    expect(payment?.transactionId).toBe('MA_C');
+    expect((payment?.gatewayResponse as any)?.supersededTranIds).toEqual(['MA_A', 'MA_B']);
+  });
+
+  it('creates the payment row on the first attempt', async () => {
+    const user = await createUser();
+    const course = await createCourse(adminId);
+    const batch = await createBatch(course._id);
+    const enrollmentId = `MA-1${new Date().getFullYear()}00003`;
+
+    await recordGatewayPaymentAttempt({
+      userId: user._id.toString(),
+      batch: batch as any,
+      enrollmentId,
+      transactionId: 'MA_ONLY_ATTEMPT',
+    });
+
+    const payment = await PaymentModel.findOne({ enrollmentId }).lean();
+    expect(payment?.transactionId).toBe('MA_ONLY_ATTEMPT');
+    expect(payment?.amount).toBe(batch.price);
+    expect((payment?.gatewayResponse as any)?.supersededTranIds).toBeUndefined();
   });
 });

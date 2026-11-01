@@ -145,6 +145,7 @@ const updateProfile = async (userId: string, updateData: any) => {
     {
       $set: {
         ...profileData,
+        ...(address !== undefined && { address }),
         ...(enrollments !== undefined && { enrollments: enrollmentRefs }),
       },
     },
