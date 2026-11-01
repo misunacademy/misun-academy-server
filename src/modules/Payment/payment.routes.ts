@@ -3,7 +3,7 @@ import { PaymentController } from './payment.controller.js';
 import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 import validateRequest from '../../middlewares/validateRequest.js';
 import { allowCronSecret } from '../../middlewares/cronAuth.js';
-import { verifyPaymentSchema, updatePaymentStatusSchema, paymentHistoryQuerySchema } from '../../validations/payment.validation.js';
+import { verifyPaymentSchema, updatePaymentStatusSchema, reVerifyPaymentSchema, paymentHistoryQuerySchema } from '../../validations/payment.validation.js';
 
 const router = express.Router();
 
@@ -53,6 +53,14 @@ router.post(
     requireAdmin,
     validateRequest(verifyPaymentSchema),
     PaymentController.verifyManualPayment
+);
+
+router.post(
+    '/:tran_id/re-verify',
+    requireAuth,
+    requireAdmin,
+    validateRequest(reVerifyPaymentSchema),
+    PaymentController.reVerifyPaymentWithGateway
 );
 
 router.put(

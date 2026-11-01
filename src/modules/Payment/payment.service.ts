@@ -1496,6 +1496,209 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
     }
 };
 
+// ─── ADMIN RE-VERIFY WITH GATEWAY ───
+
+/**
+ * Admin-initiated re-verification of a payment against the gateway.
+ *
+ * Never trusts the admin's chosen status: queries SSLCommerz authoritatively
+ * and applies whatever the gateway reports (subject to amount/currency/tran_id
+ * comparison against the stored record). On verified Success, activates the
+ * enrollment through the same guarded path as webhook finalization. On gateway
+ * failure, marks the payment Failed. On transport failure, throws 503 and
+ * leaves state untouched for retry.
+ *
+ * Every outcome is compare-and-set on the current payment status, transactional,
+ * with status history, audit log, and Sentry alert.
+ */
+const reVerifyPaymentWithGateway = async (
+    transactionId: string,
+    adminId: string,
+    reason: string,
+    queryGateway: any = querySSLCommerzTransaction
+) => {
+    if (!reason?.trim()) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Reason is required for gateway re-verification');
+    }
+
+    const payment = await PaymentModel.findOne({ transactionId });
+    if (!payment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Payment not found');
+    }
+
+    // Already terminal — no state change
+    if (payment.status === Status.Success || payment.status === Status.Refunded) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            `Payment is already ${payment.status}; cannot re-verify`
+        );
+    }
+
+    const gatewayResult = await queryGateway(transactionId);
+    if (!gatewayResult) {
+        Sentry.captureMessage('Gateway re-verify transport failure', {
+            level: 'warning',
+            tags: { transactionId, adminId, reason: reason.trim() },
+        });
+        throw new ApiError(
+            StatusCodes.SERVICE_UNAVAILABLE,
+            'Gateway unreachable — payment state unchanged, retry later'
+        );
+    }
+
+    const gatewayTranId = String(gatewayResult.tran_id || transactionId);
+    const gatewayStatus = String(gatewayResult.status || '').toUpperCase();
+    const gatewayAmount = Number(gatewayResult.amount);
+    const gatewayCurrency = String(gatewayResult.currency || '');
+
+    // Anti-tamper: gateway data must match stored record
+    if (
+        gatewayTranId !== transactionId ||
+        gatewayAmount !== Number(payment.amount) ||
+        gatewayCurrency !== payment.currency
+    ) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'Gateway data mismatch with stored payment record'
+        );
+    }
+
+    const session = await mongoose.startSession();
+    let notify: PaymentNotifyIntent | null = null;
+
+    try {
+        await session.startTransaction();
+
+        const locked = await PaymentModel.findOne({ transactionId }).session(session);
+        if (!locked) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Payment not found');
+        }
+
+        // Compare-and-set: only act on non-terminal statuses
+        if (locked.status === Status.Success || locked.status === Status.Refunded) {
+            await session.commitTransaction();
+            return { payment: locked, enrollment: null };
+        }
+
+        const isGatewaySuccess = gatewayStatus === 'VALID' || gatewayStatus === 'VALIDATED';
+        const isGatewayFailure =
+            gatewayStatus === 'FAILED' ||
+            gatewayStatus === 'FAIL' ||
+            gatewayStatus === 'FAILED_CARD' ||
+            gatewayStatus === 'INVALID_TRANSACTION' ||
+            gatewayStatus === 'CANCELLED' ||
+            gatewayStatus === 'CANCELED' ||
+            gatewayStatus === 'CANCEL';
+
+        if (isGatewaySuccess) {
+            locked.status = Status.Success;
+            locked.gatewayResponse = {
+                ...locked.gatewayResponse,
+                val_id: gatewayResult.val_id || gatewayResult.valId || null,
+                status: gatewayStatus,
+                amount: gatewayAmount,
+                currency: gatewayCurrency,
+                bank_tran_id: gatewayResult.bank_tran_id,
+                tran_date: gatewayResult.tran_date,
+                processedAt: new Date(),
+                reVerifiedBy: adminId,
+                reVerifiedAt: new Date(),
+                reVerifyReason: reason.trim(),
+            };
+            await locked.save({ session });
+
+            if (locked.enrollmentId) {
+                const result = await activateEnrollmentForPayment({
+                    payment: locked,
+                    enrollmentId: locked.enrollmentId,
+                    session,
+                    context: 'admin gateway re-verify',
+                    initializeModules: false,
+                    actorType: 'admin',
+                    actorId: adminId,
+                });
+                notify = result.notify;
+            }
+
+            logger.info(
+                {
+                    event: 'payment.reverify_success',
+                    tran_id: transactionId,
+                    enrollmentId: locked.enrollmentId,
+                    adminId,
+                    amount: locked.amount,
+                    currency: locked.currency,
+                },
+                'Admin re-verify: gateway confirmed payment success'
+            );
+        } else if (isGatewayFailure) {
+            locked.status = Status.Failed;
+            locked.gatewayResponse = {
+                ...locked.gatewayResponse,
+                status: gatewayStatus,
+                amount: gatewayAmount,
+                currency: gatewayCurrency,
+                processedAt: new Date(),
+                reVerifiedBy: adminId,
+                reVerifiedAt: new Date(),
+                reVerifyReason: reason.trim(),
+            };
+            await locked.save({ session });
+
+            if (locked.enrollmentId) {
+                notify = await failEnrollment(locked, session, 'Gateway re-verify reported failure');
+            }
+
+            logger.warn(
+                {
+                    event: 'payment.reverify_failure',
+                    tran_id: transactionId,
+                    enrollmentId: locked.enrollmentId,
+                    adminId,
+                    gatewayStatus,
+                },
+                'Admin re-verify: gateway reported payment failure'
+            );
+        }
+        // Gateway pending/review/other: leave payment state unchanged
+
+        await session.commitTransaction();
+        await flushPaymentNotify(notify);
+
+        Sentry.captureMessage('Admin-initiated payment re-verify', {
+            level: 'info',
+            tags: { paymentStatus: locked.status, transactionId },
+            extra: { adminId, reason: reason.trim(), gatewayStatus },
+        });
+
+        await recordAudit({
+            actor: adminId,
+            action: 'payment.admin_reverify',
+            targetType: 'Payment',
+            targetId: locked._id?.toString(),
+            metadata: {
+                transactionId,
+                from: payment.status,
+                to: locked.status,
+                gatewayStatus,
+                reason: reason.trim(),
+            },
+        });
+
+        return {
+            payment: locked,
+            enrollment: locked.enrollmentId
+                ? await EnrollmentModel.findOne({ enrollmentId: locked.enrollmentId }).lean()
+                : null,
+        };
+    } catch (error) {
+        await session.abortTransaction();
+        throw error;
+    } finally {
+        session.endSession();
+    }
+};
+
 // ─── SSLCOMMERZ WEBHOOK SIGNATURE VERIFICATION ───
 
 const verifyWebhookSignature = (params: {
@@ -1596,6 +1799,7 @@ export const PaymentService = {
     getMyPayments,
     initiateSSLCommerzPayment,
     verifyManualPayment,
+    reVerifyPaymentWithGateway,
     verifyWebhookSignature,
     getStatusCallbackKey,
     mapSslGatewayStatus,

@@ -5,7 +5,6 @@ import { PaymentService } from "./payment.service.js";
 import { runPaymentMaintenance } from "./paymentMaintenance.service.js";
 import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
-import { Status } from "../../types/common.js";
 import env from "../../config/env.js";
 import { logger } from "../../config/logger.js";
 
@@ -31,9 +30,19 @@ const getPaymentHistory = catchAsync(async (req: Request, res: Response) => {
 const updatePaymentWithEnrollStatus = catchAsync(async (req: Request, res: Response) => {
   const tran_id = req.params.tran_id as string;
   const status = req.body.status;
-  if (!tran_id || !status) throw new ApiError(StatusCodes.BAD_REQUEST, "Bad Request!")
+  const adminId = req.user?.id;
+  const reason = req.body.reason;
+  if (!tran_id || !status || !adminId || !reason) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, "Payment status and reason are required");
+  }
 
-  const result = await PaymentService.updatePaymentWithEnrollStatus(tran_id, status);
+  const result = await PaymentService.updatePaymentWithEnrollStatus(
+    tran_id,
+    status,
+    undefined,
+    adminId,
+    reason
+  );
 
   sendResponse(res, {
     statusCode: StatusCodes.OK,
@@ -75,7 +84,6 @@ const getMyPayments = catchAsync(async (req: Request, res: Response) => {
 const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
   const transactionId = (req.query.t || req.body?.tran_id) as string;
   const valId = (req.body?.val_id || req.query?.val_id) as string | undefined;
-  const callbackStatus = PaymentService.mapSslGatewayStatus((req.body?.status || req.query?.status) as string | undefined);
 
   if (!transactionId) {
     throw new ApiError(StatusCodes.BAD_REQUEST, "Transaction ID is required");
@@ -94,21 +102,9 @@ const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
     if (!callbackKey || callbackKey !== expectedKey) {
       throw new ApiError(StatusCodes.FORBIDDEN, "Invalid status callback key");
     }
-    if (callbackStatus) {
-      try {
-        const callbackPayload = Object.keys(req.body || {}).length > 0 ? req.body : req.query;
-
-        // Never auto-fail on a bare status redirect with no explicit gateway
-        // status. A page refresh / crawler GET must be read-only; only an
-        // explicit failed/cancelled gateway status may mutate.
-        if (callbackStatus !== Status.Pending) {
-          await PaymentService.updatePaymentWithEnrollStatus(transactionId, callbackStatus, callbackPayload);
-        }
-      } catch (error) {
-        logger.error(error, 'Failed to update payment from status callback');
-      }
-    }
-    // No val_id + no explicit gateway status => read-only redirect below.
+    // Without val_id this is only a browser redirect. Do not trust status
+    // query parameters to mutate payment state; reconciliation handles
+    // abandoned gateway attempts authoritatively.
   }
 
   const result = await PaymentService.checkPaymentStatus(transactionId);
@@ -226,6 +222,25 @@ const verifyManualPayment = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const reVerifyPaymentWithGateway = catchAsync(async (req: Request, res: Response) => {
+  const { tran_id } = req.params as { tran_id: string };
+  const { reason } = req.body;
+  const adminId = req.user?.id;
+
+  if (!adminId) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'Admin authentication required');
+  }
+
+  const result = await PaymentService.reVerifyPaymentWithGateway(tran_id, adminId, reason);
+
+  sendResponse(res, {
+    statusCode: StatusCodes.OK,
+    success: true,
+    message: 'Payment re-verified against gateway',
+    data: result,
+  });
+});
+
 /**
  * Cron / admin: settle payments captured at the gateway but never recorded
  * locally, then expire genuinely abandoned enrollments. Idempotent — safe to
@@ -251,5 +266,6 @@ export const PaymentController = {
   getMyPayments,
   sslCommerzWebhook,
   verifyManualPayment,
+  reVerifyPaymentWithGateway,
   runMaintenance,
 }

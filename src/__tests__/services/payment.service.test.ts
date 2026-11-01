@@ -1,10 +1,15 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, jest } from '@jest/globals';
 import mongoose from 'mongoose';
+import axios from 'axios';
 import { connectTestDB, disconnectTestDB, clearTestDB } from '../helpers/db.js';
 import { createUser, createAdmin, createCourse, createBatch, createPayment } from '../helpers/factories.js';
 import { PaymentService, recordGatewayPaymentAttempt } from '../../modules/Payment/payment.service.js';
 import { PaymentModel } from '../../modules/Payment/payment.model.js';
+import { PaymentAttemptModel } from '../../modules/Payment/paymentAttempt.model.js';
+import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
+import { BatchModel } from '../../modules/Batch/batch.model.js';
 import { Status } from '../../types/common.js';
+import { EnrollmentStatus } from '../../types/common.js';
 
 let adminId: mongoose.Types.ObjectId;
 
@@ -69,6 +74,33 @@ describe('PaymentService.getMyPayments', () => {
     expect(payments[0].status).toBe(Status.Pending);
     expect(payments[1].status).toBe(Status.Success);
   });
+
+  it('hides failed and cancelled gateway attempts from the learner', async () => {
+    const user = await createUser();
+    const course = await createCourse(adminId);
+    const batch = await createBatch(course._id);
+
+    await createPayment(user._id, batch._id, {
+      status: Status.Success,
+      transactionId: 'MY-HIDDEN-SUCCESS',
+      enrollmentId: 'MY-HIDDEN-1',
+    });
+    await createPayment(user._id, batch._id, {
+      status: Status.Failed,
+      transactionId: 'MY-HIDDEN-FAILED',
+      enrollmentId: 'MY-HIDDEN-2',
+    });
+    await createPayment(user._id, batch._id, {
+      status: Status.Cancel,
+      transactionId: 'MY-HIDDEN-CANCEL',
+      enrollmentId: 'MY-HIDDEN-3',
+    });
+
+    const payments = await PaymentService.getMyPayments(user._id.toString());
+
+    expect(payments).toHaveLength(1);
+    expect(payments[0].status).toBe(Status.Success);
+  });
 });
 
 describe('PaymentService.checkPaymentStatus', () => {
@@ -84,6 +116,39 @@ describe('PaymentService.checkPaymentStatus', () => {
 
     expect(result).toBeDefined();
     expect(result.payment.status).toBe(Status.Success);
+  });
+});
+
+describe('PaymentService.verifyPaymentForCurrentUser', () => {
+  it('verifies a successful payment through a superseded transaction id', async () => {
+    const user = await createUser();
+    const course = await createCourse(adminId);
+    const batch = await createBatch(course._id);
+    const enrollment = await EnrollmentModel.create({
+      userId: user._id,
+      batchId: batch._id,
+      enrollmentId: 'MA-1202600001',
+      status: EnrollmentStatus.Active,
+    });
+
+    await createPayment(user._id, batch._id, {
+      enrollmentId: enrollment.enrollmentId,
+      transactionId: 'MA_CURRENT_ATTEMPT',
+      status: Status.Success,
+      gatewayResponse: {
+        paidTranId: 'MA_OLD_ATTEMPT',
+        supersededTranIds: ['MA_OLD_ATTEMPT'],
+      },
+    });
+
+    const result = await PaymentService.verifyPaymentForCurrentUser(
+      'MA_OLD_ATTEMPT',
+      user._id.toString()
+    );
+
+    expect(result.verified).toBe(true);
+    expect(result.paymentStatus).toBe(Status.Success);
+    expect(result.transactionId).toBe('MA_CURRENT_ATTEMPT');
   });
 });
 
@@ -126,6 +191,7 @@ describe('recordGatewayPaymentAttempt — re-initiating an abandoned payment', (
         userId: user._id.toString(),
         batch: batch as any,
         enrollmentId,
+        enrollmentRef: new mongoose.Types.ObjectId(),
         transactionId: 'MA_SECOND_ATTEMPT',
       })
     ).resolves.toBeTruthy();
@@ -136,6 +202,11 @@ describe('recordGatewayPaymentAttempt — re-initiating an abandoned payment', (
     expect((payment?.gatewayResponse as any)?.supersededTranIds).toEqual(['MA_FIRST_ATTEMPT']);
     // The audit trail must survive a retry.
     expect((payment?.gatewayResponse as any)?.submissions).toHaveLength(1);
+    const attempts = await PaymentAttemptModel.find({
+      transactionId: { $in: ['MA_SECOND_ATTEMPT'] },
+    }).lean();
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.status).toBe(Status.Pending);
   });
 
   it('keeps every superseded tran id across repeated retries', async () => {
@@ -149,6 +220,7 @@ describe('recordGatewayPaymentAttempt — re-initiating an abandoned payment', (
         userId: user._id.toString(),
         batch: batch as any,
         enrollmentId,
+        enrollmentRef: new mongoose.Types.ObjectId(),
         transactionId,
       });
     }
@@ -168,6 +240,7 @@ describe('recordGatewayPaymentAttempt — re-initiating an abandoned payment', (
       userId: user._id.toString(),
       batch: batch as any,
       enrollmentId,
+      enrollmentRef: new mongoose.Types.ObjectId(),
       transactionId: 'MA_ONLY_ATTEMPT',
     });
 
@@ -175,5 +248,289 @@ describe('recordGatewayPaymentAttempt — re-initiating an abandoned payment', (
     expect(payment?.transactionId).toBe('MA_ONLY_ATTEMPT');
     expect(payment?.amount).toBe(batch.price);
     expect((payment?.gatewayResponse as any)?.supersededTranIds).toBeUndefined();
+  });
+});
+
+describe('PaymentService.updatePaymentWithEnrollStatus — guarded activation', () => {
+  it('rejects success because the generic admin transition cannot mint paid state', async () => {
+    const user = await createUser();
+    const course = await createCourse(adminId);
+    const batch = await createBatch(course._id);
+    const transactionId = `TXN-ADMIN-SUCCESS-${Date.now()}`;
+
+    await createPayment(user._id, batch._id, {
+      transactionId,
+      status: Status.Pending,
+    });
+
+    await expect(
+      PaymentService.updatePaymentWithEnrollStatus(
+        transactionId,
+        Status.Success,
+        undefined,
+        adminId.toString(),
+        'manual status change'
+      )
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('recovers an expired enrollment after verified payment', async () => {
+    const user = await createUser();
+    const course = await createCourse(adminId);
+    const batch = await createBatch(course._id);
+    const enrollmentId = `MA-EXPIRED-${Date.now()}`;
+    const transactionId = `TXN-EXPIRED-${Date.now()}`;
+
+    await EnrollmentModel.create({
+      userId: user._id,
+      batchId: batch._id,
+      enrollmentId,
+      status: EnrollmentStatus.Expired,
+    });
+    await createPayment(user._id, batch._id, {
+      enrollmentId,
+      transactionId,
+      status: Status.Pending,
+    });
+
+    jest.spyOn(axios, 'get').mockResolvedValue({
+      data: {
+        status: 'VALID',
+        tran_id: transactionId,
+        amount: 5000,
+        currency: 'BDT',
+      },
+    } as any);
+    await PaymentService.finalizeSSLCommerzPayment(transactionId, 'VAL-EXPIRED');
+
+    const enrollment = await EnrollmentModel.findOne({ enrollmentId }).lean();
+    expect(enrollment?.status).toBe(EnrollmentStatus.Active);
+    expect(enrollment?.statusChangeReason).toMatch(/recovered/i);
+  });
+
+  it('increments the batch once when duplicate payment updates race', async () => {
+    const user = await createUser();
+    const course = await createCourse(adminId);
+    const batch = await createBatch(course._id);
+    const enrollmentId = `MA-RACE-${Date.now()}`;
+    const transactionId = `TXN-RACE-${Date.now()}`;
+
+    await EnrollmentModel.create({
+      userId: user._id,
+      batchId: batch._id,
+      enrollmentId,
+      status: EnrollmentStatus.Expired,
+    });
+    await createPayment(user._id, batch._id, {
+      enrollmentId,
+      transactionId,
+      status: Status.Pending,
+    });
+
+    jest.spyOn(axios, 'get').mockResolvedValue({
+      data: {
+        status: 'VALID',
+        tran_id: transactionId,
+        amount: 5000,
+        currency: 'BDT',
+      },
+    } as any);
+    const results = await Promise.allSettled([
+      PaymentService.finalizeSSLCommerzPayment(transactionId, 'VAL-RACE'),
+      PaymentService.finalizeSSLCommerzPayment(transactionId, 'VAL-RACE'),
+    ]);
+
+    expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
+    const persistedBatch = await BatchModel.findById(batch._id).lean();
+    const enrollment = await EnrollmentModel.findOne({ enrollmentId }).lean();
+    expect(persistedBatch?.currentEnrollment).toBe(1);
+    expect(enrollment?.status).toBe(EnrollmentStatus.Active);
+  });
+
+  it('does not activate a refunded enrollment when a payment is reported successful', async () => {
+    const user = await createUser();
+    const course = await createCourse(adminId);
+    const batch = await createBatch(course._id);
+    const enrollmentId = `MA-REFUNDED-${Date.now()}`;
+
+    await EnrollmentModel.create({
+      userId: user._id,
+      batchId: batch._id,
+      enrollmentId,
+      status: EnrollmentStatus.Refunded,
+    });
+
+    const transactionId = `TXN-REFUNDED-${Date.now()}`;
+    await createPayment(user._id, batch._id, {
+      enrollmentId,
+      transactionId,
+      status: Status.Pending,
+    });
+
+    jest.spyOn(axios, 'get').mockResolvedValue({
+      data: {
+        status: 'VALID',
+        tran_id: transactionId,
+        amount: 5000,
+        currency: 'BDT',
+      },
+    } as any);
+    await PaymentService.finalizeSSLCommerzPayment(transactionId, 'VAL-REFUNDED');
+
+    const payment = await PaymentModel.findOne({ enrollmentId }).lean();
+    const enrollment = await EnrollmentModel.findOne({ enrollmentId }).lean();
+
+    expect(payment?.status).toBe(Status.Review);
+    expect(enrollment?.status).toBe(EnrollmentStatus.Refunded);
+  });
+
+  describe('reVerifyPaymentWithGateway — admin re-verify never trusts chosen status', () => {
+    const mockGatewayQuery: any = jest.fn();
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockGatewayQuery.mockReset();
+    });
+
+    it('activates enrollment when gateway confirms Success with matching amount/currency/tran_id', async () => {
+      const user = await createUser();
+      const course = await createCourse(adminId);
+      const batch = await createBatch(course._id);
+      const enrollmentId = `MA-REVERIFY-${Date.now()}`;
+      const transactionId = `TXN-REVERIFY-${Date.now()}`;
+
+      await EnrollmentModel.create({
+        userId: user._id,
+        batchId: batch._id,
+        enrollmentId,
+        status: EnrollmentStatus.Pending,
+      });
+      await createPayment(user._id, batch._id, {
+        enrollmentId,
+        transactionId,
+        amount: 5000,
+        currency: 'BDT',
+        status: Status.Pending,
+      });
+
+      mockGatewayQuery.mockResolvedValue({
+        tran_id: transactionId,
+        status: 'VALID',
+        amount: 5000,
+        currency: 'BDT',
+      } as any);
+
+      const result = await PaymentService.reVerifyPaymentWithGateway(
+        transactionId,
+        adminId.toString(),
+        'Customer claims payment was deducted',
+        mockGatewayQuery as any
+      );
+
+      expect(result.payment.status).toBe(Status.Success);
+      const enrollment = await EnrollmentModel.findOne({ enrollmentId }).lean();
+      expect(enrollment?.status).toBe(EnrollmentStatus.Active);
+    });
+
+    it('refuses amount mismatch — no state change', async () => {
+      const user = await createUser();
+      const course = await createCourse(adminId);
+      const batch = await createBatch(course._id);
+      const transactionId = `TXN-MISMATCH-${Date.now()}`;
+
+      await createPayment(user._id, batch._id, {
+        transactionId,
+        amount: 5000,
+        currency: 'BDT',
+        status: Status.Pending,
+      });
+
+      mockGatewayQuery.mockResolvedValue({
+        tran_id: transactionId,
+        status: 'VALID',
+        amount: 99999,
+        currency: 'BDT',
+      } as any);
+
+      await expect(
+        PaymentService.reVerifyPaymentWithGateway(
+          transactionId,
+          adminId.toString(),
+          'Admin re-verify',
+          mockGatewayQuery as any
+        )
+      ).rejects.toMatchObject({ statusCode: 400 });
+
+      const payment = await PaymentModel.findOne({ transactionId }).lean();
+      expect(payment?.status).toBe(Status.Pending);
+    });
+
+    it('marks payment Failed when gateway reports Failed', async () => {
+      const user = await createUser();
+      const course = await createCourse(adminId);
+      const batch = await createBatch(course._id);
+      const enrollmentId = `MA-REVERIFY-FAIL-${Date.now()}`;
+      const transactionId = `TXN-REVERIFY-FAIL-${Date.now()}`;
+
+      await EnrollmentModel.create({
+        userId: user._id,
+        batchId: batch._id,
+        enrollmentId,
+        status: EnrollmentStatus.Pending,
+      });
+      await createPayment(user._id, batch._id, {
+        enrollmentId,
+        transactionId,
+        amount: 5000,
+        currency: 'BDT',
+        status: Status.Pending,
+      });
+
+      mockGatewayQuery.mockResolvedValue({
+        tran_id: transactionId,
+        status: 'FAILED',
+        amount: 5000,
+        currency: 'BDT',
+      } as any);
+
+      const result = await PaymentService.reVerifyPaymentWithGateway(
+        transactionId,
+        adminId.toString(),
+        'Gateway reports failure',
+        mockGatewayQuery as any
+      );
+
+      expect(result.payment.status).toBe(Status.Failed);
+      const enrollment = await EnrollmentModel.findOne({ enrollmentId }).lean();
+      expect(enrollment?.status).toBe(EnrollmentStatus.PaymentFailed);
+    });
+
+    it('throws on gateway transport failure — payment stays pending', async () => {
+      const user = await createUser();
+      const course = await createCourse(adminId);
+      const batch = await createBatch(course._id);
+      const transactionId = `TXN-TRANSPORT-${Date.now()}`;
+
+      await createPayment(user._id, batch._id, {
+        transactionId,
+        amount: 5000,
+        currency: 'BDT',
+        status: Status.Pending,
+      });
+
+      mockGatewayQuery.mockResolvedValue(null);
+
+      await expect(
+        PaymentService.reVerifyPaymentWithGateway(
+          transactionId,
+          adminId.toString(),
+          'Transport test',
+          mockGatewayQuery as any
+        )
+      ).rejects.toMatchObject({ statusCode: 503 });
+
+      const payment = await PaymentModel.findOne({ transactionId }).lean();
+      expect(payment?.status).toBe(Status.Pending);
+    });
   });
 });
