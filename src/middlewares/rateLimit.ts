@@ -53,11 +53,29 @@ export const createRateLimiter = (options: RateLimiterOptions) => {
                 }
                 return next();
             } catch (error) {
-                // Fail-open (availability), but LOUD: a silent Redis outage
-                // must not silently disable all rate limiting.
-                logger.error(error, `Rate limiter backend failure (${prefix}) - allowing request`);
+                // Fail-closed in production: a silent Redis outage must not
+                // silently disable all rate limiting. In development/testing
+                // we fall back to allowing the request so local dev isn't
+                // broken by a missing Redis.
+                logger.error(error, `Rate limiter backend failure (${prefix})`);
+                if (env.NODE_ENV === 'production') {
+                    return res.status(503).json({
+                        success: false,
+                        message: 'Rate limiting temporarily unavailable',
+                    });
+                }
                 return next();
             }
+        };
+    }
+
+    // In production without Redis, fail closed as well
+    if (env.NODE_ENV === 'production') {
+        return async (_req: Request, res: Response, _next: NextFunction) => {
+            return res.status(503).json({
+                success: false,
+                message: 'Rate limiting temporarily unavailable',
+            });
         };
     }
 

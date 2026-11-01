@@ -1,9 +1,11 @@
 import Groq from 'groq-sdk';
+import { Types } from 'mongoose';
 import env from '../../config/env.js';
 import { logger as pinoLogger } from '../../config/logger.js';
 import { ChatMessage } from './chat.interface.js';
 import { BatchModel } from '../Batch/batch.model.js';
 import { BatchStatus } from '../../types/common.js';
+import { ChatMessageModel } from './chatMessage.model.js';
 
 // ─────────────────────────────────────────────
 // Types
@@ -55,6 +57,14 @@ const CONFIG = {
   RETRY_ATTEMPTS: 3,
   RETRY_BASE_DELAY_MS: 500,
   REQUEST_TIMEOUT_MS: 30_000,
+} as const;
+
+// Per-user quotas and cost caps
+const CHAT_QUOTA = {
+  DAILY_TOKEN_CAP: 5000,   // max total tokens per user per day
+  DAILY_COST_CAP_USD: 1.0, // max cost per user per day (USD)
+  COST_PER_1K_TOKENS: 0.0007, // approx Groq compound-mini pricing
+  RETENTION_DAYS: 30,      // conversation retention window
 } as const;
 
 // ─────────────────────────────────────────────
@@ -154,6 +164,83 @@ function sanitizeForPrompt(text: string): string {
     .slice(0, 200);                // hard length cap per field
 }
 
+/** Detect prompt-injection attempts (ignore instructions, system override, etc.) */
+function detectPromptInjection(content: string): boolean {
+  const injectionPatterns = [
+    /ignore\s+(previous|all|above|prior)\s+(instructions|rules|guidelines|prompt)/i,
+    /disregard\s+(previous|all|above|prior)\s+(instructions|rules|guidelines|prompt)/i,
+    /forget\s+(everything|all|above|previous|prior)/i,
+    /you\s+are\s+now\s+(a|an)\s+/i,           // role override
+    /system\s*:\s*(ignore|disregard|forget)/i,
+    /jailbreak/i,
+    /dan\s+mode/i,
+    /developer\s+mode/i,
+    /output\s+initialization/i,
+    /reveal\s+(system|prompt|instructions)/i,
+    /print\s+(system|prompt|instructions)/i,
+    /leak\s+(system|prompt|instructions)/i,
+  ];
+  return injectionPatterns.some((p) => p.test(content));
+}
+
+/** Compute estimated USD cost from token count */
+function estimateCost(totalTokens: number): number {
+  return (totalTokens / 1000) * CHAT_QUOTA.COST_PER_1K_TOKENS;
+}
+
+/** Get daily token usage for a user (last 24 hours) */
+async function getDailyTokenUsage(userId: Types.ObjectId): Promise<{ tokens: number; cost: number }> {
+  const startOfDay = new Date();
+  startOfDay.setUTCHours(0, 0, 0, 0);
+
+  const messages = await ChatMessageModel.find({
+    userId,
+    createdAt: { $gte: startOfDay },
+  }).lean();
+
+  const tokens = messages.reduce((sum, m) => sum + (m.totalTokens || 0), 0);
+  const cost = estimateCost(tokens);
+  return { tokens, cost };
+}
+
+/** Store a user + assistant message pair */
+async function storeConversation(
+  userId: Types.ObjectId,
+  conversationId: string,
+  userMessage: string,
+  assistantReply: string,
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number }
+): Promise<void> {
+  await ChatMessageModel.create([
+    {
+      userId,
+      conversationId,
+      role: 'user',
+      content: userMessage,
+      promptTokens: usage.promptTokens,
+      completionTokens: 0,
+      totalTokens: usage.promptTokens,
+    },
+    {
+      userId,
+      conversationId,
+      role: 'assistant',
+      content: assistantReply,
+      promptTokens: 0,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.completionTokens,
+    },
+  ]);
+}
+
+/** Purge conversations older than retention window */
+export async function purgeOldConversations(): Promise<number> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - CHAT_QUOTA.RETENTION_DAYS);
+  const result = await ChatMessageModel.deleteMany({ createdAt: { $lt: cutoff } });
+  return result.deletedCount ?? 0;
+}
+
 function createChatError(message: string, code: string, statusCode: number): ChatError {
   const err = new Error(message) as ChatError;
   err.code = code;
@@ -179,7 +266,6 @@ const logger = {
                     : err ? { err } : {}),
                 ...flatten(meta),
             },
-            msg
         ),
 };
 
@@ -322,7 +408,7 @@ ${batchContext}
 6. **ক্লাসের সময়সূচী:** ভর্তি শেষে ক্লাস শুরু হয় ব্যাচের startDate থেকে এবং endDate পর্যন্ত চলে
 
 ## পেমেন্ট অপশন
-### SSLCommerz (অটোমেটিক গেটওয়ে)
+### SSLCommerz (অটোমেটিক গেটও évêque)
 SSLCommerz-এর মাধ্যমে নিম্নলিখিত পদ্ধতিতে পেমেন্ট নেওয়া হয়:
 - **বিকাশ (bKash)**
 - **নগদ (Nagad)**
@@ -333,7 +419,7 @@ SSLCommerz-এর মাধ্যমে নিম্নলিখিত পদ্
 পেমেন্ট সম্পূর্ণ নিরাপদ এবং SSLCommerz-এর মাধ্যমে এনক্রিপ্টেড।
 
 ### ম্যানুয়াল পেমেন্ট (বিকাশ/নগদ/রকেট)
-- **PhonePe (ভারতীয় শিক্ষার্থীদের জন্য):** +91 9123944746 (Khokon Sarkar) — মূল্য **ভারতীয় রুপিতে (₹)** পরিশোধ করতে হবে (প্রতিটি ব্যাচের ₹ মূল্য উপরে "আসন্ন ব্যাচ সমূহ" অংশে দেখুন)
+- **PhonePe (ভারতীয় শিক্ষার্থীদের জন্য):** [ফোন নম্বর] (Khokon Sarkar) — মূল্য **ভারতীয় রুপিতে (₹)** পরিশোধ করতে হবে (প্রতিটি ব্যাচের ₹ মূল্য উপরে "আসন্ন ব্যাচ সমূহ" অংশে দেখুন)
 - ম্যানুয়াল পেমেন্ট করলে প্রশাসক ভেরিফাই করে দিলে এনরোলমেন্ট অ্যাক্টিভেট হবে
 
 ## রিফান্ড নীতি (সর্বশেষ আপডেট: ১৯ জুলাই, ২০২৫)
@@ -343,7 +429,7 @@ SSLCommerz-এর মাধ্যমে নিম্নলিখিত পদ্
 - সার্ভিস চার্জ বা পেমেন্ট গেটওয়ে ফি রিফান্ডযোগ্য নয়
 
 **রিফান্ড রিকোয়েস্ট করার পদ্ধতি:**
-misunacademybd@gmail.com-এ ইমেইল করুন এবং নিচের তথ্যগুলো পাঠান:
+[সাপোর্ট ইমেইল]-এ ইমেইল করুন এবং নিচের তথ্যগুলো পাঠান:
 1. আপনার নাম ও ইমেইল ঠিকানা (যা দিয়ে রেজিস্ট্রেশন করেছেন)
 2. কোর্সের নাম
 3. পেমেন্টের তারিখ ও মাধ্যম
@@ -373,7 +459,7 @@ misunacademybd@gmail.com-এ ইমেইল করুন এবং নিচে
 4. **প্রশ্ন:** আমি কিভাবে Misun Academy-এ এনরোল করব?
    **উত্তর:** পছন্দের কোর্স ও ব্যাচ নির্বাচন করুন, তারপর SSLCommerz-এর মাধ্যমে পেমেন্ট সম্পন্ন করুন।
 5. **প্রশ্ন:** Misun Academy-এর সাথে কিভাবে যোগাযোগ করব?
-   **উত্তর:** ইমেইল misunacademybd@gmail.com বা ফোন +88 01778371211-এ যোগাযোগ করুন।
+   **উত্তর:** [সাপোর্ট ইমেইল] বা [ফোন নম্বর]-এ যোগাযোগ করুন।
 6. **প্রশ্ন:** লাইভ ক্লাসের সময় কখন?
    **উত্তর:** মেইন ক্লাস শনিবার ও বুধবার রাত ৯-১১টা। প্রব্লেম সল্ভিং ক্লাস রবিবার ও বৃহস্পতিবার রাত ৯-১১টা। শুক্রবার বাদে প্রতিদিন ৩টি লাইভ সাপোর্ট ক্লাস থাকে।
 7. **প্রশ্ন:** এইখানে জয়েন করলে আমি কি জব পাবো?
@@ -381,7 +467,7 @@ misunacademybd@gmail.com-এ ইমেইল করুন এবং নিচে
 8. **প্রশ্ন:** ডিজাইন সেক্টর কি AI শেষ করে দিবে?
    **উত্তর:** Creative কোনো সেক্টরই AI নষ্ট করতে পারবে না — যদি আপনার ভিতর সুপার স্কিল থাকে। কিন্তু আপনি যদি শুধু বেসিক কাজ নিয়ে পড়ে থাকেন তাহলে কোনো সেক্টরেই ভালো কিছু করতে পারবেন না। আমাদের সাথে ৪ মাস লেগে থাকলে ডিজাইন সেক্টরে সফল হবেন — এটা কথা দিচ্ছি।
 9. **প্রশ্ন:** এইখানে জয়েন করলে আমি কি ক্লায়েন্টের সাথে কাজ করতে পারবো?
-   **উত্তর:** অবশ্যই পারবেন। আমাদের এখানে জয়েন করা যে স্টুডেন্টরা শেষ পর্যন্ত লেগে ছিল তারা সবাই ডিজাইন সেক্টরে সফলতার সহিত কাজ করছে। তবে এই ক্ষেত্রে ৪ মাস লেগে থাকতে হবে। আমরা চাই আপনি ডিজাইন সেক্টরে নিজের একটা বেটার ক্যারিয়ার গড়ুন — এর জন্য যা যা করতে হয় সব আমরা করবো, আপনি শুধু লেগে থাকবেন।
+   **উত্তর:** অবশ্যই পারবেন। আমাদের এখানে জয়েন করা যে স্টুডেন্টরা শেষ পর্যন্ত লেগে ছিল তারা সবই ডিজাইন সেক্টরে সফলতার সহিত কাজ করছে। তবে এই ক্ষেত্রে ৪ মাস লেগে থাকতে হবে। আমরা চাই আপনি ডিজাইন সেক্টরে নিজের একটা বেটার ক্যারিয়ার গড়ুন — এর জন্য যা যা করতে হয় সব আমরা করবো, আপনি শুধু লেগে থাকবেন।
 10. **প্রশ্ন:** কোর্সে ভর্তি হতে কী কী লাগবে?
     **উত্তর:** শুধু একটি ল্যাপটপ/কম্পিউটার এবং ইন্টারনেট সংযোগ লাগবে। ডিজাইনের কোনো পূর্ব অভিজ্ঞতা ছাড়াও সম্পূর্ণ শূন্য থেকে শুরু করা যাবে।
 11. **প্রশ্ন:** গ্রাফিক্স ডিজাইন শিখতে কোনো ডিভাইস লাগবে?
@@ -399,15 +485,15 @@ misunacademybd@gmail.com-এ ইমেইল করুন এবং নিচে
 17. **প্রশ্ন:** ইংলিশ কোর্সের জন্য আমার কি আগে থেকে ইংরেজি জানতে হবে?
     **উত্তর:** একেবারেই না। শূন্য থেকে শুরু করা যাবে। আপনার বর্তমান লেভেল যাই হোক, ধাপে ধাপে এগিয়ে যেতে পারবেন।
 18. **প্রশ্ন:** আমি যদি বিদেশ থেকে এনরোল করতে চাই?
-    **উত্তর:** বিদেশী শিক্ষার্থীরা PhonePe (ভারত: +91 9123944746) বা SSLCommerz-এর মাধ্যমে পেমেন্ট করতে পারেন। ভারতীয় শিক্ষার্থীরা PhonePe-এ **ভারতীয় রুপিতে (₹)** পেমেন্ট করবেন — প্রতিটি ব্যাচের ₹ মূল্য ব্যাচের তথ্যে দেওয়া আছে।
+    **উত্তর:** বিদেশী শিক্ষার্থীরা PhonePe ([ফোন নম্বর]) বা SSLCommerz-এর মাধ্যমে পেমেন্ট করতে পারেন। ভারতীয় শিক্ষার্থীরা PhonePe-এ **ভারতীয় রুপিতে (₹)** পেমেন্ট করবেন — প্রতিটি ব্যাচের ₹ মূল্য ব্যাচের তথ্যে দেওয়া আছে।
 
 ## যোগাযোগ ও সাপোর্ট
 - **ঠিকানা:** ৮৫, সুলতান আহমেদ রোড, মৌলভীপাড়া, ওয়ার্ড নম্বর: ২৭, খুলনা
-- **ফোন:** +88 01778371211
-- **সাপোর্ট:** 01970713708
-- **হোয়াটসঅ্যাপ:** +8801331024530, +8801871952212
+- **ফোন:** [সাপোর্ট ফোন নম্বর]
+- **সাপোর্ট:** [সাপোর্ট ফোন নম্বর]
+- **হোয়াটসঅ্যাপ:** [হোয়াটসঅ্যাপ নম্বর], [হোয়াটসঅ্যাপ নম্বর]
 - **হোয়াটসঅ্যাপে ২৪/৭ অলটাইম সাপোর্ট** — যেকোনো সময় মেসেজ দিতে পারেন
-- **ইমেইল:** misunacademybd@gmail.com
+- **ইমেইল:** [সাপোর্ট ইমেইল]
 - **ট্রেড লাইসেন্স:** নং ২৭/৫৩৬ (খুলনা সিটি কর্পোরেশন)
 - **ওয়েবসাইট:** www.misun-academy.com
 - **ফেসবুক (Misun Academy):** https://www.facebook.com/misunacademy
@@ -422,7 +508,7 @@ misunacademybd@gmail.com-এ ইমেইল করুন এবং নিচে
 - **প্রব্লেম সল্ভিং ক্লাস:** রবিবার + বৃহস্পতিবার (রাত ৯-১১টা)
 - **লাইভ সাপোর্ট ক্লাস:** শুক্রবার বাদে প্রতিদিন ৩ টা করে
 - **হোয়াটসঅ্যাপ সাপোর্ট:** ২৪/৭ অলটাইম সাপোর্ট
-- যে কোন প্রয়োজনে সাপোর্ট নাম্বারে কল করুন: 01778371211 বা 01970713708
+- যে কোন প্রয়োজনে সাপোর্ট নাম্বারে কল করুন: [ফোন নম্বর] বা [ফোন নম্বর]
 
 ## শর্তাবলী (Terms & Conditions — সর্বশেষ আপডেট: ১৯ জুলাই, ২০২৫)
 MISUN Academy-এর ওয়েবসাইট, কোর্স ও সেবা ব্যবহার করলে নিচের সকল শর্তে সম্মতি জানানো হয়েছে বলে ধরে নেওয়া হবে।
@@ -439,7 +525,7 @@ MISUN Academy-এর ওয়েবসাইট, কোর্স ও সেব�
 10. **আইন মেনে চলা বাধ্যতামূলক:** MISUN Academy-এর সকল ব্যবহারকারীর কাছ থেকে আইনসম্মত ও সম্মানজনক আচরণ প্রত্যাশিত। অবৈধ কার্যকলাপ সনাক্ত হলে প্রয়োজনীয় আইনি ব্যবস্থা নেওয়া হবে।
 
 একটি ব্যাচে নির্দিষ্ট সংখ্যক সিট থাকায় আগে আসলে আগে পাবেন ভিত্তিতে ভর্তি চলবে।
-কোর্স ফি এবং পলিসি যেকোনো সময় পরিবর্তন সাপেক্ষে। যোগাযোগ: misunacademybd@gmail.com
+কোর্স ফি এবং পলিসি যেকোনো সময় পরিবর্তন সাপেক্ষে। যোগাযোগ: [সাপোর্ট ইমেইল]
 
 ## গোপনীয়তা নীতি
 - ব্যবহারকারীর ব্যক্তিগত তথ্য (নাম, ইমেইল, ফোন) শুধুমাত্র একাডেমিক ও Enrollment সংক্রান্ত কাজে ব্যবহার করা হয়
@@ -462,12 +548,12 @@ ${userLine}
 - ❌ **জব গ্যারান্টি লেটার বা চুক্তিপত্র** (এমন কিছু নেই)
 - ❌ **যেকোনো নীতি, সুবিধা বা ফিচার যা এখানে উল্লেখ নেই**
 
-যদি কেউ এমন কিছু জিজ্ঞেস করে যা এই prompt-এ নেই, তাহলে বলো:
-> "এই বিষয়ে আমার কাছে নির্দিষ্ট তথ্য নেই। সরাসরি সাপোর্টে যোগাযোগ করুন: **01778371211** বা **misunacademybd@gmail.com**"
+যদি কেউ এমন কিছু জিজ্ঞাসে যা এই prompt-এ নেই, তাহলে বলো:
+> "এই বিষয়ে আমার কাছে নির্দিষ্ট তথ্য নেই। সরাসরি সাপোর্টে যোগাযোগ করুন: **[ফোন নম্বর]** বা **[সাপোর্ট ইমেইল]**"
 
 **বিশেষ নির্দেশনা — আংশিক পেমেন্ট / পুরো টাকা নেই এমন পরিস্থিতি:**
-যদি কেউ বলে "আমার কাছে পুরো টাকা নেই" বা "আমি আংশিক পেমেন্ট করতে চাই" বা কিস্তি/ডিসকাউন্ট সম্পর্কে জিজ্ঞেস করে:
-- তুমি বলবে: "এই বিষয়ে আমার কাছে নির্দিষ্ট তথ্য নেই। সরাসরি সাপোর্টে যোগাযোগ করুন: **01778371211** বা **misunacademybd@gmail.com**"
+যদি কেউ বলে "আমার কাছে পুরো টাকা নেই" বা "আমি আংশিক পেমেন্ট করতে চাই" বা কিস্তি/ডিসকাউন্ট সম্পর্কে জিজ্ঞাসে করে:
+- তুমি বলবে: "এই বিষয়ে আমার কাছে নির্দিষ্ট তথ্য নেই। সরাসরি সাপোর্টে যোগাযোগ করুন: **[ফোন নম্বর]** বা **[সাপোর্ট ইমেইল]**"
 - **নিজে থেকে কিস্তি, ডিসকাউন্ট, বা আংশিক পেমেন্টের কোনো অপশনের কথা বলবে না** — কারণ Misun Academy-এর তেমন কোনো নীতি এই system prompt-এ উল্লেখ নেই
 - user-কে উৎসাহ দিয়ে বলবে যে সাপোর্ট টিম তাকে সাহায্য করবে
 
@@ -476,8 +562,8 @@ ${userLine}
 **১. উত্তর সংক্ষিপ্ত রাখো (PROGRESSIVE DISCLOSURE নিয়ম):**
 - সাধারণ প্রশ্নের উত্তর ২-৪ লাইনের মধ্যে দাও
 - **"কি কি কোর্স আছে?" বা "কোর্স সম্পর্কে জানতে চাই" — এই ধরনের প্রশ্নে শুধু কোর্সের নাম, মেয়াদ ও মূল্য বলো। মডিউল বা প্রজেক্ট লিস্ট দেওয়ার দরকার নেই।**
-- **বিস্তারিত সিলেবাস, মডিউল বা প্রজেক্ট তালিকা শুধুমাত্র তখনই দাও যখন user স্পষ্টভাবে জিজ্ঞেস করে: "সিলেবাস দেখাও", "বিস্তারিত বলো", "মডিউলগুলো কি কি" ইত্যাদি।**
-- যা জিজ্ঞেস করা হয়েছে শুধু সেটার উত্তর দাও
+- **বিস্তারিত সিলেবাস, মডিউল বা প্রজেক্ট তালিকা শুধুমাত্র তখনই দাও যখন user স্পষ্টভাবে জিজ্ঞাসে: "সিলেবাস দেখাও", "বিস্তারিত বলো", "মডিউলগুলো কি কি" ইত্যাদি।**
+- যা জিজ্ঞাসা হয়েছে শুধু সেটার উত্তর দাও
 
 **২. সরাসরি ও কনফিডেন্ট হও:**
 - "হ্যাঁ, পারবেন।" — এভাবে শুরু করো, ব্যাখ্যা পরে দাও
@@ -496,9 +582,9 @@ ${userLine}
 
 **৫. ভাষা:**
 - সর্বদা বাংলায় উত্তর দাও (ব্যবহারকারী ইংরেজিতে লিখলে ইংরেজিতে উত্তর দাও)
-- মূল্য জিজ্ঞেস করলে সরাসরি ব্যাচের মূল্য বলো
-- পেমেন্ট জিজ্ঞেস করলে bKash/Nagad/SSLCommerz — সংক্ষেপে জানাও
-- অজানা তথ্যের জন্য: "এই বিষয়ে সাপোর্টে যোগাযোগ করুন: 01778371211"
+- মূল্য জিজ্ঞাস করলে সরাসরি ব্যাচের মূল্য বলো
+- পেমেন্ট জিজ্ঞাস করলে bKash/Nagad/SSLCommerz — সংক্ষেপে জানাও
+- অজানা তথ্যের জন্য: "[সাপোর্ট ইমেইল]"
 
 ## ইংলিশ লার্নিং অ্যাসিস্ট্যান্ট নির্দেশনা
 যখন কেউ ইংরেজি শেখার সাহায্য চায় (যেমন গ্রামার, ভোকাবুলারি, ইমেইল রাইটিং, স্পিকিং, প্রেজেন্টেশন, ইন্টারভিউ প্রস্তুতি), তখন তুমি একজন ইংলিশ টিউটর হিসেবে সাহায্য করবে। এই নির্দেশনা শুধুমাত্র ইংলিশ লার্নিং রিলেটেড প্রশ্নের জন্য প্রযোজ্য:
@@ -518,10 +604,10 @@ ${userLine}
 // ─────────────────────────────────────────────
 
 async function withRetry<T>(
-  fn: () => Promise<T>,
-  attempts: number,
-  baseDelayMs: number,
-  label: string,
+    fn: () => Promise<T>,
+    attempts: number,
+    baseDelayMs: number,
+    label: string,
 ): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -561,11 +647,11 @@ function sleep(ms: number): Promise<void> {
 // ─────────────────────────────────────────────
 
 export const ChatService = {
-  async chat(messages: ChatMessage[], userName?: string): Promise<ChatResult> {
+  async chat(messages: ChatMessage[], userId?: string, userName?: string): Promise<ChatResult> {
     const requestId = crypto.randomUUID();
     const startMs = Date.now();
 
-    logger.info('Chat request received', { requestId, messageCount: messages.length, userName });
+    logger.info('Chat request received', { requestId, messageCount: messages.length, userName, userId });
 
     // 1. Validate & sanitize input
     let safeMessages: ChatMessage[];
@@ -576,13 +662,58 @@ export const ChatService = {
       throw err;
     }
 
-    // 2. Fetch system context (cached)
+    // 2. Prompt-injection detection on all user messages
+    for (const m of safeMessages) {
+      if (detectPromptInjection(m.content)) {
+        logger.warn('Prompt injection detected', { requestId, userId, content: m.content.slice(0, 100) });
+        throw createChatError(
+          'Your message contains content that may interfere with safe AI operation. Please rephrase.',
+          'PROMPT_INJECTION',
+          400
+        );
+      }
+    }
+
+    // 3. Per-user daily token + cost quota enforcement
+    if (userId) {
+      const uid = new Types.ObjectId(userId);
+      const { tokens, cost } = await getDailyTokenUsage(uid);
+
+      if (tokens >= CHAT_QUOTA.DAILY_TOKEN_CAP) {
+        throw createChatError(
+          'Daily AI chat token quota exceeded. Please try again tomorrow.',
+          'QUOTA_EXCEEDED',
+          429
+        );
+      }
+      if (cost >= CHAT_QUOTA.DAILY_COST_CAP_USD) {
+        throw createChatError(
+          'Daily AI chat cost cap exceeded. Please try again tomorrow.',
+          'QUOTA_EXCEEDED',
+          429
+        );
+      }
+
+      // Estimate cost of this request before sending (prompt tokens + max completion)
+      const estimatedPromptTokens = safeMessages.reduce((sum, m) => sum + m.content.length / 4, 0);
+      const estimatedTotal = estimatedPromptTokens + CONFIG.MAX_TOKENS;
+      const estimatedCost = estimateCost(Math.ceil(estimatedTotal));
+      if (cost + estimatedCost > CHAT_QUOTA.DAILY_COST_CAP_USD) {
+        throw createChatError(
+          'This request would exceed your daily cost cap. Please try again tomorrow.',
+          'QUOTA_EXCEEDED',
+          429
+        );
+      }
+    }
+
+    // 4. Fetch system context (cached)
     const context = await getSystemContext();
 
-    // 3. Build system prompt
+    // 5. Build system prompt
     const systemPrompt = buildSystemPrompt(context, userName);
 
-    // 4. Compose API messages
+    // 6. Compose API messages
     const apiMessages = [
       { role: 'system' as const, content: systemPrompt },
       ...safeMessages.map((m) => ({
@@ -591,7 +722,7 @@ export const ChatService = {
       })),
     ];
 
-    // 5. Call Groq with retry
+    // 7. Call Groq with retry
     let completion: Awaited<ReturnType<Groq['chat']['completions']['create']>>;
     try {
       completion = await withRetry(
@@ -619,7 +750,7 @@ export const ChatService = {
       throw createChatError(
         'AI service is temporarily unavailable. Please try again shortly.',
         'GROQ_API_ERROR',
-        503,
+        503
       );
     }
 
@@ -633,6 +764,22 @@ export const ChatService = {
       completionTokens: completion.usage?.completion_tokens ?? 0,
       totalTokens: completion.usage?.total_tokens ?? 0,
     };
+
+    // 8. Store conversation (best-effort; failure doesn't block the reply)
+    if (userId && reply) {
+      try {
+        const conversationId = `conv-${userId}-${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
+        await storeConversation(
+          new Types.ObjectId(userId),
+          conversationId,
+          safeMessages.map((m) => m.content).join('\n---\n'),
+          reply,
+          usage
+        );
+      } catch (storeErr) {
+        logger.error('Failed to store conversation', storeErr, { requestId, userId });
+      }
+    }
 
     logger.info('Chat request completed', {
       requestId,
@@ -648,4 +795,7 @@ export const ChatService = {
     logger.info('Warming context cache');
     await getSystemContext();
   },
+
+  /** Purge conversations older than retention window (call from cron) */
+  purgeOldConversations,
 };

@@ -3,16 +3,33 @@ import { PaymentController } from './payment.controller.js';
 import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 import validateRequest from '../../middlewares/validateRequest.js';
 import { allowCronSecret } from '../../middlewares/cronAuth.js';
+import { createRateLimiter } from '../../middlewares/rateLimit.js';
 import { verifyPaymentSchema, updatePaymentStatusSchema, reVerifyPaymentSchema, paymentHistoryQuerySchema } from '../../validations/payment.validation.js';
 
 const router = express.Router();
 
+// Public webhook endpoint (called by SSLCommerz) — strict rate limit to prevent replay/DoS
+const paymentWebhookLimiter = createRateLimiter({
+    prefix: 'payment-webhook',
+    windowMs: 60 * 1000,
+    max: 30,
+    message: 'Too many payment webhook requests, please try again later',
+});
+
+// Payment status check (redirect endpoint) — strict rate limit
+const paymentStatusLimiter = createRateLimiter({
+    prefix: 'payment-status',
+    windowMs: 60 * 1000,
+    max: 60,
+    message: 'Too many payment status requests, please try again later',
+});
+
 // Public webhook endpoint (called by SSLCommerz)
-router.post('/webhook', PaymentController.sslCommerzWebhook);
+router.post('/webhook', paymentWebhookLimiter, PaymentController.sslCommerzWebhook);
 
 // Payment status check (redirect endpoint) - SSLCommerz uses POST
-router.post('/status', PaymentController.checkPaymentStatus);
-router.get('/status', PaymentController.checkPaymentStatus);
+router.post('/status', paymentStatusLimiter, PaymentController.checkPaymentStatus);
+router.get('/status', paymentStatusLimiter, PaymentController.checkPaymentStatus);
 
 // Reconcile stale gateway payments + expire abandoned enrollments.
 // Vercel Cron (Bearer CRON_SECRET) or an admin can trigger it.
