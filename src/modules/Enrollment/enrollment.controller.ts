@@ -136,7 +136,7 @@ const updateEnrollmentStatus = catchAsync(async (req: Request, res: Response) =>
     const { status, reason } = req.body;
     const admin = (req as any).user as { id: string; role: string } | undefined;
 
-    const enrollment = await EnrollmentService.updateEnrollmentStatus(enrollmentId, status, reason);
+    const enrollment = await EnrollmentService.updateEnrollmentStatus(enrollmentId, status, reason, admin);
 
     await recordAudit({
         actor: admin?.id,
@@ -232,7 +232,7 @@ const enrollWithManualPayment = catchAsync(async (req: Request, res: Response) =
         success: true,
         message: result.message,
         data: {
-            enrollmentId: result.enrollment._id,
+            enrollmentId: result.enrollment.enrollmentId,
             status: result.enrollment.status,
             batch: {
                 title: result.batch.title,
