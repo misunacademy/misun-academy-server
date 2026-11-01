@@ -3,7 +3,7 @@ import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
 import { UserModel } from "../User/user.model.js";
 import { BatchModel } from "../Batch/batch.model.js";
 import { CourseModel } from "../Course/course.model.js";
-import { BatchStatus, CourseStatus, EnrollmentStatus, Status, UserStatus } from "../../types/common.js";
+import { BatchStatus, CourseStatus, EnrollmentStatus, Status, UserStatus, ACCESS_STATUSES } from "../../types/common.js";
 import mongoose from "mongoose";
 import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
@@ -264,12 +264,48 @@ const getAdminDashboard = async () => {
         { $sort: { _id: 1 } }
     ]);
 
-    // Top batches by enrollment
-    const topBatches = await BatchModel.find()
-        .sort({ currentEnrollment: -1 })
-        .limit(5)
-        .populate('courseId', 'title')
-        .lean();
+    // Top batches by enrollment — count Active+Completed enrollments on demand
+    // (currentEnrollment counter deprecated). Uses ACCESS_STATUSES as the single
+    // definition of "counted as enrolled".
+    const topBatchesRaw = await BatchModel.aggregate([
+        {
+            $lookup: {
+                from: 'enrollments',
+                let: { batchId: '$_id' },
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: { $eq: ['$batchId', '$$batchId'] },
+                            status: { $in: ACCESS_STATUSES },
+                        },
+                    },
+                    { $count: 'count' },
+                ],
+                as: 'enrollmentDocs',
+            },
+        },
+        {
+            $addFields: {
+                activeCount: { $ifNull: [{ $arrayElemAt: ['$enrollmentDocs.count', 0] }, 0] },
+            },
+        },
+        { $sort: { activeCount: -1 } },
+        { $limit: 5 },
+        {
+            $lookup: {
+                from: 'courses',
+                localField: 'courseId',
+                foreignField: '_id',
+                as: 'courseId',
+            },
+        },
+        { $unwind: '$courseId' },
+    ]).exec();
+
+    const topBatches = topBatchesRaw.map((b: any) => ({
+        ...b,
+        currentEnrollment: b.activeCount,
+    }));
 
     // Recent enrollments
     const recentEnrollments = await EnrollmentModel.find()

@@ -312,17 +312,12 @@ const activateEnrollmentForPayment = async (params: ActivateEnrollmentParams) =>
         },
     ], { session });
 
-    const wasAlreadyActive = enrollment.status === EnrollmentStatus.Active;
+    const _wasAlreadyActive = enrollment.status === EnrollmentStatus.Active;
 
     await EnrollmentService.ensureStudentIdForUser(updatedEnrollment.userId.toString(), session);
 
-    if (!wasAlreadyActive) {
-        await BatchModel.findByIdAndUpdate(
-            payment.batchId,
-            { $inc: { currentEnrollment: 1 } },
-            { session }
-        );
-    }
+    // Seat counter deprecated: use EnrollmentService.countActiveEnrollments() instead.
+    // Removed $inc { currentEnrollment: 1 } to avoid drift.
 
     if (initializeModules) {
         await EnrollmentService.initializeModuleProgress(updatedEnrollment._id.toString());

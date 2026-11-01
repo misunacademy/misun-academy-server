@@ -8,7 +8,7 @@ import { PaymentModel } from '../../modules/Payment/payment.model.js';
 import { PaymentAttemptModel } from '../../modules/Payment/paymentAttempt.model.js';
 import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
 import { EnrollmentStatusHistoryModel } from '../../modules/Enrollment/enrollmentStatusHistory.model.js';
-import { BatchModel } from '../../modules/Batch/batch.model.js';
+import { EnrollmentService } from '../../modules/Enrollment/enrollment.service.js';
 import { Status } from '../../types/common.js';
 import { EnrollmentStatus, BatchStatus } from '../../types/common.js';
 
@@ -342,9 +342,10 @@ describe('PaymentService.updatePaymentWithEnrollStatus — guarded activation', 
     ]);
 
     expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
-    const persistedBatch = await BatchModel.findById(batch._id).lean();
+    // currentEnrollment counter deprecated — use countActiveEnrollments() instead
+    const activeCount = await EnrollmentService.countActiveEnrollments(batch._id.toString());
+    expect(activeCount).toBe(1);
     const enrollment = await EnrollmentModel.findOne({ enrollmentId }).lean();
-    expect(persistedBatch?.currentEnrollment).toBe(1);
     expect(enrollment?.status).toBe(EnrollmentStatus.Active);
   });
 

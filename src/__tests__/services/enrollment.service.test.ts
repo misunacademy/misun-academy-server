@@ -298,13 +298,12 @@ describe('EnrollmentService.updateEnrollmentStatus', () => {
         );
 
         const persistedUser: any = await mongoose.model('User').findById(user._id).lean();
-        const persistedBatch: any = await mongoose.model('Batch').findById(batch._id).lean();
 
         expect(updated.status).toBe(EnrollmentStatus.Active);
         expect(updated.enrollmentId).toMatch(/^MA-/);
         expect(updated.enrolledAt).toBeDefined();
         expect(persistedUser.studentId).toMatch(/^SI-/);
-        expect(persistedBatch.currentEnrollment).toBe(1);
+        // currentEnrollment counter deprecated — not written on activation anymore
     });
 
     it('persists a lowercase status and the reason', async () => {
@@ -616,6 +615,97 @@ describe('EnrollmentService.updateEnrollmentStatus', () => {
             await expect(
                 EnrollmentService.initiateEnrollment(user._id.toString(), batch._id.toString())
             ).rejects.toThrow(/already enrolled/i);
+        });
+    });
+
+    describe('countActiveEnrollments — on-demand count replacing currentEnrollment counter', () => {
+        it('returns 0 for a batch with no enrollments', async () => {
+            const admin = await createAdmin();
+            const course = await createCourse(admin._id);
+            const batch = await createBatch(course._id);
+
+            const count = await EnrollmentService.countActiveEnrollments(batch._id.toString());
+            expect(count).toBe(0);
+        });
+
+        it('returns count of Active + Completed enrollments for a batch', async () => {
+            const user1 = await createUser();
+            const user2 = await createUser();
+            const user3 = await createUser();
+            const admin = await createAdmin();
+            const course = await createCourse(admin._id);
+            const batch = await createBatch(course._id, {
+                enrollmentEndDate: new Date('2027-01-01'),
+            });
+
+            // Active enrollment
+            const e1 = await EnrollmentService.initiateEnrollment(user1._id.toString(), batch._id.toString());
+            await EnrollmentService.transitionEnrollment(
+                e1.enrollment._id.toString(),
+                EnrollmentStatus.Pending,
+                EnrollmentStatus.Active,
+                { id: user1._id.toString(), role: 'learner' },
+                'Payment confirmed'
+            );
+
+            // Completed enrollment
+            const e2 = await EnrollmentService.initiateEnrollment(user2._id.toString(), batch._id.toString());
+            await EnrollmentService.transitionEnrollment(
+                e2.enrollment._id.toString(),
+                EnrollmentStatus.Pending,
+                EnrollmentStatus.Completed,
+                { id: user2._id.toString(), role: 'learner' },
+                'Course completed'
+            );
+
+            // Pending enrollment — should NOT be counted
+            await EnrollmentService.initiateEnrollment(user3._id.toString(), batch._id.toString());
+
+            const count = await EnrollmentService.countActiveEnrollments(batch._id.toString());
+            expect(count).toBe(2);
+        });
+
+        it('reflects suspensions and reactivations', async () => {
+            const user = await createUser();
+            const admin = await createAdmin();
+            const course = await createCourse(admin._id);
+            const batch = await createBatch(course._id, {
+                enrollmentEndDate: new Date('2027-01-01'),
+            });
+
+            const e = await EnrollmentService.initiateEnrollment(user._id.toString(), batch._id.toString());
+            await EnrollmentService.transitionEnrollment(
+                e.enrollment._id.toString(),
+                EnrollmentStatus.Pending,
+                EnrollmentStatus.Active,
+                { id: user._id.toString(), role: 'learner' },
+                'Payment confirmed'
+            );
+
+            let count = await EnrollmentService.countActiveEnrollments(batch._id.toString());
+            expect(count).toBe(1);
+
+            // Suspend → count drops to 0
+            await EnrollmentService.transitionEnrollment(
+                e.enrollment._id.toString(),
+                EnrollmentStatus.Active,
+                EnrollmentStatus.Suspended,
+                { id: admin._id.toString(), role: 'admin' },
+                'Disciplinary'
+            );
+            count = await EnrollmentService.countActiveEnrollments(batch._id.toString());
+            expect(count).toBe(0);
+
+            // Reactivate → count back to 1
+            await EnrollmentService.transitionEnrollment(
+                e.enrollment._id.toString(),
+                EnrollmentStatus.Suspended,
+                EnrollmentStatus.Active,
+                { id: admin._id.toString(), role: 'admin' },
+                'Reinstated'
+            );
+            count = await EnrollmentService.countActiveEnrollments(batch._id.toString());
+            expect(count).toBe(1);
         });
     });
 });

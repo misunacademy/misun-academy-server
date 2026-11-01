@@ -3,7 +3,6 @@ import { RefundModel } from './refund.model.js';
 import { RefundChannel, RefundStatus } from './refund.interface.js';
 import { PaymentModel } from '../Payment/payment.model.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
-import { BatchModel } from '../Batch/batch.model.js';
 import { UserModel } from '../User/user.model.js';
 import { Status, EnrollmentStatus } from '../../types/common.js';
 import ApiError from '../../errors/ApiError.js';
@@ -511,14 +510,10 @@ const completeRefund = async (id: string, actor: Actor, ip?: string) => {
         );
       }
 
-      // The seat is gone: keep Batch.currentEnrollment honest.
-      if (claimed.batchId) {
-        await BatchModel.findByIdAndUpdate(
-          claimed.batchId,
-          { $inc: { currentEnrollment: -1 } },
-          { session }
-        );
-      }
+      // Seat counter deprecated: use EnrollmentService.countActiveEnrollments() instead.
+      // Removed $inc { currentEnrollment: -1 } to avoid drift — the counter was
+      // replaced by on-demand counting to guarantee consistency.
+
     }
 
     await session.commitTransaction();

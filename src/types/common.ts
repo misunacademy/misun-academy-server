@@ -38,8 +38,19 @@ export enum EnrollmentStatus {
     Completed = "completed",
     Suspended = "suspended",
     Refunded = "refunded",
-    PaymentFailed = "payment-failed"
+    PaymentFailed = "payment-failed",
+    Expired = "expired"
 }
+
+/**
+ * Enrollment statuses that grant a learner access to batch content.
+ * Single source of truth for every "count enrolled" definition across
+ * dashboard, reminders, content gates, certificate checks, and reports.
+ */
+export const ACCESS_STATUSES: EnrollmentStatus[] = [
+    EnrollmentStatus.Active,
+    EnrollmentStatus.Completed,
+];
 
 export enum BatchStatus {
     Draft = "draft",

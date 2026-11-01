@@ -375,41 +375,12 @@ const updateUserStatus = async (id: string, status: string, actor?: string) => {
         return user;
     }
 
-    // Keep Batch.currentEnrollment (used by topBatches sorting) honest: it
-    // counts Active seats, so move them out/in per batch on suspend/delete
-    // and reactivate respectively. Counts are always read BEFORE the flip.
-    const countActiveByBatch = async (): Promise<Map<string, number>> => {
-        const affected = await EnrollmentModel.find({ userId: id, status: EnrollmentStatus.Active })
-            .select('batchId')
-            .lean();
-        const perBatch = new Map<string, number>();
-        for (const e of affected) {
-            const key = e.batchId?.toString();
-            if (key) perBatch.set(key, (perBatch.get(key) ?? 0) + 1);
-        }
-        return perBatch;
-    };
-    const countSuspendedByBatch = async (): Promise<Map<string, number>> => {
-        const affected = await EnrollmentModel.find({ userId: id, status: EnrollmentStatus.Suspended })
-            .select('batchId')
-            .lean();
-        const perBatch = new Map<string, number>();
-        for (const e of affected) {
-            const key = e.batchId?.toString();
-            if (key) perBatch.set(key, (perBatch.get(key) ?? 0) + 1);
-        }
-        return perBatch;
-    };
-    const applyCounterDelta = async (perBatch: Map<string, number>, delta: -1 | 1) => {
-        await Promise.all(
-            [...perBatch.entries()].map(([batchId, count]) =>
-                BatchModel.findByIdAndUpdate(batchId, { $inc: { currentEnrollment: delta * count } })
-            )
-        );
-    };
+    // Seat counter deprecated: use EnrollmentService.countActiveEnrollments() instead.
+    // Removed applyCounterDelta + $inc { currentEnrollment } to avoid drift.
+    // Enrollment transitions (Active<->Suspended) still run via transitionEnrollment
+    // for status history; seat counting is now on-demand.
 
     if (status === UserStatus.Suspended || status === UserStatus.Deleted) {
-        await applyCounterDelta(await countActiveByBatch(), -1);
         const activeEnrollments = await EnrollmentModel.find({ userId: id, status: EnrollmentStatus.Active }).lean();
         for (const e of activeEnrollments) {
             await EnrollmentService.transitionEnrollment(
@@ -425,7 +396,6 @@ const updateUserStatus = async (id: string, status: string, actor?: string) => {
     }
 
     if (status === UserStatus.Active) {
-        const toReactivate = await countSuspendedByBatch();
         const suspendedEnrollments = await EnrollmentModel.find({ userId: id, status: EnrollmentStatus.Suspended }).lean();
         for (const e of suspendedEnrollments) {
             await EnrollmentService.transitionEnrollment(
@@ -436,7 +406,7 @@ const updateUserStatus = async (id: string, status: string, actor?: string) => {
                 'User reactivated'
             );
         }
-        await applyCounterDelta(toReactivate, 1);
+        // Seat counter deprecated — countActiveEnrollments() is on-demand, no counter to update.
     }
 
     await recordAudit({

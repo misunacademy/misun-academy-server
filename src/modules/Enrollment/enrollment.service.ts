@@ -4,7 +4,7 @@ import { EnrollmentModel } from './enrollment.model.js';
 import { EnrollmentStatusHistoryModel } from './enrollmentStatusHistory.model.js';
 import { EnrollmentCounterModel } from './enrollmentCounter.model.js';
 import { BatchModel } from '../Batch/batch.model.js';
-import { BatchStatus, EnrollmentStatus, UserStatus } from '../../types/common.js';
+import { BatchStatus, EnrollmentStatus, UserStatus, ACCESS_STATUSES } from '../../types/common.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
 import { ProgressStatus } from '../../types/common.js';
@@ -333,14 +333,8 @@ const createEnrollment = async ({
             { session }
         );
 
-        // 9. Seat counter only when entering Active at creation
-        if (initialStatus === EnrollmentStatus.Active) {
-            await BatchModel.findByIdAndUpdate(
-                batch._id,
-                { $inc: { currentEnrollment: 1 } },
-                { session }
-            );
-        }
+        // Seat counter deprecated: use countActiveEnrollments() instead.
+        // Removed $inc { currentEnrollment: 1 } to avoid drift.
 
         if (shouldOwnTransaction) {
             await session.commitTransaction();
@@ -1177,7 +1171,7 @@ const transitionEnrollment = async (
     enrollmentId: string,
     from: EnrollmentStatus,
     to: EnrollmentStatus,
-    actor?: { id: string; role?: string },
+    actor?: { id?: string; role?: string },
     reason?: string,
     externalSession?: mongoose.ClientSession
 ) => {
@@ -1244,6 +1238,18 @@ const transitionEnrollment = async (
             session.endSession();
         }
     }
+};
+
+/**
+ * On-demand count of enrollments that grant access (Active + Completed).
+ * Replaces the deprecated Batch.currentEnrollment counter which can drift.
+ * Single source of truth via ACCESS_STATUSES.
+ */
+const countActiveEnrollments = async (batchId: string): Promise<number> => {
+    return EnrollmentModel.countDocuments({
+        batchId,
+        status: { $in: ACCESS_STATUSES },
+    });
 };
 
 /**
@@ -1335,6 +1341,7 @@ export const EnrollmentService = {
     updateEnrollmentStatus,
     createEnrollment,
     transitionEnrollment,
+    countActiveEnrollments,
     initializeModuleProgress,
     generateEnrollmentId,
     ensureStudentIdForUser,

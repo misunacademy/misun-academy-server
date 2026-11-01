@@ -40,7 +40,7 @@ describe('BatchService.createBatch', () => {
         const batch = await BatchService.createBatch(buildBatchPayload(course._id));
 
         expect(batch.batchNumber).toBe(1);
-        expect(batch.currentEnrollment).toBe(0);
+        // currentEnrollment counter deprecated — removed from batch creation
         expect(batch.status).toBe(BatchStatus.Draft);
     });
 
