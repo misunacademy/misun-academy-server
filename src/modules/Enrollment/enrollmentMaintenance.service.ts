@@ -23,10 +23,12 @@ import { EnrollmentModel } from './enrollment.model.js';
 import { EnrollmentStatusHistoryModel } from './enrollmentStatusHistory.model.js';
 import { PaymentModel } from '../Payment/payment.model.js';
 import { PaymentAttemptModel } from '../Payment/paymentAttempt.model.js';
+import { UserModel } from '../User/user.model.js';
 import config from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 import { recordAudit } from '../../models/auditLog.model.js';
 import mongoose from 'mongoose';
+import { queueEmail } from '../../services/emailService.js';
 
 export interface ExpireAbandonedOptions {
     olderThanHours?: number;
@@ -170,6 +172,26 @@ export const expireAbandonedEnrollments = async (
                     },
                 }
             );
+        }
+
+        // Notify learner with a retry link (durable, idempotent via eventId)
+        try {
+            const userRow = await UserModel.findById(expired.userId).lean();
+            if (userRow) {
+                const retryLink = `${config.SERVER_URL || 'https://misun.academy'}/enroll/${expired.batchId}`;
+                await queueEmail(
+                    userRow.email,
+                    'Your course access has expired',
+                    `<p>Hello ${userRow.name},</p><p>Your enrollment for batch <strong>${expired.enrollmentId}</strong> has expired because payment was not completed within ${olderThanHours} hours.</p><p><a href="${retryLink}">Click here to re-enroll</a> and regain access.</p>`,
+                    {
+                        eventId: `enrollment_expired_${expired.enrollmentId}`,
+                        eventType: 'enrollment_expired',
+                        priority: 'high',
+                    }
+                );
+            }
+        } catch {
+            // Email is best-effort; expiry status is already committed.
         }
 
         summary.expired += 1;
