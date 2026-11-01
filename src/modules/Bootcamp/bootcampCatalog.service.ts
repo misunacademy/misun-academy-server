@@ -1,12 +1,16 @@
 import mongoose, { FilterQuery, Types } from 'mongoose';
 import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
-import SSLCommerzPayment from 'sslcommerz-lts';
 import axios from 'axios';
 import crypto from 'crypto';
 import config from '../../config/env.js';
+import { paymentGatewayAdapter } from '../../services/paymentGatewayAdapter.js';
 import { BootcampCatalogModel } from './bootcampCatalog.model.js';
 import { BootcampPurchaseModel } from './bootcampPurchase.model.js';
+import {
+    BootcampPaymentAttemptModel,
+    BootcampPaymentAttemptStatus,
+} from './bootcampPaymentAttempt.model.js';
 import {
     BootcampStatus,
     RecordedStatus,
@@ -387,8 +391,17 @@ const listBootcampsAdmin = async (params?: { status?: string; search?: string; p
 
 // ---------- Bootcamp purchases (SSLCommerz only) ----------
 
-const getMyBootcampPurchases = async (userId: string) => {
-    return BootcampPurchaseModel.find({ user: new Types.ObjectId(userId) })
+const getMyBootcampPurchases = async (userId: string, _includeHistory = false) => {
+    const user = new Types.ObjectId(userId);
+    // Failed/rejected gateway attempts are internal bookkeeping and are purged
+    // by the maintenance job after the retention window. Learners only ever
+    // see live (pending) or successful purchases.
+    const query: FilterQuery<IBootcampPurchase> = {
+        user,
+        status: { $in: [BootcampPurchaseStatus.Pending, BootcampPurchaseStatus.Paid] },
+    };
+
+    return BootcampPurchaseModel.find(query)
         .populate('bootcamp', 'title season slug thumbnail posterImage recordedPrice')
         .sort({ createdAt: -1 })
         .lean();
@@ -505,6 +518,22 @@ const generateBootcampTransactionId = (): string => {
     return `BC${timestamp}${random}`;
 };
 
+const syncBootcampPaymentAttempt = async (
+    transactionId: string,
+    status: BootcampPaymentAttemptStatus,
+    gatewayResponse?: Record<string, unknown>
+) => {
+    await BootcampPaymentAttemptModel.updateOne(
+        { transactionId },
+        {
+            $set: {
+                status,
+                ...(gatewayResponse ? { gatewayResponse } : {}),
+            },
+        }
+    );
+};
+
 const getBootcampCallbackKey = (transactionId: string): string => {
     const secret = config.SSL_STORE_PASSWORD || config.BETTER_AUTH_SECRET;
     if (!secret) {
@@ -578,6 +607,19 @@ const initiateBootcampSSLCommerz = async (slug: string, userId: string) => {
                 'gatewayResponse.supersededAt': new Date(),
             },
         });
+        await BootcampPaymentAttemptModel.updateMany(
+            {
+                transactionId: existingPending.transactionId,
+                status: BootcampPaymentAttemptStatus.Pending,
+            },
+            {
+                $set: {
+                    status: BootcampPaymentAttemptStatus.Superseded,
+                    'gatewayResponse.status': 'superseded',
+                    'gatewayResponse.supersededAt': new Date(),
+                },
+            }
+        );
     }
 
     const user = await UserModel.findById(userId).lean();
@@ -585,15 +627,6 @@ const initiateBootcampSSLCommerz = async (slug: string, userId: string) => {
         throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
     }
 
-    const store_id = config.SSL_STORE_ID;
-    const store_passwd = config.SSL_STORE_PASSWORD;
-    const is_live = config.SSL_IS_LIVE === 'true';
-
-    if (!store_id || !store_passwd) {
-        throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Payment gateway not configured');
-    }
-
-    const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
     const transactionId = generateBootcampTransactionId();
     const callbackKey = getBootcampCallbackKey(transactionId);
     const amount = bootcamp.recordedPrice ?? 0;
@@ -634,18 +667,46 @@ const initiateBootcampSSLCommerz = async (slug: string, userId: string) => {
         value_c: bootcamp._id.toString(),
     };
 
-    const created = await BootcampPurchaseModel.create({
+    let created: IBootcampPurchase;
+    try {
+        created = await BootcampPurchaseModel.create({
+            user: new Types.ObjectId(userId),
+            bootcamp: bootcamp._id,
+            amount,
+            method: 'SSLCommerz',
+            transactionId,
+            status: BootcampPurchaseStatus.Pending,
+            gatewayResponse: { initiatedAt: new Date() },
+        });
+    } catch (error: any) {
+        if (error?.code === 11000) {
+            const active = await BootcampPurchaseModel.findOne(pendingFilter).lean();
+            if (active?.gatewayResponse && (active.gatewayResponse as any).paymentUrl) {
+                return {
+                    paymentUrl: (active.gatewayResponse as any).paymentUrl,
+                    transactionId: active.transactionId,
+                };
+            }
+            throw new ApiError(
+                StatusCodes.CONFLICT,
+                'A bootcamp payment is already being initialized. Please retry shortly.'
+            );
+        }
+        throw error;
+    }
+
+    await BootcampPaymentAttemptModel.create({
+        purchase: created._id,
         user: new Types.ObjectId(userId),
         bootcamp: bootcamp._id,
         amount,
-        method: 'SSLCommerz',
         transactionId,
-        status: BootcampPurchaseStatus.Pending,
+        status: BootcampPaymentAttemptStatus.Pending,
         gatewayResponse: { initiatedAt: new Date() },
     });
 
     try {
-        const response = await sslcz.init(paymentData);
+        const response = await paymentGatewayAdapter.initiate(paymentData);
         if (response?.GatewayPageURL) {
             await BootcampPurchaseModel.findByIdAndUpdate(created._id, {
                 $set: {
@@ -655,11 +716,20 @@ const initiateBootcampSSLCommerz = async (slug: string, userId: string) => {
                     },
                 },
             });
+            await syncBootcampPaymentAttempt(transactionId, BootcampPaymentAttemptStatus.Pending, {
+                initiatedAt:
+                    created.gatewayResponse &&
+                    (created.gatewayResponse as any).initiatedAt,
+                paymentUrl: response.GatewayPageURL,
+            });
             return { paymentUrl: response.GatewayPageURL, transactionId };
         } else {
             logger.error({ response }, 'SSLCommerz init failed for bootcamp');
             await BootcampPurchaseModel.findByIdAndUpdate(created._id, {
                 $set: { status: BootcampPurchaseStatus.Rejected },
+            });
+            await syncBootcampPaymentAttempt(transactionId, BootcampPaymentAttemptStatus.Failed, {
+                status: 'failed',
             });
             throw new ApiError(
                 StatusCodes.INTERNAL_SERVER_ERROR,
@@ -670,6 +740,9 @@ const initiateBootcampSSLCommerz = async (slug: string, userId: string) => {
         logger.error(error, 'SSLCommerz error for bootcamp purchase');
         await BootcampPurchaseModel.findByIdAndUpdate(created._id, {
             $set: { status: BootcampPurchaseStatus.Rejected },
+        });
+        await syncBootcampPaymentAttempt(transactionId, BootcampPaymentAttemptStatus.Failed, {
+            status: 'failed',
         });
         throw new ApiError(
             StatusCodes.INTERNAL_SERVER_ERROR,
@@ -688,7 +761,8 @@ const finalizeBootcampSSLCommerz = async (transactionId: string, status: string,
         return purchase;
     }
 
-    if (status === 'failed' || status === 'cancel') {
+    const normalizedStatus = status.toLowerCase();
+    if (['failed', 'cancel', 'cancelled', 'canceled'].includes(normalizedStatus)) {
         // Gateway-reported failure/cancel for a Pending purchase. Non-pending
         // purchases are left untouched to avoid regressing a Paid row.
         if (purchase.status !== BootcampPurchaseStatus.Pending) {
@@ -696,16 +770,16 @@ const finalizeBootcampSSLCommerz = async (transactionId: string, status: string,
         }
         await BootcampPurchaseModel.findByIdAndUpdate(purchase._id, {
             $set: {
-                status:
-                    status === 'cancel'
-                        ? BootcampPurchaseStatus.Rejected
-                        : BootcampPurchaseStatus.Rejected,
+                status: BootcampPurchaseStatus.Rejected,
                 gatewayResponse: {
                     ...(purchase.gatewayResponse as object),
                     failedAt: new Date(),
-                    status,
+                    status: normalizedStatus,
                 },
             },
+        });
+        await syncBootcampPaymentAttempt(transactionId, BootcampPaymentAttemptStatus.Failed, {
+            status: normalizedStatus,
         });
         return purchase;
     }
@@ -759,6 +833,12 @@ const finalizeBootcampSSLCommerz = async (transactionId: string, status: string,
             { new: true, session }
         );
         await session.commitTransaction();
+        await syncBootcampPaymentAttempt(transactionId, BootcampPaymentAttemptStatus.Success, {
+            valId,
+            gatewayStatus: validation.status,
+            bankTranId: validation.bank_tran_id,
+            cardType: validation.card_type,
+        });
         return updated;
     } catch (error) {
         try {

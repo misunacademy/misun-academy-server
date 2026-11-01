@@ -1,5 +1,4 @@
 import mongoose, { PipelineStage } from "mongoose";
-import SSLCommerzPayment from 'sslcommerz-lts';
 import config from '../../config/env.js';
 import { PaymentModel } from "./payment.model.js";
 import { PaymentAttemptModel } from "./paymentAttempt.model.js";
@@ -19,6 +18,7 @@ import { BatchModel } from "../Batch/batch.model.js";
 import { ProfileService } from "../Profile/profile.service.js";
 import axios from 'axios';
 import env from '../../config/env.js';
+import { paymentGatewayAdapter } from '../../services/paymentGatewayAdapter.js';
 import { EnrollmentService } from "../Enrollment/enrollment.service.js";
 import { logger } from "../../config/logger.js";
 import { deriveCourseBrand } from "../../utils/courseBrand.js";
@@ -879,40 +879,16 @@ const validateSSLCommerzPayment = async (valId: string) => {
 
 // ─── GATEWAY TRANSACTION LOOKUP (RECONCILIATION) ───
 
-const GATEWAY_QUERY_TIMEOUT_MS = 10000;
-
 /**
  * Ask SSLCommerz for the authoritative state of a gateway transaction.
  *
  * Used by the reconciliation job to settle payments whose browser redirect and
- * IPN never reached us (tab closed, network drop, webhook outage). The SDK
- * swallows transport failures and resolves with the thrown value, so callers
- * get `null` for "could not determine — retry later" instead of an exception.
+ * IPN never reached us (tab closed, network drop, webhook outage).
  */
 export const querySSLCommerzTransaction = async (
     transactionId: string
 ): Promise<Record<string, any> | null> => {
-    const store_id = config.SSL_STORE_ID;
-    const store_passwd = config.SSL_STORE_PASSWORD;
-
-    if (!store_id || !store_passwd) {
-        throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Payment gateway not configured');
-    }
-
-    const sslcz = new SSLCommerzPayment(store_id, store_passwd, config.SSL_IS_LIVE === 'true');
-
-    const response = await Promise.race([
-        sslcz.transactionQueryByTransactionId({ tran_id: transactionId }),
-        new Promise<null>((resolve) =>
-            setTimeout(() => resolve(null), GATEWAY_QUERY_TIMEOUT_MS)
-        ),
-    ]);
-
-    if (!response || response instanceof Error || typeof response !== 'object') {
-        return null;
-    }
-
-    return response as Record<string, any>;
+    return paymentGatewayAdapter.queryTransaction(transactionId);
 };
 
 // ─── FINALIZE SSLCOMMERZ PAYMENT ───
@@ -1257,15 +1233,6 @@ const initiateSSLCommerzPayment = async (
     const batch = enrollment.batchId;
     const user = enrollment.userId;
 
-    const store_id = config.SSL_STORE_ID;
-    const store_passwd = config.SSL_STORE_PASSWORD;
-    const is_live = config.SSL_IS_LIVE === 'true';
-
-    if (!store_id || !store_passwd) {
-        throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Payment gateway not configured');
-    }
-
-    const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
     const transactionId = generateTransactionId();
     const callbackKey = getStatusCallbackKey(transactionId);
 
@@ -1318,7 +1285,7 @@ const initiateSSLCommerzPayment = async (
     });
 
     try {
-        const response = await sslcz.init(paymentData);
+        const response = await paymentGatewayAdapter.initiate(paymentData);
         if (response?.GatewayPageURL) {
             await PaymentModel.updateOne(
                 { enrollmentId, transactionId },
