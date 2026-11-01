@@ -57,8 +57,18 @@ export const initializeModuleProgress = async (enrollmentId: string) => {
 };
 
 export const getUserEnrollments = async (userId: string, status?: EnrollmentStatus) => {
+    if (status === EnrollmentStatus.PaymentFailed || status === EnrollmentStatus.Expired) {
+        return [];
+    }
+
     const query: any = { userId };
-    if (status) query.status = status;
+    if (status) {
+        query.status = status;
+    } else {
+        query.status = {
+            $nin: [EnrollmentStatus.PaymentFailed, EnrollmentStatus.Expired],
+        };
+    }
 
     const enrollments = await EnrollmentModel.find(query)
         .populate({
@@ -124,11 +134,13 @@ export const getUserEnrollments = async (userId: string, status?: EnrollmentStat
     });
 };
 
-export const getEnrollmentDetails = async (enrollmentId: string, userId: string, isStaff = false) => {
-    // Staff (admin/support debugging) may view any enrollment; learners are
-    // scoped to their own rows.
-    const filter: Record<string, unknown> = isStaff ? { _id: enrollmentId } : { _id: enrollmentId, userId };
-    const enrollment = await EnrollmentModel.findOne(filter)
+export const getEnrollmentDetails = async (
+    enrollmentId: string,
+    userId: string,
+    isStaff = false,
+    role?: string
+) => {
+    const enrollment = await EnrollmentModel.findOne({ _id: enrollmentId })
         .populate({
             path: 'batchId',
             populate: [
@@ -140,6 +152,21 @@ export const getEnrollmentDetails = async (enrollmentId: string, userId: string,
         .lean();
 
     if (!enrollment) throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+
+    // Instructors are scoped to batches they teach; admins/superadmins see all
+    if (isStaff) {
+        if (role === 'instructor') {
+            const instructors = (enrollment as any).batchId?.instructors || [];
+            const teachesBatch = instructors.some(
+                (i: any) => (i.userId || i).toString() === userId
+            );
+            if (!teachesBatch) {
+                throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+            }
+        }
+    } else if (String(enrollment.userId) !== userId) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+    }
 
     const resolvedBatchId = (enrollment as any).batchId?._id ?? (enrollment as any).batchId;
     const resolvedCourseId = (enrollment as any).batchId?.courseId?._id ?? (enrollment as any).batchId?.courseId;

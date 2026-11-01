@@ -904,7 +904,7 @@ describe('Fix 12: Admin and support tools', () => {
             batchId: batch1._id,
         }).lean();
         expect(remaining).not.toBeNull();
-        expect(remaining.status).toBe(EnrollmentStatus.Suspended);
+        expect(remaining?.status).toBe(EnrollmentStatus.Suspended);
     });
 
     it('deferEnrollment suspends and sets deferUntil', async () => {
@@ -1015,5 +1015,53 @@ describe('Fix 12: Admin and support tools', () => {
 
         expect(paidNotActive).toContain(enrollment1.enrollment._id.toString());
         expect(activeNoPayment).toContain(enrollment2.enrollment._id.toString());
+    });
+});
+
+describe('Fix 13: Admin and instructor authorization', () => {
+    it('grantAccessByEmail requires reason field', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id, {
+            enrollmentEndDate: new Date('2027-01-01'),
+        });
+
+        await expect(
+            EnrollmentService.grantAccessByEmail(
+                user.email,
+                course._id.toString(),
+                batch._id.toString(),
+                { id: admin._id.toString(), role: 'admin' },
+            )
+        ).rejects.toThrow(/reason is required/i);
+    });
+
+    it('grantAccessByEmail creates complimentary payment record', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id, {
+            enrollmentEndDate: new Date('2027-01-01'),
+        });
+
+        const result = await EnrollmentService.grantAccessByEmail(
+            user.email,
+            course._id.toString(),
+            batch._id.toString(),
+            { id: admin._id.toString(), role: 'admin' },
+            'Complimentary access for scholarship student'
+        );
+
+        expect(result.enrollment.status).toBe(EnrollmentStatus.Active);
+        expect(result.enrollment.accessType).toBe('special');
+
+        const payment = await PaymentModel.findOne({
+            enrollmentId: result.enrollment.enrollmentId,
+        }).lean();
+        expect(payment).not.toBeNull();
+        expect(payment?.status).toBe(Status.Success);
+        expect(payment?.method).toBe('complimentary');
+        expect(payment?.amount).toBe(0);
     });
 });
