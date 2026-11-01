@@ -1191,6 +1191,96 @@ const ALLOWED_ENROLLMENT_TRANSITIONS: Record<string, string[]> = {
     [EnrollmentStatus.Refunded]: [],
 };
 
+/**
+ * Guards an enrollment status transition with compare-and-set on the current
+ * status, inside a transaction, with append-only status history. The caller is
+ * responsible for validating the transition is business-valid (e.g. via
+ * ALLOWED_ENROLLMENT_TRANSITIONS in updateEnrollmentStatus or certificate
+ * eligibility before approve). This is the single primitive that every code
+ * path changing an enrollment's status must use.
+ */
+const transitionEnrollment = async (
+    enrollmentId: string,
+    from: EnrollmentStatus,
+    to: EnrollmentStatus,
+    actor?: { id: string; role?: string },
+    reason?: string,
+    externalSession?: mongoose.ClientSession
+) => {
+    const shouldOwnTransaction = !externalSession;
+    const session = externalSession ?? await mongoose.startSession();
+
+    try {
+        if (shouldOwnTransaction) {
+            await session.startTransaction();
+        }
+
+        const enrollment = await EnrollmentModel.findOneAndUpdate(
+            { _id: enrollmentId, status: from },
+            {
+                $set: {
+                    status: to,
+                    ...(reason !== undefined ? { statusChangeReason: reason } : {}),
+                },
+            },
+            { new: true, session }
+        );
+        if (!enrollment) {
+            throw new ApiError(
+                StatusCodes.CONFLICT,
+                `Cannot transition enrollment: not in ${from} state (may have changed concurrently)`
+            );
+        }
+
+        // Seat counter: only when moving INTO Active from a non-active state
+        if (to === EnrollmentStatus.Active && from !== EnrollmentStatus.Active) {
+            await BatchModel.findByIdAndUpdate(
+                enrollment.batchId as mongoose.Types.ObjectId,
+                { $inc: { currentEnrollment: 1 } },
+                { session }
+            );
+        }
+
+        // Append-only status history inside the same transaction
+        await EnrollmentStatusHistoryModel.create([
+            {
+                enrollmentId: enrollment._id,
+                userId: enrollment.userId,
+                batchId: enrollment.batchId as mongoose.Types.ObjectId,
+                from,
+                to,
+                actorType: actor?.role ? 'admin' : 'system',
+                actorId: actor?.id ? new mongoose.Types.ObjectId(actor.id) : undefined,
+                reason: reason ?? undefined,
+                source: 'internal',
+            },
+        ], { session });
+
+        if (shouldOwnTransaction) {
+            await session.commitTransaction();
+        }
+        return enrollment;
+    } catch (error) {
+        if (shouldOwnTransaction && session.inTransaction()) {
+            await session.abortTransaction();
+        }
+        throw error;
+    } finally {
+        if (shouldOwnTransaction) {
+            session.endSession();
+        }
+    }
+};
+
+/**
+ * Admin: update an enrollment's status. Values are validated against
+ * EnrollmentStatus (lowercase) — runs validators so capitalized/unknown
+ * values are rejected instead of corrupting the row — and the optional
+ * reason is persisted to statusChangeReason. Transitions are constrained to
+ * a conservative state machine so Active↔Pending ping-pong, Completed
+ * resurrection, or finance-orphaning jumps can't happen from this endpoint
+ * (refunds/revokes move status through their own audited flows).
+ */
 const updateEnrollmentStatus = async (
     enrollmentId: string,
     status: EnrollmentStatus,
@@ -1202,14 +1292,12 @@ const updateEnrollmentStatus = async (
     try {
         session.startTransaction();
 
-        const enrollment = await EnrollmentModel.findById(enrollmentId)
-            .populate({ path: 'batchId', populate: { path: 'courseId' } })
-            .session(session);
+        const enrollment = await EnrollmentModel.findById(enrollmentId).session(session).lean();
         if (!enrollment) {
             throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
         }
 
-        const fromStatus = enrollment.status;
+        const fromStatus = enrollment.status as EnrollmentStatus;
         const allowed = ALLOWED_ENROLLMENT_TRANSITIONS[enrollment.status] ?? [];
         if (enrollment.status !== status && !allowed.includes(status)) {
             throw new ApiError(
@@ -1218,48 +1306,40 @@ const updateEnrollmentStatus = async (
             );
         }
 
-        const wasActive = enrollment.status === EnrollmentStatus.Active;
-        if (status === EnrollmentStatus.Active && !wasActive) {
-            const batch = enrollment.batchId as any;
-            if (!enrollment.enrollmentId) {
-                enrollment.enrollmentId = await generateEnrollmentId(
+        // Channel-specific activation prep (enrollment ID + student ID) happens
+        // before the guarded transition so the MA- ID exists on the row.
+        if (status === EnrollmentStatus.Active && fromStatus !== EnrollmentStatus.Active) {
+            const batch = await BatchModel.findById(
+                (enrollment as any).batchId
+            ).populate({ path: 'courseId' }).session(session).lean();
+            if (!batch) {
+                throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
+            }
+            if (!(enrollment as any).enrollmentId) {
+                (enrollment as any).enrollmentId = await generateEnrollmentId(
                     parseBatchNumber(batch),
-                    deriveCourseBrand(batch?.courseId)
+                    deriveCourseBrand((batch as any)?.courseId)
+                );
+                // Persist the generated enrollmentId on the row before transitioning
+                await EnrollmentModel.findByIdAndUpdate(
+                    enrollmentId,
+                    { enrollmentId: (enrollment as any).enrollmentId },
+                    { session }
                 );
             }
-
-            await assignStudentIdIfMissing(enrollment.userId.toString(), session);
-            await BatchModel.findByIdAndUpdate(
-                batch._id,
-                { $inc: { currentEnrollment: 1 } },
-                { session }
-            );
-            enrollment.enrolledAt = new Date();
+            await assignStudentIdIfMissing((enrollment as any).userId.toString(), session);
         }
 
-        enrollment.status = status;
-        if (reason !== undefined) {
-            enrollment.statusChangeReason = reason;
-        }
-        await enrollment.save({ session });
-
-        // Append-only status history inside the same transaction
-        await EnrollmentStatusHistoryModel.create([
-            {
-                enrollmentId: enrollment._id,
-                userId: enrollment.userId,
-                batchId: enrollment.batchId as mongoose.Types.ObjectId,
-                from: fromStatus,
-                to: status,
-                actorType: 'admin',
-                actorId: actor?.id ? new mongoose.Types.ObjectId(actor.id) : undefined,
-                reason: reason ?? undefined,
-                source: 'PUT /api/v1/enrollments/:enrollmentId/status',
-            },
-        ], { session });
-
+        const result = await transitionEnrollment(
+            enrollmentId,
+            fromStatus,
+            status,
+            actor,
+            reason,
+            session
+        );
         await session.commitTransaction();
-        return enrollment;
+        return result;
     } catch (error) {
         if (session.inTransaction()) {
             await session.abortTransaction();
@@ -1279,6 +1359,7 @@ export const EnrollmentService = {
     getEnrollmentDetails,
     getAllEnrollments,
     updateEnrollmentStatus,
+    transitionEnrollment,
     initializeModuleProgress,
     generateEnrollmentId,
     ensureStudentIdForUser,

@@ -419,7 +419,8 @@ describe('EnrollmentService.updateEnrollmentStatus', () => {
         await EnrollmentService.updateEnrollmentStatus(
             enrollment._id.toString(),
             EnrollmentStatus.Active,
-            'Admin manual activation'
+            'Admin manual activation',
+            { id: admin._id.toString(), role: 'admin' }
         );
 
         const history = await EnrollmentStatusHistoryModel.find({
