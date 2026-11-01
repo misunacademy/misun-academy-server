@@ -487,4 +487,135 @@ describe('EnrollmentService.updateEnrollmentStatus', () => {
         );
         expect(reactivated.status).toBe(EnrollmentStatus.Active);
     });
+
+    describe('Shared enrollment service — all entry points enforce same rules', () => {
+        it('initiateEnrollment rejects a suspended user', async () => {
+            const user = await createUser({ status: 'suspended' as any });
+            const admin = await createAdmin();
+            const course = await createCourse(admin._id);
+            const batch = await createBatch(course._id);
+
+            await expect(
+                EnrollmentService.initiateEnrollment(user._id.toString(), batch._id.toString())
+            ).rejects.toThrow(/cannot enroll/i);
+        });
+
+        it('enrollWithManualPayment rejects a suspended user', async () => {
+            const user = await createUser({ status: 'suspended' as any });
+            const admin = await createAdmin();
+            const course = await createCourse(admin._id);
+            const batch = await createBatch(course._id);
+
+            await expect(
+                EnrollmentService.enrollWithManualPayment(
+                    user._id.toString(), batch._id.toString(),
+                    { senderNumber: '01700000000', transactionId: 'UTR123' }
+                )
+            ).rejects.toThrow(/cannot enroll/i);
+        });
+
+        it('grantAccessByEmail rejects a suspended user', async () => {
+            const user = await createUser({ status: 'suspended' as any });
+            const admin = await createAdmin();
+            const course = await createCourse(admin._id);
+            const batch = await createBatch(course._id);
+
+            await expect(
+                EnrollmentService.grantAccessByEmail(
+                    user.email, course._id.toString(), batch._id.toString(),
+                    { id: admin._id.toString(), role: 'admin' }
+                )
+            ).rejects.toThrow(/not active/i);
+        });
+
+        it('all entry points reject enrollment in a Draft batch', async () => {
+            const user = await createUser();
+            const admin = await createAdmin();
+            const course = await createCourse(admin._id);
+            const draftBatch = await createBatch(course._id, { status: BatchStatus.Draft });
+
+            await expect(
+                EnrollmentService.initiateEnrollment(user._id.toString(), draftBatch._id.toString())
+            ).rejects.toThrow(/not accepting/i);
+
+            await expect(
+                EnrollmentService.enrollWithManualPayment(
+                    user._id.toString(), draftBatch._id.toString(),
+                    { senderNumber: '01700000000', transactionId: 'UTR-DRAFT' }
+                )
+            ).rejects.toThrow(/not accepting/i);
+        });
+
+        it('all entry points reject enrollment past the window', async () => {
+            const user = await createUser();
+            const admin = await createAdmin();
+            const course = await createCourse(admin._id);
+            const closedBatch = await createBatch(course._id, {
+                enrollmentEndDate: new Date('2024-01-01'),
+                status: BatchStatus.Upcoming,
+            });
+
+            await expect(
+                EnrollmentService.initiateEnrollment(user._id.toString(), closedBatch._id.toString())
+            ).rejects.toThrow(/enrollment period|ended/i);
+
+            await expect(
+                EnrollmentService.enrollWithManualPayment(
+                    user._id.toString(), closedBatch._id.toString(),
+                    { senderNumber: '01700000000', transactionId: 'UTR-CLOSED' }
+                )
+            ).rejects.toThrow(/enrollment period|ended/i);
+        });
+
+        it('createEnrollment creates enrollmentId and status history', async () => {
+            const user = await createUser();
+            const admin = await createAdmin();
+            const course = await createCourse(admin._id);
+            const batch = await createBatch(course._id, {
+                enrollmentEndDate: new Date('2027-01-01'),
+            });
+
+            const result = await EnrollmentService.createEnrollment({
+                userId: user._id.toString(),
+                batchId: batch._id.toString(),
+                source: 'self',
+                accessType: 'standard',
+            });
+
+            const enrollment = result.enrollment;
+            expect(enrollment.enrollmentId).toMatch(/^MA-\d+/);
+            expect(enrollment.status).toBe(EnrollmentStatus.Pending);
+
+            const history = await EnrollmentStatusHistoryModel.find({
+                enrollmentId: enrollment._id,
+            }).lean();
+            expect(history.length).toBeGreaterThan(0);
+        });
+
+        it('all entry points block a second active enrollment for the same user+batch', async () => {
+            const user = await createUser();
+            const admin = await createAdmin();
+            const course = await createCourse(admin._id);
+            const batch = await createBatch(course._id, {
+                enrollmentEndDate: new Date('2027-01-01'),
+            });
+
+            const first = await EnrollmentService.initiateEnrollment(
+                user._id.toString(), batch._id.toString()
+            );
+            expect(first.enrollment.status).toBe(EnrollmentStatus.Pending);
+
+            await EnrollmentService.transitionEnrollment(
+                first.enrollment._id.toString(),
+                EnrollmentStatus.Pending,
+                EnrollmentStatus.Active,
+                { id: user._id.toString(), role: 'learner' },
+                'Payment confirmed'
+            );
+
+            await expect(
+                EnrollmentService.initiateEnrollment(user._id.toString(), batch._id.toString())
+            ).rejects.toThrow(/already enrolled/i);
+        });
+    });
 });

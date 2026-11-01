@@ -185,9 +185,9 @@ const grantAccessByEmail = catchAsync(async (req: Request, res: Response) => {
             ? 'Student already has access to this batch'
             : 'Access granted successfully',
         data: {
-            enrollmentId: result.enrollment.enrollmentId,
-            status: result.enrollment.status,
-            accessType: (result.enrollment as any).accessType,
+            enrollmentId: result.enrollment?.enrollmentId,
+            status: result.enrollment?.status,
+            accessType: (result.enrollment as any)?.accessType,
             user: {
                 id: result.user._id,
                 name: result.user.name,
