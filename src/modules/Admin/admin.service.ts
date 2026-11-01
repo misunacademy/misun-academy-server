@@ -2,6 +2,7 @@ import { StatusCodes } from "http-status-codes";
 import ApiError from "../../errors/ApiError.js";
 import { UserModel } from "../User/user.model.js";
 import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
+import { EnrollmentService } from "../Enrollment/enrollment.service.js";
 import { BatchModel } from "../Batch/batch.model.js";
 import { CourseModel } from "../Course/course.model.js";
 import { ModuleModel } from "../Module/module.model.js";
@@ -409,20 +410,32 @@ const updateUserStatus = async (id: string, status: string, actor?: string) => {
 
     if (status === UserStatus.Suspended || status === UserStatus.Deleted) {
         await applyCounterDelta(await countActiveByBatch(), -1);
-        await EnrollmentModel.updateMany(
-            { userId: id, status: EnrollmentStatus.Active },
-            { status: EnrollmentStatus.Suspended },
-        );
+        const activeEnrollments = await EnrollmentModel.find({ userId: id, status: EnrollmentStatus.Active }).lean();
+        for (const e of activeEnrollments) {
+            await EnrollmentService.transitionEnrollment(
+                e._id.toString(),
+                EnrollmentStatus.Active,
+                EnrollmentStatus.Suspended,
+                { id: actorId, role: 'admin' },
+                `User ${status}`
+            );
+        }
         await revokeUserSessions(id);
         logger.warn(`Sessions revoked for ${status} user ${user.email}`);
     }
 
     if (status === UserStatus.Active) {
         const toReactivate = await countSuspendedByBatch();
-        await EnrollmentModel.updateMany(
-            { userId: id, status: EnrollmentStatus.Suspended },
-            { status: EnrollmentStatus.Active },
-        );
+        const suspendedEnrollments = await EnrollmentModel.find({ userId: id, status: EnrollmentStatus.Suspended }).lean();
+        for (const e of suspendedEnrollments) {
+            await EnrollmentService.transitionEnrollment(
+                e._id.toString(),
+                EnrollmentStatus.Suspended,
+                EnrollmentStatus.Active,
+                { id: actorId, role: 'admin' },
+                'User reactivated'
+            );
+        }
         await applyCounterDelta(toReactivate, 1);
     }
 
@@ -452,21 +465,19 @@ const deleteUser = async (id: string, actor?: string) => {
     // Cleanup: revoke sessions (requireAuth blocks Deleted, but existing JWE
     // cookie-cache + DB sessions stay valid until expiry otherwise) and drop
     // the profile doc. Enrollments/payments are retained for finance history,
-    // but their seats leave the Active counters.
+    // but their seats leave the Active counters. Enrollments are transitioned
+    // through transitionEnrollment so each flip is audited with status history.
     await revokeUserSessions(id);
-    const activeEnrollments = await EnrollmentModel.find({ userId: id, status: EnrollmentStatus.Active })
-        .select('batchId')
-        .lean();
-    const perBatch = new Map<string, number>();
+    const activeEnrollments = await EnrollmentModel.find({ userId: id, status: EnrollmentStatus.Active }).lean();
     for (const e of activeEnrollments) {
-        const key = (e as any).batchId?.toString();
-        if (key) perBatch.set(key, (perBatch.get(key) ?? 0) + 1);
+        await EnrollmentService.transitionEnrollment(
+            e._id.toString(),
+            EnrollmentStatus.Active,
+            EnrollmentStatus.Suspended,
+            { id: actorId, role: 'admin' },
+            'User account deleted'
+        );
     }
-    await Promise.all(
-        [...perBatch.entries()].map(([batchId, count]) =>
-            BatchModel.findByIdAndUpdate(batchId, { $inc: { currentEnrollment: -count } })
-        )
-    );
     try {
         const { ProfileModel } = await import('../Profile/profile.model.js');
         await ProfileModel.deleteOne({ user: id });

@@ -363,17 +363,25 @@ const activateEnrollmentForPayment = async (params: ActivateEnrollmentParams) =>
     return { enrollment: updatedEnrollment, notify };
 };
 
-const failEnrollment = async (
+export const failEnrollment = async (
     payment: IPayment & mongoose.Document,
     session: mongoose.ClientSession,
     failureReason: string,
 ): Promise<PaymentNotifyIntent | null> => {
     if (payment.enrollmentId) {
-        await EnrollmentModel.findOneAndUpdate(
-            { enrollmentId: payment.enrollmentId },
-            { status: EnrollmentStatus.PaymentFailed },
-            { session }
-        );
+        // Guarded enrollment transition via the shared primitive so a
+        // status-history row is written inside the same transaction.
+        const enrollment = await EnrollmentModel.findOne({ enrollmentId: payment.enrollmentId }).session(session).lean();
+        if (enrollment && enrollment.status !== EnrollmentStatus.PaymentFailed) {
+            await EnrollmentService.transitionEnrollment(
+                enrollment._id.toString(),
+                enrollment.status as EnrollmentStatus,
+                EnrollmentStatus.PaymentFailed,
+                { id: payment.userId.toString(), role: 'system' },
+                failureReason,
+                session
+            );
+        }
     }
 
     const user = await UserModel.findById(payment.userId).lean().session(session);
@@ -1800,6 +1808,7 @@ export const PaymentService = {
     initiateSSLCommerzPayment,
     verifyManualPayment,
     reVerifyPaymentWithGateway,
+    failEnrollment,
     verifyWebhookSignature,
     getStatusCallbackKey,
     mapSslGatewayStatus,

@@ -3,13 +3,14 @@ import mongoose from 'mongoose';
 import axios from 'axios';
 import { connectTestDB, disconnectTestDB, clearTestDB } from '../helpers/db.js';
 import { createUser, createAdmin, createCourse, createBatch, createPayment } from '../helpers/factories.js';
-import { PaymentService, recordGatewayPaymentAttempt } from '../../modules/Payment/payment.service.js';
+import { PaymentService, recordGatewayPaymentAttempt, failEnrollment } from '../../modules/Payment/payment.service.js';
 import { PaymentModel } from '../../modules/Payment/payment.model.js';
 import { PaymentAttemptModel } from '../../modules/Payment/paymentAttempt.model.js';
 import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
+import { EnrollmentStatusHistoryModel } from '../../modules/Enrollment/enrollmentStatusHistory.model.js';
 import { BatchModel } from '../../modules/Batch/batch.model.js';
 import { Status } from '../../types/common.js';
-import { EnrollmentStatus } from '../../types/common.js';
+import { EnrollmentStatus, BatchStatus } from '../../types/common.js';
 
 let adminId: mongoose.Types.ObjectId;
 
@@ -531,6 +532,60 @@ describe('PaymentService.updatePaymentWithEnrollStatus — guarded activation', 
 
       const payment = await PaymentModel.findOne({ transactionId }).lean();
       expect(payment?.status).toBe(Status.Pending);
+    });
+  });
+
+  describe('failEnrollment writes status history', () => {
+    it('marks enrollment PaymentFailed with a history row', async () => {
+      const user = await createUser();
+      const course = await createCourse(adminId);
+      const batch = await createBatch(course._id, { status: BatchStatus.Running });
+      const enrollmentId = `MA-FAIL-HIST-${Date.now()}`;
+
+      await EnrollmentModel.create({
+        userId: user._id,
+        batchId: batch._id,
+        enrollmentId,
+        status: EnrollmentStatus.Pending,
+      });
+      const payment = await PaymentModel.create({
+        userId: user._id,
+        batchId: batch._id,
+        transactionId: `TXN-FAIL-HIST-${Date.now()}`,
+        enrollmentId,
+        amount: 5000,
+        currency: 'BDT',
+        status: Status.Pending,
+        method: 'SSLCommerz',
+      });
+
+      const session = await mongoose.startSession();
+      session.startTransaction();
+      try {
+        const notify = await failEnrollment(payment, session, 'Gateway declined');
+        await session.commitTransaction();
+        expect(notify).not.toBeNull();
+        if (notify?.kind === 'failed') {
+          expect(notify.reason).toContain('Gateway declined');
+        }
+      } finally {
+        session.endSession();
+      }
+
+      const enrollment = await EnrollmentModel.findOne({ enrollmentId }).lean();
+      expect(enrollment?.status).toBe(EnrollmentStatus.PaymentFailed);
+      expect(enrollment).not.toBeNull();
+
+      const history = await EnrollmentStatusHistoryModel.find({
+        enrollmentId: (enrollment as any)._id,
+        to: EnrollmentStatus.PaymentFailed,
+      }).lean();
+
+      expect(history.length).toBeGreaterThan(0);
+      const row = history[0];
+      expect(row.from).toBe(EnrollmentStatus.Pending);
+      expect(row.to).toBe(EnrollmentStatus.PaymentFailed);
+      expect(row.reason).toContain('Gateway declined');
     });
   });
 });

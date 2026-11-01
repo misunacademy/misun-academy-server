@@ -5,6 +5,7 @@ import { createUser, createAdmin, createCourse, createBatch } from '../helpers/f
 import { AdminService } from '../../modules/Admin/admin.service.js';
 import { UserModel } from '../../modules/User/user.model.js';
 import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
+import { EnrollmentStatusHistoryModel } from '../../modules/Enrollment/enrollmentStatusHistory.model.js';
 import { AuditLogModel } from '../../models/auditLog.model.js';
 import { EnrollmentStatus, UserStatus } from '../../types/common.js';
 
@@ -222,6 +223,53 @@ describe('AdminService.updateUser / updateUserStatus / deleteUser', () => {
 
         const enr = await EnrollmentModel.findById(enrollment._id).lean();
         expect(enr?.status).toBe(EnrollmentStatus.Active);
+    });
+
+    it('updateUserStatus suspend writes enrollment status history', async () => {
+        const admin = await createAdmin({ role: 'superadmin' });
+        const user = await createUser({ email: `u-${uniq()}@example.com` });
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const enrollment = await createEnrollmentWithId(user._id, batch._id);
+
+        await AdminService.updateUserStatus(
+            user._id.toString(),
+            UserStatus.Suspended,
+            admin._id.toString()
+        );
+
+        const history = await EnrollmentStatusHistoryModel.find({
+            enrollmentId: enrollment._id,
+            to: EnrollmentStatus.Suspended,
+        }).lean();
+
+        expect(history.length).toBeGreaterThan(0);
+        const row = history[0];
+        expect(row.from).toBe(EnrollmentStatus.Active);
+        expect(row.to).toBe(EnrollmentStatus.Suspended);
+        expect(row.actorType).toBe('admin');
+    });
+
+    it('deleteUser writes enrollment status history for active enrollments', async () => {
+        const actor = await createUser({ email: `actor-${uniq()}@example.com`, role: 'admin' });
+        const user = await createUser({ email: `u-${uniq()}@example.com` });
+        const admin = await createAdmin({ role: 'superadmin' });
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const enrollment = await createEnrollmentWithId(user._id, batch._id);
+
+        await AdminService.deleteUser(user._id.toString(), actor._id.toString());
+
+        const history = await EnrollmentStatusHistoryModel.find({
+            enrollmentId: enrollment._id,
+            to: EnrollmentStatus.Suspended,
+        }).lean();
+
+        expect(history.length).toBeGreaterThan(0);
+        const row = history[0];
+        expect(row.from).toBe(EnrollmentStatus.Active);
+        expect(row.to).toBe(EnrollmentStatus.Suspended);
+        expect(row.actorType).toBe('admin');
     });
 
     it('updateUserStatus with unchanged status returns without auditing', async () => {
