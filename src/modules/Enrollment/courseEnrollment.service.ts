@@ -12,6 +12,11 @@ import { QuizModel } from '../Quiz/quiz.model.js';
 import mongoose from 'mongoose';
 import { CourseModel } from '../Course/course.model.js';
 
+// Minimum watch ratio required to mark a lesson complete (server-enforced,
+// not client-trusted). A lesson is only "completed" when the learner has
+// watched at least 90% of its duration via heartbeat events.
+const MIN_WATCH_RATIO = 0.9;
+
 /**
  * Classroom URLs carry course slugs, not ObjectIds (see
  * courseEnrollment.validation.ts). Resolve either form to the canonical
@@ -288,14 +293,14 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
         );
     }
 
-    // Check if lesson is already completed
+    // Check if lesson is already completed via server-validated watch time
     const existingProgress = await LessonProgressModel.findOne({
         enrollmentId: enrollment._id,
         lessonId,
     }).lean();
 
     if (existingProgress && existingProgress.status === LessonProgressStatus.Completed) {
-        // Already completed, return success
+        // Already completed via heartbeat — return existing progress
         return {
             lessonId,
             moduleId,
@@ -303,17 +308,18 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
         };
     }
 
-    // Mark lesson as completed
-    const lessonProgress = await LessonProgressModel.findOneAndUpdate(
+    // Mark lesson as in-progress only. Completion requires server-validated
+    // watch time via recordWatchTime (watchTime >= MIN_WATCH_RATIO * duration).
+    await LessonProgressModel.findOneAndUpdate(
         {
             enrollmentId: enrollment._id,
             lessonId,
         },
         {
-            status: LessonProgressStatus.Completed,
-            completedAt: new Date(),
-            watchTime: lesson.videoDuration || 0, // Assume full watch time for manual completion
-            lastWatchedPosition: lesson.videoDuration || 0,
+            status: LessonProgressStatus.InProgress,
+            completedAt: undefined,
+            watchTime: 0,
+            lastWatchedPosition: 0,
         },
         { upsert: true, new: true }
     );
@@ -324,6 +330,90 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
     return {
         lessonId,
         moduleId,
+        completedAt: undefined,
+    };
+};
+
+/**
+ * Record a server-validated watch-time heartbeat for a lesson.
+ *
+ * The client is never trusted to self-report completion. This endpoint:
+ *   1. Rejects watchTime exceeding video duration (tamper attempt)
+ *   2. Persists watchTime and lastWatchedPosition
+ *   3. Marks the lesson complete ONLY when watchTime >= MIN_WATCH_RATIO
+ *      of videoDuration (server-enforced minimum-watch-ratio)
+ *
+ * A lesson can only reach Completed via this heartbeat path; completeLesson
+ * no longer mints a fake full watch time.
+ */
+const recordWatchTime = async (
+    userId: string,
+    courseId: string,
+    moduleId: string,
+    lessonId: string,
+    watchTime: number,
+    lastWatchedPosition: number
+) => {
+    const resolvedCourseId = await resolveCourseId(courseId);
+    const module = await ModuleModel.findById(moduleId).lean();
+    if (!module) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+    }
+    if (module.courseId.toString() !== resolvedCourseId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Module does not belong to this course');
+    }
+    if (!module.batchId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Module is not assigned to a batch');
+    }
+    const batchId = module.batchId.toString();
+
+    const enrollment = await findEnrollmentForCourse(userId, resolvedCourseId, [
+        EnrollmentStatus.Active,
+    ], batchId);
+    if (!enrollment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'No active enrollment found for this course');
+    }
+
+    const lesson = await LessonModel.findById(lessonId).lean();
+    if (!lesson || lesson.moduleId.toString() !== moduleId) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found or does not belong to the specified module');
+    }
+
+    const videoDuration = lesson.videoDuration || 0;
+    if (watchTime < 0 || watchTime > videoDuration) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            `watchTime ${watchTime} exceeds video duration ${videoDuration}`
+        );
+    }
+
+    const watchRatio = videoDuration > 0 ? watchTime / videoDuration : 0;
+    const isComplete = watchRatio >= MIN_WATCH_RATIO;
+
+    const lessonProgress = await LessonProgressModel.findOneAndUpdate(
+        {
+            enrollmentId: enrollment._id,
+            lessonId,
+        },
+        {
+            status: isComplete ? LessonProgressStatus.Completed : LessonProgressStatus.InProgress,
+            completedAt: isComplete ? new Date() : undefined,
+            watchTime,
+            lastWatchedPosition,
+        },
+        { upsert: true, new: true }
+    );
+
+    if (isComplete) {
+        await recalculateModuleProgress(enrollment._id.toString(), moduleId);
+    }
+
+    return {
+        lessonId,
+        moduleId,
+        watchTime,
+        lastWatchedPosition,
+        completed: isComplete,
         completedAt: lessonProgress.completedAt,
     };
 };
@@ -437,4 +527,5 @@ const unlockNextModule = async (enrollmentId: string, currentModuleId: string) =
 export const CourseEnrollmentService = {
     getCourseProgress,
     completeLesson,
+    recordWatchTime,
 };

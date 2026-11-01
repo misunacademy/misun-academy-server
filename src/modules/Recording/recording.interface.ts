@@ -19,4 +19,9 @@ export interface IRecording {
     createdBy: Types.ObjectId;
     createdAt?: Date;
     updatedAt?: Date;
+    // Content protection
+    signedUrl?: string;
+    signedUrlExpiresAt?: Date;
+    recordingDrmProtected?: boolean;
+    recordingWatermarked?: boolean;
 }

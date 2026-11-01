@@ -284,3 +284,55 @@ describe('LessonService.reorderLessons', () => {
         ).rejects.toThrow(/lessonOrders must be an array/i);
     });
 });
+
+describe('Fix 15: Content protection — signed URLs', () => {
+    it('lesson supports signedUrl field for expiring, domain-restricted delivery', async () => {
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const mod = await createModule(course._id, batch._id, 0);
+
+        const lesson = await LessonModel.create({
+            moduleId: mod._id,
+            title: 'Protected Video',
+            type: LessonType.Video,
+            orderIndex: 0,
+            videoSource: 'youtube',
+            videoId: 'dQw4w9WgXcQ',
+            videoUrl: 'https://youtube.com/watch?v=dQw4w9WgXcQ',
+            videoDuration: 600,
+            videoDrmProtected: true,
+            videoWatermarked: true,
+            signedUrl: 'https://res.cloudinary.com/demo/video/upload/signed/abc123',
+            signedUrlExpiresAt: new Date(Date.now() + 3600000),
+        });
+
+        expect(lesson.videoDrmProtected).toBe(true);
+        expect(lesson.videoWatermarked).toBe(true);
+        expect(lesson.signedUrl).toContain('cloudinary');
+        expect(lesson.signedUrlExpiresAt).toBeDefined();
+    });
+
+    it('lesson defaults signedUrl fields to undefined when not provided', async () => {
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const mod = await createModule(course._id, batch._id, 0);
+
+        const lesson = await LessonModel.create({
+            moduleId: mod._id,
+            title: 'Public Video',
+            type: LessonType.Video,
+            orderIndex: 0,
+            videoSource: 'youtube',
+            videoId: 'dQw4w9WgXcQ',
+            videoUrl: 'https://youtube.com/watch?v=dQw4w9WgXcQ',
+            videoDuration: 600,
+        });
+
+        expect(lesson.videoDrmProtected).toBe(false);
+        expect(lesson.videoWatermarked).toBe(false);
+        expect(lesson.signedUrl).toBeUndefined();
+        expect(lesson.signedUrlExpiresAt).toBeUndefined();
+    });
+});

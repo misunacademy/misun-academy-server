@@ -63,6 +63,21 @@ const lessonSchema = new Schema<ILesson>(
             type: Boolean,
             default: true,
         },
+        // Content protection: signed, expiring, domain-restricted delivery
+        signedUrl: {
+            type: String,
+        },
+        signedUrlExpiresAt: {
+            type: Date,
+        },
+        videoDrmProtected: {
+            type: Boolean,
+            default: false,
+        },
+        videoWatermarked: {
+            type: Boolean,
+            default: false,
+        },
         resources: [
             {
                 title: { type: String, required: true },

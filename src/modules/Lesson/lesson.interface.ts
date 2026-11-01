@@ -17,6 +17,11 @@ export interface ILesson {
     isMandatory: boolean;
     isPublished?: boolean;
     resources?: ILessonResource[];
+    // Content protection
+    signedUrl?: string;
+    signedUrlExpiresAt?: Date;
+    videoDrmProtected?: boolean;
+    videoWatermarked?: boolean;
     createdAt?: Date;
     updatedAt?: Date;
 }

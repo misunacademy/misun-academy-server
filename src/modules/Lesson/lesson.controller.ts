@@ -86,6 +86,24 @@ const reorderLessons = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+/**
+ * Generate a signed, expiring URL for lesson video delivery.
+ * Requires active enrollment in the lesson's batch.
+ */
+const generateSignedVideoUrl = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.user as any;
+    const { lessonId } = req.params as { lessonId: string };
+
+    const result = await LessonService.generateSignedVideoUrl(lessonId, id);
+
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: 'Signed video URL generated',
+        data: result,
+    });
+});
+
 export const LessonController = {
     createLesson,
     getModuleLessons,
@@ -93,4 +111,5 @@ export const LessonController = {
     updateLesson,
     deleteLesson,
     reorderLessons,
+    generateSignedVideoUrl,
 };

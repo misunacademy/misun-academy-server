@@ -15,7 +15,7 @@ import { LessonProgressModel } from '../../modules/Progress/lessonProgress.model
 import { ModuleProgressModel } from '../../modules/Progress/moduleProgress.model.js';
 import { CourseEnrollmentService } from '../../modules/Enrollment/courseEnrollment.service.js';
 import { initializeModuleProgress } from '../../modules/Enrollment/enrollmentProgress.service.js';
-import { ProgressStatus, LessonType, EnrollmentStatus } from '../../types/common.js';
+import { ProgressStatus, LessonType, EnrollmentStatus, LessonProgressStatus } from '../../types/common.js';
 
 const buildLesson = (moduleId: mongoose.Types.ObjectId, orderIndex: number, title: string) =>
     LessonModel.create({
@@ -51,6 +51,16 @@ describe('CourseEnrollmentService.completeLesson — sequential locking (FLOW-01
         const lesson = await buildLesson(m1._id, 1, 'Lesson 1');
         const enrollment = await createActiveEnrollment(user._id, batch._id);
         await initializeModuleProgress(enrollment._id.toString());
+
+        // Server-validated watch time heartbeat (>= 90% of 600s)
+        await CourseEnrollmentService.recordWatchTime(
+            user._id.toString(),
+            course._id.toString(),
+            m1._id.toString(),
+            lesson._id.toString(),
+            541,
+            541
+        );
 
         const result = await CourseEnrollmentService.completeLesson(
             user._id.toString(),
@@ -107,6 +117,15 @@ describe('CourseEnrollmentService.completeLesson — sequential locking (FLOW-01
         });
         expect(orphanedAttempt).toBe(0);
 
+        // Complete lesson1 via server-validated watch time
+        await CourseEnrollmentService.recordWatchTime(
+            user._id.toString(),
+            course._id.toString(),
+            m1._id.toString(),
+            lesson1._id.toString(),
+            541,
+            541
+        );
         await CourseEnrollmentService.completeLesson(
             user._id.toString(),
             course._id.toString(),
@@ -129,6 +148,16 @@ describe('CourseEnrollmentService.completeLesson — sequential locking (FLOW-01
         const m1 = await createModule(course._id, batch._id, 1);
         const lesson = await buildLesson(m1._id, 1, 'Orphan Lesson');
         const enrollment = await createActiveEnrollment(user._id, batch._id);
+
+        // Server-validated watch time heartbeat (>= 90% of 600s)
+        await CourseEnrollmentService.recordWatchTime(
+            user._id.toString(),
+            course._id.toString(),
+            m1._id.toString(),
+            lesson._id.toString(),
+            541,
+            541
+        );
 
         const result = await CourseEnrollmentService.completeLesson(
             user._id.toString(),
@@ -209,5 +238,112 @@ describe('CourseEnrollmentService.completeLesson — sequential locking (FLOW-01
 
         const user1Progress = await LessonProgressModel.find({ enrollmentId: enrollment1._id });
         expect(user1Progress).toHaveLength(1);
+    });
+});
+
+describe('Fix 15: Progress integrity — server-validated watch time', () => {
+    it('does NOT auto-mark complete when client sends watchTime=0 (tamper attempt)', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const m1 = await createModule(course._id, batch._id, 1);
+        const lesson = await buildLesson(m1._id, 1, 'Video Lesson');
+        const enrollment = await createActiveEnrollment(user._id, batch._id);
+        await initializeModuleProgress(enrollment._id.toString());
+
+        // completeLesson should NOT mark complete without server-validated watch time
+        const result = await CourseEnrollmentService.completeLesson(
+            user._id.toString(),
+            course._id.toString(),
+            m1._id.toString(),
+            lesson._id.toString()
+        );
+        expect(result.lessonId.toString()).toBe(lesson._id.toString());
+
+        const progress = await LessonProgressModel.findOne({
+            enrollmentId: enrollment._id,
+            lessonId: lesson._id,
+        });
+        // 600s duration, 0 watch time -> must NOT be completed (below 90% ratio)
+        expect(progress?.status).toBe(LessonProgressStatus.InProgress);
+    });
+
+    it('does NOT mark complete when watchTime < 90% of video duration', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const m1 = await createModule(course._id, batch._id, 1);
+        const lesson = await buildLesson(m1._id, 1, 'Video Lesson'); // 600s duration
+        const enrollment = await createActiveEnrollment(user._id, batch._id);
+        await initializeModuleProgress(enrollment._id.toString());
+
+        // Simulate heartbeat with watchTime = 500s (< 90% of 600s)
+        await CourseEnrollmentService.recordWatchTime(
+            user._id.toString(),
+            course._id.toString(),
+            m1._id.toString(),
+            lesson._id.toString(),
+            500,
+            500
+        );
+
+        const progress = await LessonProgressModel.findOne({
+            enrollmentId: enrollment._id,
+            lessonId: lesson._id,
+        });
+        expect(progress?.status).toBe(LessonProgressStatus.InProgress);
+        expect(progress?.watchTime).toBe(500);
+    });
+
+    it('marks complete when server-validated watchTime >= 90% of video duration', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const m1 = await createModule(course._id, batch._id, 1);
+        const lesson = await buildLesson(m1._id, 1, 'Video Lesson'); // 600s duration
+        const enrollment = await createActiveEnrollment(user._id, batch._id);
+        await initializeModuleProgress(enrollment._id.toString());
+
+        // Heartbeat with watchTime = 541s (>= 90% of 600s)
+        await CourseEnrollmentService.recordWatchTime(
+            user._id.toString(),
+            course._id.toString(),
+            m1._id.toString(),
+            lesson._id.toString(),
+            541,
+            541
+        );
+
+        const progress = await LessonProgressModel.findOne({
+            enrollmentId: enrollment._id,
+            lessonId: lesson._id,
+        });
+        expect(progress?.status).toBe(LessonProgressStatus.Completed);
+        expect(progress?.completedAt).toBeDefined();
+    });
+
+    it('rejects watchTime exceeding video duration (tamper attempt)', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        const m1 = await createModule(course._id, batch._id, 1);
+        const lesson = await buildLesson(m1._id, 1, 'Video Lesson'); // 600s duration
+        const enrollment = await createActiveEnrollment(user._id, batch._id);
+        await initializeModuleProgress(enrollment._id.toString());
+
+        await expect(
+            CourseEnrollmentService.recordWatchTime(
+                user._id.toString(),
+                course._id.toString(),
+                m1._id.toString(),
+                lesson._id.toString(),
+                700, // exceeds 600s duration
+                700
+            )
+        ).rejects.toThrow(/exceeds|invalid/i);
     });
 });

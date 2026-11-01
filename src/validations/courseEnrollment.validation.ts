@@ -13,3 +13,12 @@ export const completeLessonSchema = z.object({
         lessonId: objectIdString,
     }),
 });
+
+export const recordWatchTimeSchema = z.object({
+    body: z.object({
+        moduleId: objectIdString,
+        lessonId: objectIdString,
+        watchTime: z.number().nonnegative('watchTime must be non-negative'),
+        lastWatchedPosition: z.number().nonnegative('lastWatchedPosition must be non-negative'),
+    }),
+});
