@@ -28,6 +28,7 @@ import { AuditLogRoutes } from '../modules/AuditLog/auditLog.routes.js';
 import { BootcampRoutes } from '../modules/Bootcamp/bootcamp.routes.js';
 import { AnnouncementRoutes } from '../modules/Announcement/announcement.routes.js';
 import { RefundRoutes } from '../modules/Refund/refund.routes.js';
+import { PrivacyRoutes } from '../modules/Privacy/privacy.routes.js';
 
 
 const router = express.Router();
@@ -145,6 +146,10 @@ const moduleRoutes = [
     {
         path: '/announcements',
         route: AnnouncementRoutes,
+    },
+    {
+        path: '/privacy',
+        route: PrivacyRoutes,
     },
 ];
 

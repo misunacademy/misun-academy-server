@@ -74,6 +74,17 @@ const paymentSchema = new Schema<IPayment>(
     },
     {
         timestamps: true,
+        toJSON: {
+            transform: (_, ret) => {
+                if (ret.gatewayResponse && typeof ret.gatewayResponse === 'object') {
+                    delete (ret.gatewayResponse as Record<string, unknown>).cardNumber;
+                    delete (ret.gatewayResponse as Record<string, unknown>).cvv;
+                    delete (ret.gatewayResponse as Record<string, unknown>).cardCvv;
+                    delete (ret.gatewayResponse as Record<string, unknown>).securityCode;
+                }
+                return ret;
+            },
+        },
     }
 );
 
