@@ -6,6 +6,7 @@ import { EnrollmentService } from '../../modules/Enrollment/enrollment.service.j
 import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
 import { EnrollmentStatusHistoryModel } from '../../modules/Enrollment/enrollmentStatusHistory.model.js';
 import { EnrollmentStatus, BatchStatus, Status } from '../../types/common.js';
+import { EmailLogModel } from '../../models/email.model.js';
 
 // Register models needed for populate refs
 import '../../modules/Instructor/instructor.model.js';
@@ -707,5 +708,106 @@ describe('EnrollmentService.updateEnrollmentStatus', () => {
             count = await EnrollmentService.countActiveEnrollments(batch._id.toString());
             expect(count).toBe(1);
         });
+    });
+});
+
+describe('Fix 9: Transactional outbox — emails via queueEmail, idempotent', () => {
+    it('queueEmail with same eventId+eventType produces exactly one email row', async () => {
+        const { queueEmail } = await import('../../services/emailService.js');
+        const { EmailLogModel } = await import('../../models/email.model.js');
+
+        await queueEmail(
+            'test@example.com',
+            'Test Subject',
+            '<p>Test HTML</p>',
+            { eventId: 'evt-unique-1', eventType: 'enrollment_confirmation', priority: 'high' }
+        );
+        await queueEmail(
+            'test@example.com',
+            'Test Subject',
+            '<p>Test HTML</p>',
+            { eventId: 'evt-unique-1', eventType: 'enrollment_confirmation', priority: 'high' }
+        );
+
+        const count = await EmailLogModel.countDocuments({
+            eventId: 'evt-unique-1',
+            eventType: 'enrollment_confirmation',
+        });
+        expect(count).toBe(1);
+    });
+
+    it('queueEmail with different eventId produces separate rows', async () => {
+        const { queueEmail } = await import('../../services/emailService.js');
+        const { EmailLogModel } = await import('../../models/email.model.js');
+
+        await queueEmail(
+            'test@example.com',
+            'Subject A',
+            '<p>HTML A</p>',
+            { eventId: 'evt-a', eventType: 'type-a' }
+        );
+        await queueEmail(
+            'test@example.com',
+            'Subject B',
+            '<p>HTML B</p>',
+            { eventId: 'evt-b', eventType: 'type-b' }
+        );
+
+        const count = await EmailLogModel.countDocuments({ eventType: { $exists: true } });
+        expect(count).toBe(2);
+    });
+
+    it('EmailLogModel created inside transaction is rolled back on abort', async () => {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        try {
+            await EmailLogModel.create([
+                {
+                    to: 'rollback@example.com',
+                    subject: 'Rollback Test',
+                    html: '<p>Should be rolled back</p>',
+                    eventId: 'evt-rollback-1',
+                    eventType: 'rollback_test',
+                    status: 'pending',
+                    priority: 'normal',
+                    maxRetries: 3,
+                },
+            ], { session });
+
+            await session.abortTransaction();
+        } finally {
+            session.endSession();
+        }
+
+        const count = await EmailLogModel.countDocuments({ eventId: 'evt-rollback-1' });
+        expect(count).toBe(0);
+    });
+
+    it('EmailLogModel created inside transaction persists on commit', async () => {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        try {
+            await EmailLogModel.create([
+                {
+                    to: 'commit@example.com',
+                    subject: 'Commit Test',
+                    html: '<p>Should persist</p>',
+                    eventId: 'evt-commit-1',
+                    eventType: 'commit_test',
+                    status: 'pending',
+                    priority: 'high',
+                    maxRetries: 3,
+                },
+            ], { session });
+
+            await session.commitTransaction();
+        } finally {
+            session.endSession();
+        }
+
+        const count = await EmailLogModel.countDocuments({ eventId: 'evt-commit-1' });
+        expect(count).toBe(1);
     });
 });

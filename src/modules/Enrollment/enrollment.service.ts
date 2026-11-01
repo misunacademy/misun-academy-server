@@ -16,8 +16,7 @@ import mongoose from 'mongoose';
 import crypto from 'crypto';
 import { StudentIdCounterModel } from '../User/studentIdCounter.model.js';
 import { NotificationService } from '../Notification/notification.service.js';
-import { sendCourseWaitingPaymentVerificationEmail } from '../../services/courseEmailRouter.js';
-import { logger } from '../../config/logger.js';
+import { queueEmail } from '../../services/emailService.js';
 import { CourseBrand, deriveCourseBrand } from '../../utils/courseBrand.js';
 import { recordAudit } from '../../models/auditLog.model.js';
 import {
@@ -676,36 +675,34 @@ const enrollWithManualPayment = async (
 
         await session.commitTransaction();
 
-        setImmediate(async () => {
-            try {
-                const user = await UserModel.findById(userId).lean();
-                if (user) {
-                    const courseData = (batch.courseId as any);
-                    const courseTitle = typeof courseData === 'object' ? (courseData?.title || '') : '';
-                    await NotificationService.createNotificationForAdmins({
-                        type: 'payment_pending',
-                        title: 'Manual Payment Pending',
-                        message: `${user.name} submitted a manual payment for ${courseTitle || batch.title}`,
-                        link: '/dashboard/admin/payment',
-                    });
+        // Enqueue payment-pending email (durable, idempotent via eventId).
+        // Replaces fire-and-forget setImmediate that could be dropped in serverless.
+        const userRow = await UserModel.findById(userId).lean();
+        if (userRow) {
+            const courseData = (batch.courseId as any);
+            const courseTitle = typeof courseData === 'object' ? (courseData?.title || '') : '';
+            const courseLabel = courseTitle
+                ? `${courseTitle} - ${batch.title}`
+                : batch.title;
 
-                    const rawCourseName = courseTitle;
-                    const courseSlug = typeof courseData === 'object' ? (courseData?.slug || '') : '';
-                    const courseLabel = rawCourseName
-                        ? `${rawCourseName} - ${batch.title}`
-                        : batch.title;
+            await NotificationService.createNotificationForAdmins({
+                type: 'payment_pending',
+                title: 'Manual Payment Pending',
+                message: `${userRow.name} submitted a manual payment for ${courseTitle || batch.title}`,
+                link: '/dashboard/admin/payment',
+            });
 
-                    sendCourseWaitingPaymentVerificationEmail(
-                        { courseName: rawCourseName || batch.title, courseSlug },
-                        user,
-                        courseLabel,
-                        paymentTransactionId
-                    );
+            await queueEmail(
+                userRow.email,
+                `Payment Pending — ${courseLabel}`,
+                `<p>Hello ${userRow.name},</p><p>We received your manual payment for <strong>${courseLabel}</strong> (Transaction: ${paymentTransactionId}).</p><p>Your access will be activated once the payment is verified, usually within 12–24 hours.</p>`,
+                {
+                    eventId: `payment_pending_${paymentTransactionId}`,
+                    eventType: 'payment_pending',
+                    priority: 'high',
                 }
-            } catch (error) {
-                logger.error(error, 'Failed to send manual payment notification');
-            }
-        });
+            );
+        }
 
         return {
             enrollment,
@@ -868,19 +865,27 @@ const grantAccessByEmail = async (
             await initializeModuleProgress(enrollment._id.toString());
 
             const course = (batch.courseId as any) || {};
-            setImmediate(async () => {
-                try {
-                    await NotificationService.createNotification({
-                        userId: user._id.toString(),
-                        type: 'access_granted',
-                        title: 'Course Access Granted',
-                        message: `You have been granted access to ${course?.title || 'Course'} - ${batch?.title}`,
-                        link: '/my-classes',
-                    });
-                } catch (error) {
-                    logger.error(error, 'Failed to send access granted notification');
-                }
+
+            // In-app notification (no longer fire-and-forget)
+            await NotificationService.createNotification({
+                userId: user._id.toString(),
+                type: 'access_granted',
+                title: 'Course Access Granted',
+                message: `You have been granted access to ${course?.title || 'Course'} - ${batch?.title}`,
+                link: '/my-classes',
             });
+
+            // Enqueue access-granted email (durable, idempotent via eventId)
+            await queueEmail(
+                user.email,
+                `Access Granted — ${course?.title || 'Course'}`,
+                `<p>Hello ${user.name},</p><p>You now have access to <strong>${course?.title || 'Course'}</strong> (${batch?.title}).</p><p>Start learning at /my-classes.</p>`,
+                {
+                    eventId: `access_granted_${enrollment._id}`,
+                    eventType: 'access_granted',
+                    priority: 'high',
+                }
+            );
         }
 
         return {
