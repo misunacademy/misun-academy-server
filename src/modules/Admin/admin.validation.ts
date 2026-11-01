@@ -53,3 +53,9 @@ export const updateUserStatusSchema = z.object({
         status: z.enum([UserStatus.Active, UserStatus.Suspended, UserStatus.Deleted]),
     }),
 });
+
+export const deleteUserSchema = z.object({
+    body: z.object({
+        deletionReason: z.string().trim().min(1, { message: 'Deletion reason is required' }),
+    }),
+});

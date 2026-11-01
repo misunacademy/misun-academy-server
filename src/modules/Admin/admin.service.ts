@@ -450,24 +450,41 @@ const updateUserStatus = async (id: string, status: string, actor?: string) => {
     return user;
 };
 
-const deleteUser = async (id: string, actor?: string) => {
+const deleteUser = async (id: string, actor?: string, deletionReason?: string) => {
     const actorId = typeof actor === 'string' ? actor : (actor as Actor | undefined)?.id;
     if (actorId && id.toString() === actorId.toString()) {
         throw new ApiError(StatusCodes.FORBIDDEN, 'You cannot delete your own account');
     }
 
-    const user = await UserModel.findByIdAndDelete(id);
+    if (!deletionReason?.trim()) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'deletionReason is required');
+    }
 
+    const user = await UserModel.findById(id);
     if (!user) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
     }
 
-    // Cleanup: revoke sessions (requireAuth blocks Deleted, but existing JWE
-    // cookie-cache + DB sessions stay valid until expiry otherwise) and drop
-    // the profile doc. Enrollments/payments are retained for finance history,
-    // but their seats leave the Active counters. Enrollments are transitioned
-    // through transitionEnrollment so each flip is audited with status history.
-    await revokeUserSessions(id);
+    // Stage 1: soft-delete — keep the row (and its financial/academic
+    // records linked by userId) but mark it deleted and anonymize PII later.
+    user.deletedAt = new Date();
+    user.deletedBy = actorId;
+    user.deletionReason = deletionReason.trim();
+    user.status = UserStatus.Deleted;
+    await user.save();
+
+    // Revoke every Better-Auth session for this user so stale JWE cookies
+    // and DB sessions cannot be used after deletion.
+    const db = mongoose.connection.db;
+    if (db) {
+        await db.collection('sessions').deleteMany({
+            userId: { $in: [id, new mongoose.Types.ObjectId(id)] },
+        });
+    }
+
+    // Transition active enrollments to Suspended so the user loses access
+    // and seat counters are decremented. Each transition is transactional
+    // via transitionEnrollment.
     const activeEnrollments = await EnrollmentModel.find({ userId: id, status: EnrollmentStatus.Active }).lean();
     for (const e of activeEnrollments) {
         await EnrollmentService.transitionEnrollment(
@@ -478,6 +495,9 @@ const deleteUser = async (id: string, actor?: string) => {
             'User account deleted'
         );
     }
+
+    // Drop the profile doc (PII) — enrollment/payment/certificate records
+    // are retained for finance history and remain linked by userId.
     try {
         const { ProfileModel } = await import('../Profile/profile.model.js');
         await ProfileModel.deleteOne({ user: id });
@@ -490,8 +510,62 @@ const deleteUser = async (id: string, actor?: string) => {
         action: 'user.delete',
         targetType: 'User',
         targetId: id,
-        metadata: { email: user.email, role: user.role },
+        metadata: { email: user.email, role: user.role, deletionReason: user.deletionReason ?? '' },
     });
+
+    return user;
+};
+
+/**
+ * Stage 2: anonymize PII for a soft-deleted user.
+ *
+ * Idempotent: safe to run multiple times. Removes OAuth account links so the
+ * same person can sign up again later as a fresh user instead of colliding
+ * with the old record. Financial and academic records remain linked by userId.
+ */
+const anonymizeUser = async (id: string) => {
+    const user = await UserModel.findById(id);
+    if (!user) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+    }
+
+    if (user.status !== UserStatus.Deleted) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'User must be soft-deleted before anonymization'
+        );
+    }
+    if (user.anonymizedAt) {
+        return user; // already anonymized
+    }
+
+    // Anonymize PII. .invalid TLD is reserved and can never receive mail;
+    // the userId suffix keeps the unique email index happy.
+    user.email = `deleted+${(user._id as any).toString()}@deleted.invalid`;
+    user.name = 'Deleted User';
+    user.phone = undefined;
+    user.address = undefined;
+    user.avatar = undefined;
+    user.anonymizedAt = new Date();
+    await user.save();
+
+    // Remove OAuth account links (Google) so the person can re-sign up later.
+    const db = mongoose.connection.db;
+    if (db) {
+        await db.collection('account').deleteMany({
+            userId: new mongoose.Types.ObjectId(id),
+        });
+    }
+
+    await recordAudit({
+        actor: user.deletedBy ?? 'system',
+        action: 'user.anonymize',
+        targetType: 'User',
+        targetId: id,
+        metadata: { anonymizedAt: user.anonymizedAt },
+    });
+
+    return user;
 };
 
 const sendEnrollmentReminder = async () => {
@@ -792,6 +866,7 @@ export const AdminService = {
     updateUser,
     updateUserStatus,
     deleteUser,
+    anonymizeUser,
     sendEnrollmentReminder,
     sendNewsUpdate,
     sendRunningBatchProgressReminder,

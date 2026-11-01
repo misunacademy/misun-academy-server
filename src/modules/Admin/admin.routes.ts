@@ -1,6 +1,6 @@
 import express from 'express';
 import validateRequest from '../../middlewares/validateRequest.js';
-import { loginValidationSchema, adminRegisterSchema, updateUserSchema, updateUserStatusSchema, sendNewsUpdateSchema, sendBatchProgressReminderSchema, sendBatchIncompleteReminderSchema } from './admin.validation.js';
+import { loginValidationSchema, adminRegisterSchema, updateUserSchema, updateUserStatusSchema, sendNewsUpdateSchema, sendBatchProgressReminderSchema, sendBatchIncompleteReminderSchema, deleteUserSchema } from './admin.validation.js';
 import { AdminAuthController } from './admin.controller.js';
 import { requireAuth, requireAdmin, requireSuperAdmin } from '../../middlewares/betterAuth.js';
 
@@ -57,6 +57,7 @@ router.delete(
     '/users/:id',
     requireAuth,
     requireSuperAdmin,
+    validateRequest(deleteUserSchema),
     AdminAuthController.deleteUser
 );
 

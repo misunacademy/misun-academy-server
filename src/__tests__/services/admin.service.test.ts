@@ -258,7 +258,7 @@ describe('AdminService.updateUser / updateUserStatus / deleteUser', () => {
         const batch = await createBatch(course._id);
         const enrollment = await createEnrollmentWithId(user._id, batch._id);
 
-        await AdminService.deleteUser(user._id.toString(), actor._id.toString());
+        await AdminService.deleteUser(user._id.toString(), actor._id.toString(), 'Test cleanup');
 
         const history = await EnrollmentStatusHistoryModel.find({
             enrollmentId: enrollment._id,
@@ -285,20 +285,117 @@ describe('AdminService.updateUser / updateUserStatus / deleteUser', () => {
         ).rejects.toThrow(/User not found/i);
     });
 
-    it('deleteUser removes the user and audits', async () => {
+    it('deleteUser soft-deletes instead of hard-delete', async () => {
         const actor = await createUser({ email: `actor-${uniq()}@example.com`, role: 'admin' });
         const user = await createUser({ email: `u-${uniq()}@example.com` });
 
-        await AdminService.deleteUser(user._id.toString(), actor._id.toString());
-        expect(await UserModel.countDocuments({ _id: user._id })).toBe(0);
+        await AdminService.deleteUser(user._id.toString(), actor._id.toString(), 'GDPR request');
+
+        const softDeleted = await UserModel.findById(user._id).lean();
+        expect(softDeleted).not.toBeNull();
+        expect(softDeleted?.status).toBe(UserStatus.Deleted);
+        expect(softDeleted?.deletedAt).toBeDefined();
+        expect(softDeleted?.deletedBy).toBe(actor._id.toString());
+        expect(softDeleted?.deletionReason).toBe('GDPR request');
+
         const audit = await AuditLogModel.findOne({ action: 'user.delete' }).lean();
         expect(audit).toBeDefined();
     });
 
+    it('deleteUser requires deletionReason', async () => {
+        const actor = await createUser({ email: `actor-${uniq()}@example.com`, role: 'admin' });
+        const user = await createUser({ email: `u-${uniq()}@example.com` });
+
+        await expect(
+            AdminService.deleteUser(user._id.toString(), actor._id.toString())
+        ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('deleteUser keeps user record queryable by userId for financial history', async () => {
+        const actor = await createUser({ email: `actor-${uniq()}@example.com`, role: 'admin' });
+        const user = await createUser({ email: `u-${uniq()}@example.com` });
+        const admin = await createAdmin({ role: 'superadmin' });
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        await createEnrollmentWithId(user._id, batch._id);
+
+        await AdminService.deleteUser(user._id.toString(), actor._id.toString(), 'GDPR request');
+
+        const userRecord = await UserModel.findById(user._id).lean();
+        expect(userRecord?._id.toString()).toBe(user._id.toString());
+        expect(userRecord?.status).toBe(UserStatus.Deleted);
+    });
+
     it('deleteUser throws NOT_FOUND for unknown id', async () => {
         await expect(
-            AdminService.deleteUser(new mongoose.Types.ObjectId().toString())
+            AdminService.deleteUser(new mongoose.Types.ObjectId().toString(), 'actor', 'cleanup')
         ).rejects.toThrow(/User not found/i);
+    });
+
+    describe('anonymizeUser (stage 2 data erasure)', () => {
+        it('anonymizes PII for a soft-deleted user', async () => {
+            const actor = await createUser({ email: `actor-${uniq()}@example.com`, role: 'admin' });
+            const user = await createUser({ email: `u-${uniq()}@example.com` });
+
+            await AdminService.deleteUser(user._id.toString(), actor._id.toString(), 'GDPR request');
+
+            const anonymized = await AdminService.anonymizeUser(user._id.toString());
+
+        expect(anonymized.email).toBe(`deleted+${user._id}@deleted.invalid`);
+        expect(anonymized.name).toBe('Deleted User');
+        expect(anonymized.phone).toBeUndefined();
+        expect(anonymized.address).toBeUndefined();
+        expect(anonymized.anonymizedAt).toBeDefined();
+
+            const persisted = await UserModel.findById(user._id).lean();
+            expect(persisted?.email).toBe(`deleted+${user._id}@deleted.invalid`);
+            expect(persisted?.name).toBe('Deleted User');
+            expect(persisted?.anonymizedAt).toBeDefined();
+        });
+
+        it('anonymizeUser throws if user is not soft-deleted', async () => {
+            const user = await createUser({ email: `u-${uniq()}@example.com` });
+
+            await expect(
+                AdminService.anonymizeUser(user._id.toString())
+            ).rejects.toMatchObject({ statusCode: 400 });
+        });
+
+        it('anonymizeUser removes OAuth account links', async () => {
+            const actor = await createUser({ email: `actor-${uniq()}@example.com`, role: 'admin' });
+            const user = await createUser({ email: `u-${uniq()}@example.com` });
+
+            // Create an OAuth account link (Better Auth stores these in the 'account' collection)
+            const db = mongoose.connection.db;
+            if (db) {
+                await db.collection('account').insertOne({
+                    userId: user._id,
+                    provider: 'google',
+                    providerAccountId: 'google-12345',
+                });
+            }
+
+            await AdminService.deleteUser(user._id.toString(), actor._id.toString(), 'GDPR request');
+            await AdminService.anonymizeUser(user._id.toString());
+
+            const oauthLinks = db ? await db.collection('account').find({ userId: user._id }).toArray() : [];
+            expect(oauthLinks).toHaveLength(0);
+        });
+
+        it('anonymizeUser keeps financial and academic records linked by userId', async () => {
+            const actor = await createUser({ email: `actor-${uniq()}@example.com`, role: 'admin' });
+            const user = await createUser({ email: `u-${uniq()}@example.com` });
+            const admin = await createAdmin({ role: 'superadmin' });
+            const course = await createCourse(admin._id);
+            const batch = await createBatch(course._id);
+            const enrollment = await createEnrollmentWithId(user._id, batch._id);
+
+            await AdminService.deleteUser(user._id.toString(), actor._id.toString(), 'GDPR request');
+            await AdminService.anonymizeUser(user._id.toString());
+
+            const enrollmentRecord = await EnrollmentModel.findById(enrollment._id).lean();
+            expect(enrollmentRecord?.userId.toString()).toBe(user._id.toString());
+        });
     });
 });
 
