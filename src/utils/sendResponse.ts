@@ -10,7 +10,7 @@ const sendResponse = <T>(
         statusCode: data.statusCode,
         message: data.message || 'Success',
         meta: data.meta,
-        data: data.data || null
+        data: data.data ?? null
     };
 
     if (data.serverTimestamp !== undefined) {

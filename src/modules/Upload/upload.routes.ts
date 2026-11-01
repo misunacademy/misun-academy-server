@@ -58,12 +58,14 @@ router.post(
 );
 
 /**
- * @route   DELETE /api/v1/upload/:publicId
+ * @route   DELETE /api/v1/upload/* (splat)
  * @desc    Delete image from Cloudinary
  * @access  Protected (only owner or admin can delete)
+ * @note    Splat (not :publicId): Cloudinary public IDs may contain `/`
+ *          (folder/asset) which an Express `:param` would truncate.
  */
 router.delete(
-    '/:publicId',
+    '/*splat',
     requireAuth,
     UploadController.deleteImage
 );

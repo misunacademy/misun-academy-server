@@ -9,7 +9,14 @@ import env from "../../config/env.js";
 import { logger } from "../../config/logger.js";
 
 const getPaymentHistory = catchAsync(async (req: Request, res: Response) => {
-  const result = await PaymentService.getPaymentHistory(req.query);
+  // validateRequest checks req.query but does not replace it, so coerce here:
+  // $skip/$limit require real numbers, not numeric strings.
+  const { page, limit, ...rest } = req.query as Record<string, unknown>;
+  const result = await PaymentService.getPaymentHistory({
+    ...rest,
+    ...(page === undefined ? {} : { page: Number(page) }),
+    ...(limit === undefined ? {} : { limit: Number(limit) }),
+  });
 
   sendResponse(res, {
     statusCode: StatusCodes.OK,
@@ -31,6 +38,18 @@ const updatePaymentWithEnrollStatus = catchAsync(async (req: Request, res: Respo
     statusCode: StatusCodes.OK,
     success: true,
     message: 'Payment updated successfully !',
+    data: result,
+  });
+});
+
+const getPaymentDetail = catchAsync(async (req: Request, res: Response) => {
+  const transactionId = req.params.transactionId as string;
+  const result = await PaymentService.getPaymentDetail(transactionId);
+
+  sendResponse(res, {
+    statusCode: StatusCodes.OK,
+    success: true,
+    message: 'Payment detail retrieved successfully',
     data: result,
   });
 });
@@ -72,32 +91,23 @@ const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
     const expectedKey = PaymentService.getStatusCallbackKey(transactionId);
 
     if (!callbackKey || callbackKey !== expectedKey) {
-      logger.warn(
-        { transactionId },
-        'Status callback without val_id rejected: missing or invalid callback key'
-      );
-    } else if (callbackStatus) {
+      throw new ApiError(StatusCodes.FORBIDDEN, "Invalid status callback key");
+    }
+    if (callbackStatus) {
       try {
         const callbackPayload = Object.keys(req.body || {}).length > 0 ? req.body : req.query;
 
-        if (callbackStatus === Status.Pending) {
-          await PaymentService.updatePaymentWithEnrollStatus(transactionId, Status.Failed, callbackPayload);
-        } else {
+        // Never auto-fail on a bare status redirect with no explicit gateway
+        // status. A page refresh / crawler GET must be read-only; only an
+        // explicit failed/cancelled gateway status may mutate.
+        if (callbackStatus !== Status.Pending) {
           await PaymentService.updatePaymentWithEnrollStatus(transactionId, callbackStatus, callbackPayload);
         }
       } catch (error) {
         logger.error(error, 'Failed to update payment from status callback');
       }
-    } else {
-      try {
-        const statusCheck = await PaymentService.checkPaymentStatus(transactionId);
-        if (statusCheck.payment?.status === Status.Pending && statusCheck.payment.status !== undefined) {
-          await PaymentService.updatePaymentWithEnrollStatus(transactionId, Status.Failed);
-        }
-      } catch (error) {
-        logger.error(error, 'Failed to cleanup pending payment without explicit callback status');
-      }
     }
+    // No val_id + no explicit gateway status => read-only redirect below.
   }
 
   const result = await PaymentService.checkPaymentStatus(transactionId);
@@ -217,6 +227,7 @@ const verifyManualPayment = catchAsync(async (req: Request, res: Response) => {
 
 export const PaymentController = {
   getPaymentHistory,
+  getPaymentDetail,
   updatePaymentWithEnrollStatus,
   checkPaymentStatus,
   verifyPaymentSuccessForCurrentUser,

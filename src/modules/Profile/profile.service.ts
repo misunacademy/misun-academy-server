@@ -91,9 +91,37 @@ const createProfile = async (userId: string, profileData: Partial<IProfile>) => 
 };
 
 const getProfile = async (userId: string) => {
-  const profile = await ProfileModel.findOne({ user: userId })
+  let profile = await ProfileModel.findOne({ user: userId })
     .populate({ path: 'user' })
     .lean();
+
+  // Self-heal: enrollments created through flows that skipped the profile
+  // sync (older seeds, manual inserts) leave the reference list short while
+  // My Classes — which reads the enrollments collection directly — shows
+  // them. Reconcile here so both surfaces agree on next read.
+  if (profile) {
+    const known = new Set(toEnrollmentRefs(profile.enrollments).map((e) => e.enrollmentId));
+    const existing = await EnrollmentModel.find({
+      userId: userId as any,
+      enrollmentId: { $exists: true, $ne: null },
+    })
+      .select('enrollmentId')
+      .lean();
+    const missing = [...new Set(
+      existing
+        .map((e) => (e as { enrollmentId?: string }).enrollmentId)
+        .filter((id): id is string => !!id && !known.has(id))
+    )];
+    if (missing.length > 0) {
+      await ProfileModel.updateOne(
+        { user: userId },
+        { $addToSet: { enrollments: { $each: missing.map((enrollmentId) => ({ enrollmentId })) } } }
+      );
+      profile = await ProfileModel.findOne({ user: userId })
+        .populate({ path: 'user' })
+        .lean();
+    }
+  }
 
   return hydrateProfileWithEnrollmentDetails(profile);
 };

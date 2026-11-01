@@ -69,7 +69,27 @@ const recalculateModuleProgress = async (enrollmentId: string, moduleId: string)
     ]);
 
     const totalItems = lessons.length + quizzes.length;
-    if (totalItems === 0) return;
+    if (totalItems === 0) {
+        // A module with no lessons and no published quizzes has nothing to
+        // complete — treat it as complete so a freshly created or draft-only
+        // module never blocks certificates or sequential unlocking.
+        const completed = await ModuleProgressModel.findOneAndUpdate(
+            { enrollmentId, moduleId },
+            {
+                $set: {
+                    completionPercentage: 100,
+                    status: ProgressStatus.Completed,
+                    completedAt: new Date(),
+                },
+            },
+            { upsert: true, new: true }
+        );
+
+        // Check if next module should be unlocked (sequential unlocking)
+        await unlockNextModule(enrollmentId, moduleId);
+
+        return completed;
+    }
 
     const [lessonProgress, quizProgress] = await Promise.all([
         LessonProgressModel.find({
@@ -86,8 +106,11 @@ const recalculateModuleProgress = async (enrollmentId: string, moduleId: string)
         (p) => p.status === LessonProgressStatus.Completed
     ).length;
 
+    // Only PASSED quizzes count toward module completion. A submitted-but-
+    // failed attempt records progress (QuizProgress.passed=false) without
+    // unlocking modules or feeding certificate eligibility.
     const completedQuizzes = quizProgress.filter(
-        (p) => p.status === 'completed'
+        (p) => p.status === 'completed' && (p as any).passed === true
     ).length;
 
     const completedItems = completedLessons + completedQuizzes;

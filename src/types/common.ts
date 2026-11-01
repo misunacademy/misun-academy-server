@@ -21,7 +21,8 @@ export enum Status {
     Failed = "failed",
     Review = "review",
     Risk = "risk",
-    Cancel = "cancel"
+    Cancel = "cancel",
+    Refunded = "refunded"
 }
 
 export enum UserStatus {

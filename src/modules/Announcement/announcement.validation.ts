@@ -1,0 +1,55 @@
+import { z } from 'zod';
+
+const withSaneWindow = <T extends z.ZodRawShape>(shape: T) =>
+  z.object(shape).refine(
+    (b: any) => {
+      if (!b.publishAt || !b.expireAt) return true;
+      return new Date(b.expireAt).getTime() > new Date(b.publishAt).getTime();
+    },
+    { message: 'expireAt must be after publishAt', path: ['expireAt'] }
+  );
+
+export const createAnnouncementSchema = z.object({
+  body: withSaneWindow({
+    title: z.string().trim().min(3).max(150),
+    message: z.string().trim().min(10).max(2000),
+    type: z.enum(['info', 'success', 'warning', 'critical']).optional(),
+    audience: z.enum(['all', 'learner', 'instructor', 'employee', 'admin']).optional(),
+    status: z.enum(['draft', 'published', 'scheduled', 'unpublished']).optional(),
+    link: z.string().trim().max(2048).optional().or(z.literal('')),
+    isDismissible: z.boolean().optional(),
+    notifyByEmail: z.boolean().optional(),
+    publishAt: z.string().datetime({ offset: true }).optional().or(z.literal('')),
+    expireAt: z.string().datetime({ offset: true }).optional().or(z.literal('')),
+  }),
+});
+
+export const updateAnnouncementSchema = z.object({
+  params: z.object({ id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid id') }),
+  body: withSaneWindow({
+    title: z.string().trim().min(3).max(150).optional(),
+    message: z.string().trim().min(10).max(2000).optional(),
+    type: z.enum(['info', 'success', 'warning', 'critical']).optional(),
+    audience: z.enum(['all', 'learner', 'instructor', 'employee', 'admin']).optional(),
+    status: z.enum(['draft', 'published', 'scheduled', 'expired', 'unpublished']).optional(),
+    link: z.string().trim().max(2048).optional().or(z.literal('')),
+    isDismissible: z.boolean().optional(),
+    notifyByEmail: z.boolean().optional(),
+    publishAt: z.string().datetime({ offset: true }).optional().or(z.literal('')),
+    expireAt: z.string().datetime({ offset: true }).optional().or(z.literal('')),
+  }),
+});
+
+export const announcementIdParamSchema = z.object({
+  params: z.object({ id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid id') }),
+});
+
+export const announcementQuerySchema = z.object({
+  query: z.object({
+    status: z.enum(['draft', 'published', 'scheduled', 'expired', 'unpublished']).optional(),
+    audience: z.enum(['all', 'learner', 'instructor', 'employee', 'admin']).optional(),
+    search: z.string().trim().max(100).optional(),
+    page: z.coerce.number().int().min(1).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+  }),
+});

@@ -3,6 +3,7 @@ import catchAsync from "../../utils/catchAsync.js";
 import sendResponse from "../../utils/sendResponse.js";
 import { BatchService } from "./batch.service.js";
 import { StatusCodes } from "http-status-codes";
+import ApiError from "../../errors/ApiError.js";
 import { recordAudit } from "../../models/auditLog.model.js";
 
 const createBatch = catchAsync(async (req: Request, res: Response) => {
@@ -27,12 +28,16 @@ const createBatch = catchAsync(async (req: Request, res: Response) => {
 
 const getAllBatches = catchAsync(async (req: Request, res: Response) => {
     const { status, courseId, upcoming, page = 1, limit = 10 } = req.query;
+    // Malformed courseId must 400, not CastError-500.
+    if (courseId && typeof courseId === 'string' && !/^[0-9a-fA-F]{24}$/.test(courseId)) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid course ID');
+    }
     const result = await BatchService.getAllBatches({
         status: status as any,
         courseId: courseId as string,
         upcoming: upcoming === 'true',
-        page: Number(page),
-        limit: Number(limit),
+        page: Number(page) || 1,
+        limit: Number(limit) || 10,
     });
 
     sendResponse(res, {

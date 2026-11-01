@@ -7,6 +7,7 @@ export type NotificationType =
   | 'payment_pending'
   | 'payment_success'
   | 'payment_failed'
+  | 'payment_refunded'
   | 'access_granted'
   | 'quiz_published'
   | 'quiz_result'
@@ -24,7 +25,8 @@ export type NotificationType =
   | 'user_status_changed'
   | 'course_completed'
   | 'module_completed'
-  | 'new_announcement';
+  | 'new_announcement'
+  | 'bootcamp_registration';
 
 export interface INotification {
   userId: Types.ObjectId;

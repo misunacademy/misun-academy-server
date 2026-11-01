@@ -59,6 +59,7 @@ app.use(cors({
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'x-correlation-id', 'X-CSRF-Token'],
+    exposedHeaders: ['x-correlation-id'],
 }));
 
 app.use(helmet({
@@ -116,6 +117,22 @@ app.use('/api/v1/auth/verify-email', strictAuthLimiter);
 app.use('/api/v1/auth/forget-password', strictAuthLimiter);
 app.use('/api/v1/auth/reset-password', strictAuthLimiter);
 app.use('/api/v1/auth/change-password', strictAuthLimiter);
+// Custom Better-Auth server-action endpoints (the actually-used login path:
+// /api/v1/auth/server/sign-in/email, /server/sign-up/email,
+// /server/request-password-reset, /server/reset-password, /server/change-password).
+// Without these, brute-force on the real login route only hits the loose
+// general limiter (1000/15m).
+app.use('/api/v1/auth/server/sign-in', strictAuthLimiter);
+app.use('/api/v1/auth/server/sign-up', strictAuthLimiter);
+app.use('/api/v1/auth/server/request-password-reset', strictAuthLimiter);
+app.use('/api/v1/auth/server/reset-password', strictAuthLimiter);
+app.use('/api/v1/auth/server/change-password', strictAuthLimiter);
+// Verification/session-management endpoints: token brute-force surface.
+app.use('/api/v1/auth/server/verify-email', strictAuthLimiter);
+app.use('/api/v1/auth/server/list-sessions', strictAuthLimiter);
+app.use('/api/v1/auth/server/revoke-session', strictAuthLimiter);
+app.use('/api/v1/auth/server/update-user', strictAuthLimiter);
+app.use('/api/v1/auth/server/sign-out', strictAuthLimiter);
 
 app.use('/api/v1/auth', generalAuthLimiter);
 app.use('/api/v1/auth', BetterAuthRoutes);
@@ -123,9 +140,13 @@ app.use('/api/v1/auth', BetterAuthRoutes);
 app.all('/api/v1/auth/*splat', betterAuthCatchAll);
 app.all('/api/v1/auth', betterAuthCatchAll);
 
-// Fallback: unmatched auth paths redirect to client login (safety net for OAuth error redirects)
-app.use('/api/v1/auth', (req, res) => {
-  res.redirect(`${env.MA_FRONTEND_URL}/auth`);
+// Fallback: unmatched auth paths return JSON 404 (a 302 redirect here masks
+// API 404s and breaks OAuth clients expecting JSON).
+app.use('/api/v1/auth', (_req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Auth route not found',
+  });
 });
 
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
@@ -140,9 +161,19 @@ const apiRateLimiter = createRateLimiter({
     message: 'Too many requests, please try again later',
 });
 
+// Cloudinary-backed uploads bypass the 1mb JSON body limit (multipart) —
+// cap them separately to bound cost/DoS.
+const uploadRateLimiter = createRateLimiter({
+    prefix: 'upload',
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    message: 'Too many upload requests, please try again later',
+});
+
+app.use('/api/v1/upload', uploadRateLimiter);
 app.use('/api/v1', apiRateLimiter, router);
 
-// Health check endpoints
+// Health check endpoints (minimal surface — no memory/uptime internals)
 app.get('/health', (_req, res) => {
     const dbState = mongoose.connection.readyState;
     const dbStatus = dbState === 1 ? 'connected' : dbState === 2 ? 'connecting' : 'disconnected';
@@ -151,8 +182,6 @@ app.get('/health', (_req, res) => {
         success: dbState === 1,
         status: 'ok',
         timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        memoryUsage: process.memoryUsage(),
         db: dbStatus,
     });
 });
@@ -167,7 +196,17 @@ app.get('/ready', async (_req, res) => {
 
 const openApiSpecPath = path.resolve(process.cwd(), 'openapi.json');
 
+// Public API docs expose all admin paths — disable in production unless
+// explicitly enabled.
+const docsEnabled = env.NODE_ENV !== 'production' || process.env.ENABLE_API_DOCS === 'true';
+
 app.get('/openapi.json', (_req, res) => {
+    if (!docsEnabled) {
+        return res.status(404).json({
+            success: false,
+            message: 'Route not found',
+        });
+    }
     if (!fs.existsSync(openApiSpecPath)) {
         return res.status(500).json({
             success: false,
@@ -179,6 +218,12 @@ app.get('/openapi.json', (_req, res) => {
 });
 
 app.use('/docs', (_req, res, next) => {
+    if (!docsEnabled) {
+        return res.status(404).json({
+            success: false,
+            message: 'Route not found',
+        });
+    }
     res.setHeader(
         'Content-Security-Policy',
         "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https:; font-src 'self' data: https:"

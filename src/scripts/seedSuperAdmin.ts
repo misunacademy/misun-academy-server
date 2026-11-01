@@ -8,6 +8,7 @@ import { getAuth } from '../config/betterAuth.js';
 import ApiError from '../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
 import { UserStatus } from '../types/common.js';
+import { isDirectRun, requireMigrationConfirm } from './runGuard.js';
 
 export const seedSuperAdmin = async () => {
     try {
@@ -71,5 +72,7 @@ export const seedSuperAdmin = async () => {
     }
 };
 
-// Allow running directly with ts-node
-seedSuperAdmin();
+if (isDirectRun(import.meta.url)) {
+    requireMigrationConfirm('seedSuperAdmin');
+    seedSuperAdmin();
+}

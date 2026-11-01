@@ -2,6 +2,7 @@ import { StatusCodes } from 'http-status-codes';
 import { LessonModel } from './lesson.model.js';
 import { ModuleModel } from '../Module/module.model.js';
 import ApiError from '../../errors/ApiError.js';
+import { normalizeVideoId } from '../../utils/video.utils.js';
 import { NotificationService } from '../Notification/notification.service.js';
 import { logger } from '../../config/logger.js';
 
@@ -52,6 +53,12 @@ const createLesson = async (moduleId: string, lessonData: any) => {
         lessonData.orderIndex = maxOrder ? maxOrder.orderIndex + 1 : 0;
     }
 
+    if (lessonData.videoId) {
+        lessonData.videoId = normalizeVideoId(lessonData.videoSource, lessonData.videoId);
+        // Drop stale embed URLs built from a previously-wrapped id.
+        delete lessonData.videoUrl;
+    }
+
     const lesson = await LessonModel.create({
         ...lessonData,
         moduleId,
@@ -98,8 +105,12 @@ const updateLesson = async (lessonId: string, updateData: any) => {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found');
     }
 
-    if (updateData.orderIndex !== undefined && updateData.orderIndex !== oldLesson.orderIndex) {
-        const existingLesson = await LessonModel.findOne({
+    // A lesson belongs to its module: moving it across modules/batches via
+    // update would orphan progress rows. Use delete + recreate instead.
+    if (updateData.moduleId && updateData.moduleId.toString() !== (oldLesson as any).moduleId?.toString()) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Module cannot be changed for a lesson');
+    }
+    if (updateData.orderIndex !== undefined && updateData.orderIndex !== oldLesson.orderIndex) {        const existingLesson = await LessonModel.findOne({
             moduleId: oldLesson.moduleId,
             orderIndex: updateData.orderIndex,
             _id: { $ne: lessonId },
@@ -111,6 +122,11 @@ const updateLesson = async (lessonId: string, updateData: any) => {
                 'Lesson with this order index already exists'
             );
         }
+    }
+
+    if (updateData.videoId) {
+        updateData.videoId = normalizeVideoId(updateData.videoSource ?? (oldLesson as any).videoSource, updateData.videoId);
+        delete updateData.videoUrl;
     }
 
     const lesson = await LessonModel.findByIdAndUpdate(
@@ -145,6 +161,29 @@ const deleteLesson = async (lessonId: string) => {
 };
 
 /**
+ * Backfill existing rows created before input normalization: strip full
+ * URLs / double-wrapped values down to raw ids and drop stale videoUrls.
+ * Returns the number of lessons repaired.
+ */
+const backfillVideoIds = async (): Promise<number> => {
+    const lessons = await LessonModel.find({ videoId: { $exists: true, $ne: '' } }).lean();
+    let fixed = 0;
+    for (const lesson of lessons) {
+        const raw = (lesson as any).videoId;
+        if (typeof raw !== 'string' || !raw) continue;
+        const normalized = normalizeVideoId((lesson as any).videoSource, raw);
+        if (normalized && normalized !== raw) {
+            await LessonModel.findByIdAndUpdate((lesson as any)._id, {
+                $set: { videoId: normalized },
+                $unset: { videoUrl: '' },
+            });
+            fixed++;
+        }
+    }
+    return fixed;
+};
+
+/**
  * Reorder lessons in a module
  */
 const reorderLessons = async (moduleId: string, lessonOrders: { lessonId: string; orderIndex: number }[]) => {
@@ -170,4 +209,5 @@ export const LessonService = {
     updateLesson,
     deleteLesson,
     reorderLessons,
+    backfillVideoIds,
 };

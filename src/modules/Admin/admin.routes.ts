@@ -92,6 +92,14 @@ router.post(
     AdminAuthController.sendCompletedBatchIncompleteReminder
 );
 
+// Role stats for ACCESS > Roles overview
+router.get(
+    '/roles/stats',
+    requireAuth,
+    requireAdmin,
+    AdminAuthController.getRoleStats
+);
+
 // Get all active instructor profiles (for batch assignment)
 router.get(
     '/instructors',

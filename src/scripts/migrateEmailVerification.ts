@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { UserModel } from '../modules/User/user.model.js';
 import config from '../config/env.js';
+import { isDirectRun, requireMigrationConfirm } from './runGuard.js';
 
 const migrateEmailVerification = async () => {
     try {
@@ -23,4 +24,7 @@ const migrateEmailVerification = async () => {
     }
 };
 
-migrateEmailVerification();
+if (isDirectRun(import.meta.url)) {
+    requireMigrationConfirm('migrateEmailVerification');
+    migrateEmailVerification();
+}

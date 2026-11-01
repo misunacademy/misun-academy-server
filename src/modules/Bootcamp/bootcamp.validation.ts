@@ -1,7 +1,5 @@
 import { z } from 'zod';
 
-const validWhatsAppMobile = /^(?:01[3-9]\d{8}|(?:\+?91|0)?[6789]\d{9})$/;
-
 export const registerBootcampValidationSchema = z.object({
     body: z.object({
         name: z
@@ -12,7 +10,6 @@ export const registerBootcampValidationSchema = z.object({
         whatsapp: z
             .string()
             .trim()
-            .regex(validWhatsAppMobile, 'Enter a valid WhatsApp number')
             .optional()
             .or(z.literal('')),
         address: z
@@ -50,7 +47,7 @@ export const bootcampQueryValidationSchema = z.object({
         status: z.enum(['pending', 'verified', 'rejected']).optional(),
         search: z.string().trim().max(150).optional(),
         page: z.coerce.number().int().min(1).optional(),
-        limit: z.coerce.number().int().min(1).max(500).optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
     }),
 });
 

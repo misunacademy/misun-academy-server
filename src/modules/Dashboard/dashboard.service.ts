@@ -3,7 +3,7 @@ import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
 import { UserModel } from "../User/user.model.js";
 import { BatchModel } from "../Batch/batch.model.js";
 import { CourseModel } from "../Course/course.model.js";
-import { BatchStatus, EnrollmentStatus } from "../../types/common.js";
+import { BatchStatus, CourseStatus, EnrollmentStatus, Status, UserStatus } from "../../types/common.js";
 import mongoose from "mongoose";
 import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
@@ -51,19 +51,21 @@ const getDashboardMetaData = async (courseId?: string) => {
         },
     ]);
 
-    // 3. Total income (all time, successful payments)
+    // 3. Total income (all time, successful payments), grouped by currency:
+    // BDT and INR must never be summed into one number.
     const totalIncomePromise = PaymentModel.aggregate([
         { $match: paymentMatch },
-        { $group: { _id: null, totalIncome: { $sum: "$amount" } } },
+        { $group: { _id: '$currency', totalIncome: { $sum: "$amount" } } },
     ]);
 
-    // 4. Day-wise income & enrollment stats (last 60 days)
+    // 4. Day-wise income & enrollment stats (last 60 days, Dhaka days —
+    // UTC boundaries would split local business days at 6am)
     const dayWiseStatsPromise = PaymentModel.aggregate([
         { $match: { ...paymentMatch, createdAt: { $gte: sixtyDaysAgo } } },
         {
             $group: {
                 _id: {
-                    $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+                    $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "Asia/Dhaka" },
                 },
                 totalIncome: { $sum: "$amount" },
                 totalEnrollment: { $sum: 1 },
@@ -170,7 +172,14 @@ const getDashboardMetaData = async (courseId?: string) => {
             batchId: b._id,
             totalEnrolled: b.totalEnrolled,
         })),
-        totalIncome: totalIncomeResult[0]?.totalIncome || 0,
+        // Per-currency ledger (never sum across currencies downstream).
+        // NOTE: legacy `totalIncome` below is a mixed-currency sum kept for
+        // UI compatibility — migrate displays to totalIncomeByCurrency.
+        totalIncomeByCurrency: (totalIncomeResult as any[]).map((r: any) => ({
+            currency: r._id || 'BDT',
+            totalIncome: r.totalIncome,
+        })),
+        totalIncome: (totalIncomeResult as any[]).reduce((s: number, r: any) => s + (r.totalIncome || 0), 0),
         dayWiseStats: dayWiseStats.map((d: any) => ({
             date: d._id,
             totalIncome: d.totalIncome,
@@ -203,32 +212,41 @@ const getAdminDashboard = async () => {
 
     // Overview stats
     const totalUsers = await UserModel.countDocuments();
-    const totalCourses = await CourseModel.countDocuments({ status: 'Published' });
+    const totalCourses = await CourseModel.countDocuments({ status: CourseStatus.Published });
     const totalBatches = await BatchModel.countDocuments();
     const activeEnrollments = await EnrollmentModel.countDocuments({
         status: EnrollmentStatus.Active
     });
 
-    // Revenue stats (last 30 days)
+    // Revenue stats (last 30 days), grouped by currency.
     const revenueData = await PaymentModel.aggregate([
         {
             $match: {
-                status: 'Success',
+                status: Status.Success,
                 createdAt: { $gte: thirtyDaysAgo }
             }
         },
         {
             $group: {
-                _id: null,
+                _id: '$currency',
                 totalRevenue: { $sum: '$amount' },
                 totalTransactions: { $sum: 1 }
             }
         }
     ]);
 
-    const revenue = revenueData[0] || { totalRevenue: 0, totalTransactions: 0 };
+    const revenueByCurrency = revenueData.map((r: any) => ({
+        currency: r._id || 'BDT',
+        totalRevenue: r.totalRevenue,
+        totalTransactions: r.totalTransactions,
+    }));
+    // Legacy mixed-currency rollup (UI compat) — prefer revenueByCurrency.
+    const revenue = {
+        totalRevenue: revenueByCurrency.reduce((s, r) => s + r.totalRevenue, 0),
+        totalTransactions: revenueByCurrency.reduce((s, r) => s + r.totalTransactions, 0),
+    };
 
-    // Enrollment trends (last 30 days)
+    // Enrollment trends (last 30 days, Dhaka days)
     const enrollmentTrends = await EnrollmentModel.aggregate([
         {
             $match: {
@@ -238,7 +256,7 @@ const getAdminDashboard = async () => {
         {
             $group: {
                 _id: {
-                    $dateToString: { format: '%Y-%m-%d', date: '$createdAt' }
+                    $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Asia/Dhaka' }
                 },
                 count: { $sum: 1 }
             }
@@ -272,6 +290,7 @@ const getAdminDashboard = async () => {
             activeEnrollments,
             totalRevenue: revenue.totalRevenue,
             totalTransactions: revenue.totalTransactions,
+            revenueByCurrency,
         },
         enrollmentTrends,
         topBatches,
@@ -284,8 +303,8 @@ const getAdminDashboard = async () => {
  */
 const getUserStats = async () => {
     const totalUsers = await UserModel.countDocuments();
-    const activeUsers = await UserModel.countDocuments({ status: 'Active' });
-    const suspendedUsers = await UserModel.countDocuments({ status: 'Suspended' });
+    const activeUsers = await UserModel.countDocuments({ status: UserStatus.Active });
+    const suspendedUsers = await UserModel.countDocuments({ status: UserStatus.Suspended });
 
     const usersByRole = await UserModel.aggregate([
         {
@@ -329,10 +348,10 @@ const getStudentDashboard = async (userId: string) => {
         status: EnrollmentStatus.Completed
     });
 
-    // Get upcoming classes (active batches)
+    // Get upcoming classes (running batches)
     const upcomingClasses = await BatchModel.countDocuments({
         _id: { $in: enrollments.map(e => e.batchId) },
-        status: 'Active'
+        status: BatchStatus.Running
     });
 
     // Format enrolled courses
@@ -372,71 +391,35 @@ const getStudentDashboard = async (userId: string) => {
 };
 
 
-// /**
-//  * Get employee dashboard data
-//  */
-// const getEmployeeDashboard = async (userId: string) => {
-//     const { SalaryModel } = await import('../Employee/salary.model');
-//     const { LeaveRequestModel } = await import('../Employee/leaveRequest.model');
-
-//     const totalSalaryPaid = await SalaryModel.aggregate([
-//         { $match: { employeeId: userId, status: 'Paid' } },
-//         { $group: { _id: null, total: { $sum: '$amount' } } },
-//     ]);
-
-//     const pendingLeaveCount = await LeaveRequestModel.countDocuments({
-//         employeeId: userId,
-//         status: 'Pending',
-//     });
-
-//     const approvedLeaveCount = await LeaveRequestModel.countDocuments({
-//         employeeId: userId,
-//         status: 'Approved',
-//     });
-
-//     const recentSalaries = await SalaryModel.find({ employeeId: userId })
-//         .sort({ createdAt: -1 })
-//         .limit(5)
-//         .lean();
-
-//     return {
-//         totalSalaryPaid: totalSalaryPaid[0]?.total ?? 0,
-//         pendingLeaveCount,
-//         approvedLeaveCount,
-//         recentSalaries,
-//     };
-// };
-
 const getInstructorDashboard = async (userId: string) => {
 
-    // Get instructor's single assigned course (1-to-1 constraint)
-    const course = await CourseModel.findOne({ instructorId: userId })
+    // An instructor may own several courses — aggregate across all of them.
+    const courses = await CourseModel.find({ instructorId: userId })
         .populate('instructorId', 'name email image')
         .lean();
 
-    if (!course) {
-        return { course: null, enrolledStudents: 0, activeBatches: 0, totalBatches: 0 };
+    if (courses.length === 0) {
+        return { courses: [], course: null, enrolledStudents: 0, activeBatches: 0, totalBatches: 0 };
     }
 
-    // Get all batch IDs for this course
-    const batchIds = await BatchModel.find({ courseId: course._id }).distinct('_id');
+    const courseIds = courses.map((c: any) => c._id);
 
-    // Count enrolled students via BatchModel (EnrollmentStatus.Active = "active")
-    const enrolledStudents = await EnrollmentModel.countDocuments({
-        batchId: { $in: batchIds },
-        status: EnrollmentStatus.Active,
-    });
+    // Get all batch IDs for these courses
+    const batchIds = await BatchModel.find({ courseId: { $in: courseIds } }).distinct('_id');
 
-    // Count total & running batches (BatchStatus.Running = "running")
-    const [totalBatches, activeBatches] = await Promise.all([
-        BatchModel.countDocuments({ courseId: course._id }),
-        BatchModel.countDocuments({ courseId: course._id, status: BatchStatus.Running }),
+    // Count enrolled students (Active + Completed graduates) + batches.
+    const [enrolledStudents, totalBatches, activeBatches] = await Promise.all([
+        EnrollmentModel.countDocuments({
+            batchId: { $in: batchIds },
+            status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] },
+        }),
+        BatchModel.countDocuments({ courseId: { $in: courseIds } }),
+        BatchModel.countDocuments({ courseId: { $in: courseIds }, status: BatchStatus.Running }),
     ]);
 
-    return { course, enrolledStudents, activeBatches, totalBatches };
+    // `course` kept for backward compatibility (first course); prefer `courses`.
+    return { courses, course: courses[0], enrolledStudents, activeBatches, totalBatches };
 };
-
-
 
 export const DashboardService = {
     getDashboardMetaData,
@@ -444,5 +427,4 @@ export const DashboardService = {
     getUserStats,
     getStudentDashboard,
     getInstructorDashboard,
-    // getEmployeeDashboard,
 }

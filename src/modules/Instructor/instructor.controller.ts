@@ -251,6 +251,14 @@ const getQuizAnalytics = catchAsync(async (req: Request, res: Response) => {
     sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: 'Quiz analytics retrieved successfully', data: result });
 });
 
+/** Reset a student's attempts so a stuck learner can retry (scoped to assigned courses) */
+const resetQuizAttempts = catchAsync(async (req: Request, res: Response) => {
+    const { id, role } = req.user as any;
+    const { quizId, userId: targetUserId } = req.params as { quizId: string; userId: string };
+    const result = await InstructorService.resetQuizAttemptsForInstructor(id, quizId, targetUserId, { id, role }, req.ip);
+    sendResponse(res, { statusCode: StatusCodes.OK, success: true, message: `Attempts reset successfully (${result.deletedAttempts} removed)`, data: result });
+});
+
 /** Get a single question by ID */
 const getQuestionById = catchAsync(async (req: Request, res: Response) => {
     const { id } = req.user as any;
@@ -338,6 +346,7 @@ export const InstructorController = {
     deleteModuleQuiz,
     getQuizQuestions,
     getQuizAnalytics,
+    resetQuizAttempts,
     getQuestionById,
     createQuestion,
     updateQuestion,

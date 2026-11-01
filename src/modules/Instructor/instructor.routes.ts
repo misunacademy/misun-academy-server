@@ -6,6 +6,7 @@ import { createModuleSchema, updateModuleSchema, reorderModulesSchema } from '..
 import { createLessonSchema, updateLessonSchema } from '../../validations/lesson.validation.js';
 import { updateInstructorProfileSchema } from '../../validations/instructor.validation.js';
 import { createQuizSchema, updateQuizSchema, createQuestionSchema, updateQuestionSchema, reorderQuestionsSchema } from '../../validations/quiz.validation.js';
+import { resetAttemptsSchema } from '../../validations/attempt.validation.js';
 
 const router = express.Router();
 
@@ -48,6 +49,8 @@ router.delete('/quizzes/:quizId', InstructorController.deleteModuleQuiz);
 
 // Quiz analytics
 router.get('/quizzes/:quizId/analytics', InstructorController.getQuizAnalytics);
+// Reset a student's attempts (recovery for exhausted attempts without a pass)
+router.delete('/quizzes/:quizId/attempts/user/:userId', validateRequest(resetAttemptsSchema), InstructorController.resetQuizAttempts);
 
 // Question CRUD — only for quizzes inside assigned courses
 router.get('/quizzes/:quizId/questions', InstructorController.getQuizQuestions);

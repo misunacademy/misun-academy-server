@@ -1,10 +1,12 @@
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../../errors/ApiError.js';
+import { normalizeVideoId, buildDrivePreviewUrl } from '../../utils/video.utils.js';
 import { RecordingModel } from './recording.model.js';
 import { IRecording } from './recording.interface.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
 import { CourseModel } from '../Course/course.model.js';
 import { Role } from '../../types/role.js';
+import { EnrollmentStatus } from '../../types/common.js';
 import { NotificationService } from '../Notification/notification.service.js';
 import { logger } from '../../config/logger.js';
 
@@ -40,10 +42,11 @@ const createRecording = async (
     createdBy: string
 ): Promise<IRecording> => {
     if (recordingData.videoSource && recordingData.videoId) {
+        recordingData.videoId = normalizeVideoId(recordingData.videoSource, recordingData.videoId);
         recordingData.videoUrl =
             recordingData.videoSource === 'youtube'
                 ? `https://www.youtube.com/embed/${recordingData.videoId}`
-                : `https://drive.google.com/file/d/${recordingData.videoId}/preview`;
+                : buildDrivePreviewUrl(recordingData.videoId);
     }
 
     const recording = await RecordingModel.create({
@@ -151,15 +154,6 @@ const getStudentRecordings = async (userId: string) => {
         status: 'active',
     }).select('batchId').lean();
 
-    // console.log('Student Enrollments:', {
-    //     userId,
-    //     enrollmentCount: enrollments.length,
-    //     enrollments: enrollments.map((e: any) => ({
-    //         batchId: e.batchId,
-    //         status: e.status
-    //     }))
-    // });
-
     const batchIds = enrollments.map((e: any) => e.batchId);
 
     // Get all published recordings for enrolled batches
@@ -172,16 +166,6 @@ const getStudentRecordings = async (userId: string) => {
         .populate('instructor', 'name email')
         .sort({ sessionDate: -1 })
         .lean();
-
-    console.log('Student Recordings Found:', {
-        batchIds: batchIds.map((id: any) => id.toString()),
-        recordingCount: recordings.length,
-        recordings: recordings.map(r => ({
-            title: r.title,
-            batchId: r.batchId,
-            isPublished: r.isPublished
-        }))
-    });
 
     return recordings;
 };
@@ -198,10 +182,11 @@ const updateRecording = async (
     }
 
     if (updateData.videoSource && updateData.videoId) {
+        updateData.videoId = normalizeVideoId(updateData.videoSource, updateData.videoId as string);
         updateData.videoUrl =
             updateData.videoSource === 'youtube'
                 ? `https://www.youtube.com/embed/${updateData.videoId}`
-                : `https://drive.google.com/file/d/${updateData.videoId}/preview`;
+                : buildDrivePreviewUrl(updateData.videoId as string);
     }
 
     const recording = await RecordingModel.findByIdAndUpdate(
@@ -229,7 +214,25 @@ const deleteRecording = async (recordingId: string): Promise<void> => {
     }
 };
 
-const incrementViewCount = async (recordingId: string): Promise<void> => {
+const incrementViewCount = async (recordingId: string, userId?: string, userRole?: string): Promise<void> => {
+    const recording = await RecordingModel.findById(recordingId).lean();
+    if (!recording) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Recording not found');
+    }
+    // Staff preview their own content — only learners need batch enrollment.
+    const isStaff = userRole === Role.ADMIN || userRole === Role.SUPERADMIN || userRole === Role.INSTRUCTOR;
+    // Only learners enrolled in the recording's batch count toward views.
+    // Mask as 404 (not 403) so recording IDs can't be probed for existence.
+    if (userId && recording.batchId && !isStaff) {
+        const enrollment = await EnrollmentModel.findOne({
+            userId,
+            batchId: recording.batchId,
+            status: EnrollmentStatus.Active,
+        }).lean();
+        if (!enrollment) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Recording not found');
+        }
+    }
     await RecordingModel.findByIdAndUpdate(recordingId, {
         $inc: { viewCount: 1 },
     });

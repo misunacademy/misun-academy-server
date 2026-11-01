@@ -16,21 +16,44 @@ export const initializeModuleProgress = async (enrollmentId: string) => {
     const courseId = (batchPopulated as any).courseId?._id;
     if (!courseId) return null;
 
-    const existing = await ModuleProgressModel.findOne({ enrollmentId }).lean();
-    if (existing) return existing;
+    const existing = await ModuleProgressModel.find({ enrollmentId }).lean();
+    const byModuleId = new Map(existing.map((row: any) => [row.moduleId.toString(), row]));
 
     const modules = await ModuleModel.find({ courseId, batchId: enrollment.batchId }).sort({ orderIndex: 1 }).lean();
     if (modules.length === 0) return null;
 
-    const progressEntries = modules.map((module: any, index: number) => ({
-        enrollmentId,
-        moduleId: module._id,
-        status: index === 0 ? ProgressStatus.Unlocked : ProgressStatus.Locked,
-        unlockedAt: index === 0 ? new Date() : undefined,
-        completionPercentage: 0,
-    }));
+    const isRecorded = (batchPopulated as any).deliveryMode === 'recorded' || (batchPopulated as any).isEvergreen === true;
 
-    return ModuleProgressModel.insertMany(progressEntries);
+    // Backfill modules added after a partial initialization instead of
+    // bailing out on the first existing row. Gating mirrors fresh init:
+    // every predecessor must be Completed (or, for recorded batches, unlock all).
+    let allPreviousCompleted = true;
+    const missing = [];
+    for (const [index, module] of (modules as any[]).entries()) {
+        const key = module._id.toString();
+        if (!byModuleId.has(key)) {
+            missing.push({
+                enrollmentId,
+                moduleId: module._id,
+                status: isRecorded || allPreviousCompleted
+                    ? ProgressStatus.Unlocked
+                    : ProgressStatus.Locked,
+                unlockedAt: isRecorded || allPreviousCompleted || index === 0 ? new Date() : undefined,
+                completionPercentage: 0,
+            });
+        }
+        const current = byModuleId.get(key);
+        if (!current || current.status !== ProgressStatus.Completed) {
+            allPreviousCompleted = false;
+        }
+    }
+
+    if (missing.length > 0) {
+        const inserted = await ModuleProgressModel.insertMany(missing);
+        return existing.length > 0 ? existing[0] : inserted;
+    }
+
+    return (existing[0] as any) ?? null;
 };
 
 export const getUserEnrollments = async (userId: string, status?: EnrollmentStatus) => {
@@ -101,8 +124,11 @@ export const getUserEnrollments = async (userId: string, status?: EnrollmentStat
     });
 };
 
-export const getEnrollmentDetails = async (enrollmentId: string, userId: string) => {
-    const enrollment = await EnrollmentModel.findOne({ _id: enrollmentId, userId })
+export const getEnrollmentDetails = async (enrollmentId: string, userId: string, isStaff = false) => {
+    // Staff (admin/support debugging) may view any enrollment; learners are
+    // scoped to their own rows.
+    const filter: Record<string, unknown> = isStaff ? { _id: enrollmentId } : { _id: enrollmentId, userId };
+    const enrollment = await EnrollmentModel.findOne(filter)
         .populate({
             path: 'batchId',
             populate: [

@@ -83,15 +83,10 @@ const globalErrorHandler: ErrorRequestHandler = (
             ]
             : [];
     } else if (error instanceof Error) {
-        message = error?.message;
-        errorMessages = error?.message
-            ? [
-                {
-                    path: '',
-                    message: error?.message,
-                },
-            ]
-            : [];
+        // Never leak internal error messages (DB/auth internals) to clients.
+        // Log the real error server-side (done above), return a generic 500.
+        message = 'Something went wrong !';
+        errorMessages = [];
     }
 
     res.status(statusCode).json({

@@ -53,9 +53,25 @@ const getBatchModules = async (batchId: string, enrollmentId: string) => {
 };
 
 /**
+ * Defense-in-depth: routes authenticate :batchId via checkBatchEnrollment but
+ * controllers historically dropped it before calling these services. When the
+ * caller supplies batchId, the module must belong to that batch — a swapped
+ * moduleId from another batch fails closed here instead of relying solely on
+ * missing progress rows.
+ */
+const assertModuleInBatch = async (moduleId: string, batchId?: string) => {
+    if (!batchId) return;
+    const module = await ModuleModel.findById(moduleId).select('batchId courseId').lean();
+    if (!module || module.batchId?.toString() !== batchId) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found in this batch');
+    }
+};
+
+/**
  * Get lessons for a module with progress
  */
-const getModuleLessons = async (enrollmentId: string, moduleId: string) => {
+const getModuleLessons = async (enrollmentId: string, moduleId: string, batchId?: string) => {
+    await assertModuleInBatch(moduleId, batchId);
     // Check if module is unlocked
     const moduleProgress = await ModuleProgressModel.findOne({
         enrollmentId,
@@ -73,7 +89,8 @@ const getModuleLessons = async (enrollmentId: string, moduleId: string) => {
 /**
  * Get lesson details with video URL
  */
-const getLessonDetails = async (enrollmentId: string, moduleId: string, lessonId: string) => {
+const getLessonDetails = async (enrollmentId: string, moduleId: string, lessonId: string, batchId?: string) => {
+    await assertModuleInBatch(moduleId, batchId);
     // Check module access
     const moduleProgress = await ModuleProgressModel.findOne({
         enrollmentId,
@@ -103,7 +120,8 @@ const getLessonDetails = async (enrollmentId: string, moduleId: string, lessonId
 /**
  * Get module resources
  */
-const getModuleResources = async (enrollmentId: string, moduleId: string) => {
+const getModuleResources = async (enrollmentId: string, moduleId: string, batchId?: string) => {
+    await assertModuleInBatch(moduleId, batchId);
     // Check module access
     const moduleProgress = await ModuleProgressModel.findOne({
         enrollmentId,
@@ -123,7 +141,8 @@ const getModuleResources = async (enrollmentId: string, moduleId: string) => {
 /**
  * Get quizzes for a module with attempt progress
  */
-const getModuleQuizzes = async (enrollmentId: string, moduleId: string) => {
+const getModuleQuizzes = async (enrollmentId: string, moduleId: string, batchId?: string) => {
+    await assertModuleInBatch(moduleId, batchId);
     const moduleProgress = await ModuleProgressModel.findOne({
         enrollmentId,
         moduleId,
@@ -137,14 +156,24 @@ const getModuleQuizzes = async (enrollmentId: string, moduleId: string) => {
         .sort({ orderIndex: 1 })
         .lean();
 
-    const quizzesWithProgress = await Promise.all(
-        quizzes.map(async (quiz) => {
-            const attempts = await QuizAttemptModel.find({
-                quizId: quiz._id,
-                enrollmentId: enrollmentId as any,
-            })
-                .sort({ attemptNumber: -1 })
-                .lean();
+    // One attempts query for all quizzes (not N per-quiz round trips).
+    const allAttempts = quizzes.length
+        ? await QuizAttemptModel.find({
+            quizId: { $in: quizzes.map((q) => q._id) },
+            enrollmentId: enrollmentId as any,
+        })
+            .sort({ attemptNumber: -1 })
+            .lean()
+        : [];
+    const attemptsByQuiz = new Map<string, any[]>();
+    for (const a of allAttempts) {
+        const key = (a.quizId as any)?.toString();
+        if (!attemptsByQuiz.has(key)) attemptsByQuiz.set(key, []);
+        attemptsByQuiz.get(key)!.push(a);
+    }
+
+    const quizzesWithProgress = quizzes.map((quiz) => {
+            const attempts = attemptsByQuiz.get((quiz._id as any).toString()) ?? [];
 
             const completedAttempts = attempts.filter(a => a.status === AttemptStatus.Completed);
             const bestAttempt = completedAttempts.length > 0
@@ -161,8 +190,7 @@ const getModuleQuizzes = async (enrollmentId: string, moduleId: string) => {
                 bestScoreTotal: bestAttempt?.totalMarks || null,
                 lastAttemptAt: attempts[0]?.submittedAt || null,
             };
-        })
-    );
+        });
 
     return quizzesWithProgress;
 };
@@ -170,7 +198,8 @@ const getModuleQuizzes = async (enrollmentId: string, moduleId: string) => {
 /**
  * Get unified curriculum (lessons + quizzes) for a module, sorted by orderIndex
  */
-const getModuleCurriculum = async (enrollmentId: string, moduleId: string) => {
+const getModuleCurriculum = async (enrollmentId: string, moduleId: string, batchId?: string) => {
+    await assertModuleInBatch(moduleId, batchId);
     const moduleProgress = await ModuleProgressModel.findOne({
         enrollmentId,
         moduleId,
@@ -185,14 +214,23 @@ const getModuleCurriculum = async (enrollmentId: string, moduleId: string) => {
         QuizModel.find({ moduleId, status: 'published' }).sort({ orderIndex: 1 }).lean(),
     ]);
 
-    const quizzesWithProgress = await Promise.all(
-        quizzes.map(async (quiz) => {
-            const attempts = await QuizAttemptModel.find({
-                quizId: quiz._id,
-                enrollmentId: enrollmentId as any,
-            })
-                .sort({ attemptNumber: -1 })
-                .lean();
+    const allAttempts = quizzes.length
+        ? await QuizAttemptModel.find({
+            quizId: { $in: quizzes.map((q) => q._id) },
+            enrollmentId: enrollmentId as any,
+        })
+            .sort({ attemptNumber: -1 })
+            .lean()
+        : [];
+    const attemptsByQuiz = new Map<string, any[]>();
+    for (const a of allAttempts) {
+        const key = (a.quizId as any)?.toString();
+        if (!attemptsByQuiz.has(key)) attemptsByQuiz.set(key, []);
+        attemptsByQuiz.get(key)!.push(a);
+    }
+
+    const quizzesWithProgress = quizzes.map((quiz) => {
+            const attempts = attemptsByQuiz.get((quiz._id as any).toString()) ?? [];
 
             const completedAttempts = attempts.filter(a => a.status === AttemptStatus.Completed);
             const bestAttempt = completedAttempts.length > 0
@@ -218,8 +256,7 @@ const getModuleCurriculum = async (enrollmentId: string, moduleId: string) => {
                 bestScoreTotal: bestAttempt?.totalMarks || null,
                 lastAttemptAt: attempts[0]?.submittedAt || null,
             };
-        })
-    );
+        });
 
     const lessonsWithType = lessons.lessons.map((lesson: any) => ({
         type: 'lesson',

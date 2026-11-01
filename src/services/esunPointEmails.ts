@@ -1,4 +1,7 @@
+// NOTE: classroom links intentionally target MA_FRONTEND_URL: EP is the
+// checkout funnel, the classroom lives on MA. Do not "fix" these to EP.
 import env from '../config/env.js';
+import { escapeHtml } from '../utils/escapeHtml.js';
 import { SettingsService } from '../modules/Settings/settings.service.js';
 import { queueEmail } from './emailService.js';
 import { isEnglishText } from '../utils/courseBrand.js';
@@ -95,7 +98,7 @@ export const sendPaymentSuccessEmail = async (
             <h1>Payment Successful!</h1>
         </div>
         <div class="content">
-            <p>Dear <strong>${name}</strong>,</p>
+            <p>Dear <strong>${escapeHtml(name)}</strong>,</p>
             <p>We have received your payment for <strong>${courseName}</strong>.</p>
             
             <div class="highlight-box">
@@ -140,7 +143,7 @@ export const sendPaymentFailedEmail = async (student: any, courseName: string, r
         <div class="content">
             <p>Dear ${student.name},</p>
             <p>Your payment for <strong>${courseName}</strong> could not be completed.</p>
-            <p><strong>Reason:</strong> ${reason}</p>
+            <p><strong>Reason:</strong> ${escapeHtml(reason)}</p>
             <p>Please try again or contact support.</p>
         </div>
     `, "#ef4444");
@@ -151,7 +154,7 @@ export const sendPaymentFailedEmail = async (student: any, courseName: string, r
 
 // --- ACADEMIC ---
 
-export const sendBatchStartReminderEmail = async (studentEmail: string, studentName: string, batchName: string, startDate: string) => {
+export const sendBatchStartReminderEmail = async (studentEmail: string, studentName: string, batchName: string, startDate: string, eventId?: string) => {
     const html = getEmailTemplate(`
         <div class="header" style="background: #3b82f6;">
             <h1>Class Starting Soon!</h1>
@@ -166,7 +169,10 @@ export const sendBatchStartReminderEmail = async (studentEmail: string, studentN
         </div>
     `, "#3b82f6");
 
-    await queueEmail(studentEmail, `Reminder: ${batchName} Starts Soon`, html);
+    await queueEmail(studentEmail, `Reminder: ${batchName} Starts Soon`, html, {
+      eventType: 'batch_start_reminder',
+      eventId,
+    });
 };
 
 
@@ -199,7 +205,7 @@ export const sendEnrollmentConfirmationEmail = async (
                         <td class="content-padding" style="padding: 40px 30px 20px 30px; color: #333333; line-height: 1.6;">
                             
                             <p style="font-size: 16px; margin-bottom: 20px; margin-top: 0;">
-                                <strong>Dear ${user.name},</strong>
+                                <strong>Dear ${escapeHtml(user.name)},</strong>
                             </p>
                             <p style="font-size: 16px; margin-bottom: 20px;">
                                 Congratulations! Your payment has been successfully processed, and you are officially enrolled in <strong>${courseName}</strong>.
@@ -226,7 +232,7 @@ export const sendEnrollmentConfirmationEmail = async (
                                 <tr>
                                     <td style="padding: 20px;">
                                         <h3 style="margin-top: 0; margin-bottom: 10px; font-size: 18px; color: #333333;">Payment & Enrollment Receipt</h3>
-                                        <p style="margin: 5px 0; font-size: 14px;"><strong>Student Name:</strong> ${user.name}</p>
+                                        <p style="margin: 5px 0; font-size: 14px;"><strong>Student Name:</strong> ${escapeHtml(user.name)}</p>
                                         <p style="margin: 5px 0; font-size: 14px;"><strong>Enrollment ID:</strong> ${enrollmentId}</p>
                                         <p style="margin: 5px 0; font-size: 14px;"><strong>Email:</strong> ${user.email}</p>
                                         <p style="margin: 5px 0; font-size: 14px;"><strong>Amount:</strong> ${paymentAmount} ${displayCurrency}</p>

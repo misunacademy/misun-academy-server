@@ -9,6 +9,25 @@ import { ProgressStatus, LessonProgressStatus, EnrollmentStatus } from '../../ty
 import { LessonModel } from '../Lesson/lesson.model.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { QuizModel } from '../Quiz/quiz.model.js';
+import mongoose from 'mongoose';
+import { CourseModel } from '../Course/course.model.js';
+
+/**
+ * Classroom URLs carry course slugs, not ObjectIds (see
+ * courseEnrollment.validation.ts). Resolve either form to the canonical
+ * course _id string, or 404. Without this, slug callers always 400 on the
+ * module→course bind check below and progress can never advance.
+ */
+const resolveCourseId = async (courseIdOrSlug: string): Promise<string> => {
+    if (mongoose.Types.ObjectId.isValid(courseIdOrSlug)) {
+        return courseIdOrSlug;
+    }
+    const course = await CourseModel.findOne({ slug: courseIdOrSlug }).select('_id').lean();
+    if (!course) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Course not found');
+    }
+    return (course._id as mongoose.Types.ObjectId).toString();
+};
 
 const findEnrollmentForCourse = async (
     userId: string,
@@ -16,6 +35,7 @@ const findEnrollmentForCourse = async (
     statuses: EnrollmentStatus[],
     batchId?: string
 ) => {
+    const resolvedCourseId = await resolveCourseId(courseId);
     if (batchId) {
         return EnrollmentModel.findOne({
             userId,
@@ -24,7 +44,7 @@ const findEnrollmentForCourse = async (
         }).lean();
     }
 
-    const batches = await BatchModel.find({ courseId }).select('_id').lean();
+    const batches = await BatchModel.find({ courseId: resolvedCourseId }).select('_id').lean();
     const batchIds = batches.map((b) => b._id);
 
     if (batchIds.length === 0) {
@@ -57,7 +77,7 @@ const ensureModuleProgress = async (enrollmentId: string, courseId: string, batc
 
     for (const mod of modules) {
         const key = mod._id.toString();
-        const row = byModuleId.get(key);
+        let row = byModuleId.get(key);
 
         if (!row) {
             const created = await ModuleProgressModel.create({
@@ -67,7 +87,17 @@ const ensureModuleProgress = async (enrollmentId: string, courseId: string, batc
                 ...(allPreviousCompleted ? { unlockedAt: new Date() } : {}),
                 completionPercentage: 0,
             });
-            byModuleId.set(key, created.toObject());
+            row = created.toObject();
+            byModuleId.set(key, row);
+        } else if ((row.status as ProgressStatus) === ProgressStatus.Locked && allPreviousCompleted) {
+            // Self-heal: every previous module is completed but this one stayed
+            // locked (e.g. the unlock step previously missed its batch scope).
+            await ModuleProgressModel.updateOne(
+                { _id: row._id },
+                { $set: { status: ProgressStatus.Unlocked, unlockedAt: new Date() } }
+            );
+            row = { ...row, status: ProgressStatus.Unlocked, unlockedAt: new Date() };
+            byModuleId.set(key, row);
         }
 
         const current = byModuleId.get(key)!;
@@ -81,7 +111,8 @@ const ensureModuleProgress = async (enrollmentId: string, courseId: string, batc
  * Get course progress for a user
  */
 const getCourseProgress = async (userId: string, courseId: string, batchId?: string) => {
-    const enrollment = await findEnrollmentForCourse(userId, courseId, [
+    const resolvedCourseId = await resolveCourseId(courseId);
+    const enrollment = await findEnrollmentForCourse(userId, resolvedCourseId, [
         EnrollmentStatus.Active,
         EnrollmentStatus.Completed,
     ], batchId);
@@ -90,13 +121,12 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
         throw new ApiError(StatusCodes.NOT_FOUND, 'No enrollment found for this course');
     }
 
-    await ensureModuleProgress(enrollment._id.toString(), courseId, batchId ?? enrollment.batchId?.toString());
+    await ensureModuleProgress(enrollment._id.toString(), resolvedCourseId, batchId ?? enrollment.batchId?.toString());
 
     // Get module progress
     const moduleProgress = await ModuleProgressModel.find({
         enrollmentId: enrollment._id,
     }).populate('moduleId', 'title orderIndex').lean();
-
     // Get lesson progress
     const lessonProgress = await LessonProgressModel.find({
         enrollmentId: enrollment._id,
@@ -107,8 +137,9 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
         enrollmentId: enrollment._id,
     }).lean();
 
-    // Calculate overall progress from lesson + quiz completion
-    const allCourseModules = await ModuleModel.find({ courseId, batchId: enrollment.batchId }).sort({ orderIndex: 1 }).lean();
+    // Calculate overall progress from lesson + quiz completion. Only PASSED
+    // quizzes count — a failed submit must not inflate the percentage.
+    const allCourseModules = await ModuleModel.find({ courseId: resolvedCourseId, batchId: enrollment.batchId }).sort({ orderIndex: 1 }).lean();
     const allModuleIds = allCourseModules.map((m) => m._id);
     const [allLessons, allQuizzes] = await Promise.all([
         LessonModel.find({ moduleId: { $in: allModuleIds } }).lean(),
@@ -120,7 +151,7 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
         (lp) => lp.status === LessonProgressStatus.Completed
     ).length;
     const completedQuizzesCount = quizProgress.filter(
-        (qp) => qp.status === 'completed'
+        (qp) => qp.status === 'completed' && (qp as any).passed === true
     ).length;
     const completedItemsCount = completedLessonsCount + completedQuizzesCount;
 
@@ -183,9 +214,11 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
         completedAt: lessonProgress.find(lp => lp.lessonId.toString() === lesson._id.toString())?.completedAt,
     }));
 
-    // Get completed quizzes with module info
+    // Get completed quizzes with module info. Only PASSED attempts count —
+    // otherwise the UI (curriculum-locks) unlocks content the server still
+    // treats as locked, stranding users on 403s.
     const completedQuizIds = quizProgress
-        .filter(qp => qp.status === 'completed')
+        .filter(qp => qp.status === 'completed' && (qp as any).passed === true)
         .map(qp => qp.quizId);
 
     const completedQuizzesWithModules = await QuizModel.find({
@@ -210,10 +243,23 @@ const getCourseProgress = async (userId: string, courseId: string, batchId?: str
  * Complete a lesson for a user
  */
 const completeLesson = async (userId: string, courseId: string, moduleId: string, lessonId: string) => {
+    const resolvedCourseId = await resolveCourseId(courseId);
     const module = await ModuleModel.findById(moduleId).lean();
-    const batchId = module?.batchId?.toString();
+    if (!module) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+    }
+    // Bind the module to the URL course: without this, a module from another
+    // course (or an unassigned legacy module with no batchId) could complete
+    // lessons against the wrong enrollment.
+    if (module.courseId.toString() !== resolvedCourseId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Module does not belong to this course');
+    }
+    if (!module.batchId) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Module is not assigned to a batch');
+    }
+    const batchId = module.batchId.toString();
 
-    const enrollment = await findEnrollmentForCourse(userId, courseId, [
+    const enrollment = await findEnrollmentForCourse(userId, resolvedCourseId, [
         EnrollmentStatus.Active,
     ], batchId);
 
@@ -228,7 +274,7 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
     }
 
     // Backfill progress rows for modules added after enrollment, then re-check
-    await ensureModuleProgress(enrollment._id.toString(), courseId, enrollment.batchId?.toString());
+    await ensureModuleProgress(enrollment._id.toString(), resolvedCourseId, enrollment.batchId?.toString());
 
     const moduleProgress = await ModuleProgressModel.findOne({
         enrollmentId: enrollment._id,
@@ -361,11 +407,17 @@ const unlockNextModule = async (enrollmentId: string, currentModuleId: string) =
 
     if (!currentModule) return;
 
-    // Find next module by orderIndex
-    const nextModule = await ModuleModel.findOne({
+    // Find next module by orderIndex within the SAME batch. Modules are
+    // batch-scoped (courseId + batchId + orderIndex), so omitting batchId can
+    // match a sibling batch's module and leave the real next module locked.
+    const nextQuery: Record<string, unknown> = {
         courseId: currentModule.courseId,
         orderIndex: currentModule.orderIndex + 1,
-    }).lean();
+    };
+    if (currentModule.batchId) {
+        nextQuery.batchId = currentModule.batchId;
+    }
+    const nextModule = await ModuleModel.findOne(nextQuery).lean();
 
     if (!nextModule) return; // No next module
 

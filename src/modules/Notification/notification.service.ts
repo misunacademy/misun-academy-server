@@ -113,8 +113,8 @@ const getUserNotifications = async (
   userId: string,
   query: { page?: number; limit?: number; read?: boolean }
 ) => {
-  const page = query.page || 1;
-  const limit = query.limit || 10;
+  const page = Math.max(1, Math.floor(Number(query.page) || 1));
+  const limit = Math.min(100, Math.max(1, Math.floor(Number(query.limit) || 10)));
   const filter: any = { userId, isDeleted: { $ne: true } };
   if (query.read !== undefined) filter.read = query.read;
 

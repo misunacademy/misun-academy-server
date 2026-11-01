@@ -1,6 +1,7 @@
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../../errors/ApiError.js';
 import cloudinary, { isCloudinaryConfigured } from '../../config/cloudinary.js';
+import { logger } from '../../config/logger.js';
 import { IUploadResult, IMultipleUploadResult } from './upload.interface.js';
 
 const RESTRICTED_NID_FOLDER = 'misun-academy/employees/nid';
@@ -19,7 +20,7 @@ const uploadBufferToCloudinary = (
             (error, result) => {
                 clearTimeout(timeout);
                 if (error) {
-                    console.error('Cloudinary upload error:', error);
+                    logger.error(error, 'Cloudinary upload error');
                     reject(new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Failed to upload image to Cloudinary'));
                 } else {
                     resolve(result);
@@ -29,12 +30,30 @@ const uploadBufferToCloudinary = (
 
         uploadStream.on('error', (error) => {
             clearTimeout(timeout);
-            console.error('Upload stream error:', error);
+            logger.error(error, 'Upload stream error');
             reject(new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Upload stream failed'));
         });
 
         uploadStream.end(file.buffer);
     });
+
+/**
+ * Magic-byte sniffing: mimetype/extension are client-controlled, so a
+ * polyglot HTML/SVG renamed to image/png would pass the filter and become
+ * stored XSS via CDN delivery. The buffer never lies.
+ */
+const assertImageMagicBytes = (file: Express.Multer.File): void => {
+    const buf: Buffer = file.buffer;
+    if (!buf || buf.length < 12) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid image file');
+    }
+    const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
+    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    const isWebp = buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP';
+    if (!isJpeg && !isPng && !isWebp) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid image file: content does not match an image format');
+    }
+};
 
 /**
  * Process single uploaded file from Multer buffer to Cloudinary
@@ -47,6 +66,8 @@ const processSingleUpload = async (file: Express.Multer.File): Promise<IUploadRe
     if (!file.buffer) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'File buffer not available');
     }
+
+    assertImageMagicBytes(file);
 
     if (!isCloudinaryConfigured) {
         throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Image upload service is not configured. Please check Cloudinary credentials.');
@@ -74,7 +95,7 @@ const processSingleUpload = async (file: Express.Multer.File): Promise<IUploadRe
             uploadedAt: new Date(),
         };
     } catch (error: any) {
-        console.error('Upload service error:', error);
+        logger.error(error, 'Upload service error');
         throw new ApiError(
             StatusCodes.INTERNAL_SERVER_ERROR,
             error.message || 'Failed to process image upload'
@@ -95,6 +116,8 @@ const processRestrictedUpload = async (file: Express.Multer.File): Promise<IUplo
     if (!file.buffer) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'File buffer not available');
     }
+
+    assertImageMagicBytes(file);
 
     if (!isCloudinaryConfigured) {
         throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Image upload service is not configured. Please check Cloudinary credentials.');
@@ -159,7 +182,7 @@ const processMultipleUploads = async (files: Express.Multer.File[]): Promise<IMu
                 try {
                     return await processSingleUpload(file);
                 } catch (error) {
-                    console.error(`Failed to process file ${file.originalname}:`, error);
+                    logger.error(error, `Failed to process file ${file.originalname}`);
                     throw error;
                 }
             })
@@ -192,7 +215,7 @@ const deleteImage = async (publicId: string): Promise<void> => {
             throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Failed to delete image from Cloudinary');
         }
     } catch (error: any) {
-        console.error('Delete image error:', error);
+        logger.error(error, 'Delete image error');
         throw new ApiError(
             StatusCodes.INTERNAL_SERVER_ERROR,
             error.message || 'Failed to delete image from Cloudinary'
@@ -214,10 +237,10 @@ const deleteMultipleImages = async (publicIds: string[]): Promise<void> => {
         // Check if any deletions failed
         const failedDeletions = publicIds.filter(id => result.deleted[id] !== 'deleted');
         if (failedDeletions.length > 0) {
-            console.warn('Some images failed to delete:', failedDeletions);
+            logger.warn({ failedDeletions }, 'Some images failed to delete');
         }
     } catch (error: any) {
-        console.error('Delete multiple images error:', error);
+        logger.error(error, 'Delete multiple images error');
         throw new ApiError(
             StatusCodes.INTERNAL_SERVER_ERROR,
             error.message || 'Failed to delete images from Cloudinary'

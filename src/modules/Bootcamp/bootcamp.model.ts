@@ -53,8 +53,23 @@ const bootcampRegistrationSchema = new Schema<IBootcampRegistration>(
     }
 );
 
-bootcampRegistrationSchema.index({ email: 1 });
-bootcampRegistrationSchema.index({ whatsapp: 1 });
+bootcampRegistrationSchema.index(
+    { email: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { status: { $ne: BootcampRegistrationStatus.Rejected } },
+    }
+);
+bootcampRegistrationSchema.index(
+    { whatsapp: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            status: { $ne: BootcampRegistrationStatus.Rejected },
+            whatsapp: { $exists: true, $ne: '' },
+        },
+    }
+);
 bootcampRegistrationSchema.index({ createdAt: -1 });
 
 export const BootcampRegistrationModel = model<IBootcampRegistration>(

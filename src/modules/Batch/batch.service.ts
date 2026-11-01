@@ -30,9 +30,6 @@ export const BatchService = {
             throw new ApiError(StatusCodes.BAD_REQUEST, "Course ID is required");
         }
 
-        // Generate batch number
-        const batchNumber = await getNextBatchNumber(data.courseId.toString());
-
         // Validate dates
         if (data.startDate && data.endDate && data.startDate >= data.endDate) {
             throw new ApiError(StatusCodes.BAD_REQUEST, "End date must be after start date");
@@ -42,14 +39,27 @@ export const BatchService = {
             throw new ApiError(StatusCodes.BAD_REQUEST, "Enrollment end date must be after enrollment start date");
         }
 
-        const batch = await BatchModel.create({
-            ...data,
-            batchNumber,
-            currentEnrollment: 0,
-            status: data.status || BatchStatus.Draft,
-        });
-
-        return batch;
+        // batchNumber has a per-course unique index: retry on 11000 so
+        // concurrent creates don't 500.
+        let lastError: unknown = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                const batchNumber = await getNextBatchNumber(data.courseId.toString());
+                const batch = await BatchModel.create({
+                    ...data,
+                    batchNumber,
+                    currentEnrollment: 0,
+                    status: data.status || BatchStatus.Draft,
+                });
+                return batch;
+            } catch (error: any) {
+                if (error?.code !== 11000) throw error;
+                lastError = error;
+            }
+        }
+        throw lastError instanceof Error
+            ? lastError
+            : new ApiError(StatusCodes.CONFLICT, 'Batch number conflict, please retry');
     },
 
     /**
@@ -70,18 +80,19 @@ export const BatchService = {
             query.status = { $in: [BatchStatus.Upcoming, BatchStatus.Running] };
         }
 
-        // Pagination
-        const page = Math.max(1, filters?.page || 1);
-        const limit = Math.max(1, filters?.limit || 10);
+        // Pagination (capped: full-collection scans + course populate = DoS)
+        const page = Math.max(1, Math.floor(filters?.page || 1));
+        const limit = Math.min(100, Math.max(1, Math.floor(filters?.limit || 10)));
         const skip = (page - 1) * limit;
 
         // Get total count
         const total = await BatchModel.countDocuments(query);
         const totalPages = Math.ceil(total / limit);
 
-        // Get paginated data
+        // Get paginated data (course populate minimized: public callers don't
+        // need the full Course doc)
         const data = await BatchModel.find(query)
-            .populate('courseId')
+            .populate('courseId', 'title slug thumbnailImage status brand')
             // .populate('instructors', 'name')
             .sort({ startDate: -1 })
             .skip(skip)
@@ -109,6 +120,7 @@ export const BatchService = {
         const query: any = {
             status: BatchStatus.Upcoming,
             enrollmentEndDate: { $gte: now },
+            isHidden: { $ne: true },
         };
 
         if (courseId) {
@@ -135,6 +147,7 @@ export const BatchService = {
         const batches = await BatchModel.find({
             status: BatchStatus.Upcoming,
             enrollmentEndDate: { $gte: now },
+            isHidden: { $ne: true },
         })
             .populate('courseId', 'title slug thumbnailImage shortDescription instructor')
             .sort({ enrollmentStartDate: 1 })
@@ -163,8 +176,6 @@ export const BatchService = {
      * Update batch (allows manual status override)
      */
     updateBatch: async (id: string, data: Partial<IBatch>) => {
-        console.log('BatchService.updateBatch called:', { id, data });
-
         const batch = await BatchModel.findById(id).lean();
         if (!batch) {
             throw new ApiError(StatusCodes.NOT_FOUND, "Batch not found");
@@ -244,21 +255,6 @@ export const BatchService = {
             throw new ApiError(StatusCodes.NOT_FOUND, "Batch not found");
         }
 
-        // // Validate status transition
-        // const validTransitions: Record<BatchStatus, BatchStatus[]> = {
-        //     [BatchStatus.Draft]: [BatchStatus.Upcoming],
-        //     [BatchStatus.Upcoming]: [BatchStatus.Running, BatchStatus.Draft],
-        //     [BatchStatus.Running]: [BatchStatus.Completed],
-        //     [BatchStatus.Completed]: [], // Cannot transition from completed
-        // };
-
-        // if (!validTransitions[batch.status].includes(newStatus)) {
-        //     throw new ApiError(
-        //         StatusCodes.BAD_REQUEST,
-        //         `Cannot transition from ${batch.status} to ${newStatus}`
-        //     );
-        // }
-
     const oldStatus = batch.status;
     batch.status = newStatus;
     await batch.save();
@@ -313,6 +309,14 @@ export const BatchService = {
         const batch = await BatchModel.findById(id).lean();
         if (!batch) {
             throw new ApiError(StatusCodes.NOT_FOUND, "Batch not found");
+        }
+
+        const enrollmentCount = await EnrollmentModel.countDocuments({ batchId: id });
+        if (enrollmentCount > 0) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                "Cannot delete batch with existing enrollments. Remove or transfer enrollments first."
+            );
         }
 
         await BatchModel.findByIdAndDelete(id);

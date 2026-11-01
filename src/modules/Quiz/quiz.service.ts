@@ -84,6 +84,16 @@ const getQuizById = async (quizId: string) => {
     return quiz;
 };
 
+// Learner-facing quiz info: drafts are masked as not-found so unpublished
+// titles/descriptions/instructions can't be enumerated.
+const getQuizInfo = async (quizId: string) => {
+    const quiz = await QuizModel.findById(quizId).lean();
+    if (!quiz || quiz.status !== 'published') {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Quiz not found');
+    }
+    return quiz;
+};
+
 const getQuizBySlug = async (slug: string) => {
     const quiz = await QuizModel.findOne({ slug }).populate('moduleId').lean();
     if (!quiz) {
@@ -164,9 +174,11 @@ const reorderQuizzes = async (moduleId: string, quizOrders: { quizId: string; or
         throw new ApiError(StatusCodes.BAD_REQUEST, 'quizOrders must be an array');
     }
 
+    // Scoped to the module so a stray/foreign quizId can never move a
+    // quiz that belongs to another module.
     await Promise.all(
         quizOrders.map(({ quizId, orderIndex }) =>
-            QuizModel.findByIdAndUpdate(quizId, { orderIndex })
+            QuizModel.findOneAndUpdate({ _id: quizId, moduleId }, { orderIndex })
         )
     );
 
@@ -350,6 +362,7 @@ export const QuizService = {
     createQuiz,
     getModuleQuizzes,
     getQuizById,
+    getQuizInfo,
     getQuizBySlug,
     updateQuiz,
     deleteQuiz,

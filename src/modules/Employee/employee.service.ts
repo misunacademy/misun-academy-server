@@ -7,6 +7,7 @@ import { ISalary, ILeaveRequest } from './employee.interface.js';
 import { Role } from '../../types/role.js';
 import { logger } from '../../config/logger.js';
 import { sendEmployeeSalaryPaidEmail } from '../../services/misunAcademyEmails.js';
+import { escapeRegExp } from '../../utils/escapeRegExp.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EMPLOYEE PROFILE
@@ -174,13 +175,13 @@ const addLeaveRequest = async (
 const getAllEmployees = async (query: {
     page?: number; limit?: number; search?: string;
 }) => {
-    const page  = Math.max(1, Number(query.page  ?? 1));
-    const limit = Math.max(1, Number(query.limit ?? 10));
+    const page  = Math.max(1, Math.floor(Number(query.page  ?? 1) || 1));
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(query.limit ?? 10) || 10)));
     const skip  = (page - 1) * limit;
 
     const filter: any = { role: Role.EMPLOYEE };
     if (query.search) {
-        const re = new RegExp(query.search, 'i');
+        const re = new RegExp(escapeRegExp(query.search), 'i');
         filter.$or = [{ name: re }, { email: re }];
     }
 
@@ -221,12 +222,17 @@ const getAllEmployees = async (query: {
 const getAllSalariesAdmin = async (query: {
     page?: number; limit?: number; employeeId?: string; status?: string;
 }) => {
-    const page  = Math.max(1, Number(query.page  ?? 1));
-    const limit = Math.max(1, Number(query.limit ?? 10));
+    const page  = Math.max(1, Math.floor(Number(query.page  ?? 1) || 1));
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(query.limit ?? 10) || 10)));
     const skip  = (page - 1) * limit;
 
     const filter: any = {};
-    if (query.employeeId) filter.employeeId = new mongoose.Types.ObjectId(query.employeeId);
+    if (query.employeeId) {
+        if (!mongoose.Types.ObjectId.isValid(query.employeeId)) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid employee ID');
+        }
+        filter.employeeId = new mongoose.Types.ObjectId(query.employeeId);
+    }
     if (query.status && ['Paid', 'Pending'].includes(query.status)) filter.status = query.status;
 
     const [salaries, total] = await Promise.all([
@@ -238,8 +244,20 @@ const getAllSalariesAdmin = async (query: {
 };
 
 const addSalary = async (payload: Omit<ISalary, 'totalAmount'>) => {
+    // Ghost-salary guard: the employee must exist and hold the employee role.
+    const holder = await UserModel.findById(payload.employeeId).select('name role').lean();
+    if (!holder) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Employee not found');
+    }
+    if (holder.role !== Role.EMPLOYEE) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Salary can only be recorded for employees');
+    }
     const totalAmount = (payload.amount ?? 0) + (payload.bonus ?? 0);
-    return SalaryModel.create({ ...payload, totalAmount });
+    return SalaryModel.create({
+        ...payload,
+        employeeName: (payload as any).employeeName || holder.name,
+        totalAmount,
+    });
 };
 
 const updateSalaryStatus = async (id: string, status: 'Paid' | 'Pending') => {

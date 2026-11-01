@@ -1,0 +1,574 @@
+import mongoose, { PipelineStage } from 'mongoose';
+import { RefundModel } from './refund.model.js';
+import { RefundChannel, RefundStatus } from './refund.interface.js';
+import { PaymentModel } from '../Payment/payment.model.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { BatchModel } from '../Batch/batch.model.js';
+import { UserModel } from '../User/user.model.js';
+import { Status, EnrollmentStatus } from '../../types/common.js';
+import ApiError from '../../errors/ApiError.js';
+import { StatusCodes } from 'http-status-codes';
+import { recordAudit } from '../../models/auditLog.model.js';
+import { NotificationService } from '../Notification/notification.service.js';
+import { escapeRegExp } from '../../utils/escapeRegExp.js';
+import { Role } from '../../types/role.js';
+import env from '../../config/env.js';
+
+interface Actor {
+  id: string;
+  role?: string;
+}
+
+interface CreateRefundPayload {
+  transactionId: string;
+  amount?: number;
+  reason: string;
+}
+
+interface ListQuery {
+  status?: RefundStatus;
+  search?: string;
+  page?: number;
+  limit?: number;
+}
+
+const getBankTranId = (gatewayResponse: unknown): string | undefined => {
+  if (!gatewayResponse || typeof gatewayResponse !== 'object') return undefined;
+  const gw = gatewayResponse as Record<string, unknown>;
+  return typeof gw.bank_tran_id === 'string' && gw.bank_tran_id ? gw.bank_tran_id : undefined;
+};
+
+/**
+ * Maker-checker: the admin who requested a refund must not be the one to
+ * move its money (approve / complete). Superadmins bypass — they are the
+ * checker by definition, which also keeps solo-superadmin teams working.
+ * Cancelling (reject) your own request is always allowed: no money moves.
+ */
+const assertChecker = (
+  refund: { requestedBy: unknown },
+  actor: Actor,
+  action: 'approve' | 'complete'
+) => {
+  if (actor.role === Role.SUPERADMIN) return;
+  if (refund.requestedBy?.toString() === actor.id) {
+    throw new ApiError(
+      StatusCodes.FORBIDDEN,
+      `A second admin must ${action} this refund — the requester cannot ${action} their own refund`
+    );
+  }
+};
+
+const resolveSslBaseUrl = (): string =>
+  env.SSL_IS_LIVE === 'true' ? 'https://securepay.sslcommerz.com' : 'https://sandbox.sslcommerz.com';
+
+interface SslRefundResult {
+  APIConnect?: string;
+  status?: string;
+  refund_ref_id?: string;
+  refund_ref?: string;
+  errorReason?: string;
+}
+
+/**
+ * Initiate a refund through SSLCommerz (documented Refund API — v4 docs):
+ * GET {base}/validator/api/merchantTransIDvalidationAPI.php with
+ * bank_tran_id, refund_amount, refund_remarks, store_id, store_passwd plus
+ * the mandatory refund_trans_id (unique per request, introduced 24/02/2025).
+ * Success is `status: "success"` with a `refund_ref_id`.
+ */
+const requestGatewayRefund = async (
+  bankTranId: string,
+  amount: number,
+  remarks: string
+): Promise<SslRefundResult | null> => {
+  const params = new URLSearchParams({
+    bank_tran_id: bankTranId,
+    refund_amount: amount.toFixed(2),
+    refund_remarks: remarks,
+    store_id: env.SSL_STORE_ID,
+    store_passwd: env.SSL_STORE_PASSWORD,
+    refund_trans_id: `RFD${Date.now()}${Math.floor(Math.random() * 1e6)}`,
+    format: 'json',
+    v: '1',
+  });
+
+  try {
+    const res = await fetch(
+      `${resolveSslBaseUrl()}/validator/api/merchantTransIDvalidationAPI.php?${params.toString()}`,
+      { method: 'GET' }
+    );
+    return (await res.json()) as SslRefundResult;
+  } catch {
+    return null;
+  }
+};
+
+const isGatewayRefundSuccess = (result: SslRefundResult | null | undefined): boolean =>
+  !!result &&
+  result.APIConnect === 'DONE' &&
+  typeof result.status === 'string' &&
+  result.status.toLowerCase() === 'success' &&
+  !!(result.refund_ref_id ?? result.refund_ref);
+
+const createRefund = async (payload: CreateRefundPayload, actor: Actor, ip?: string) => {
+  const payment = await PaymentModel.findOne({ transactionId: payload.transactionId });
+  if (!payment) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Payment not found');
+  }
+  if (payment.status !== Status.Success) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Only successful payments can be refunded');
+  }
+
+  const amount = payload.amount ?? payment.amount;
+  if (amount <= 0) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Refund amount must be positive');
+  }
+  if (amount > payment.amount) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Refund amount cannot exceed the paid amount');
+  }
+
+  const activeRefund = await RefundModel.findOne({
+    transactionId: payload.transactionId,
+    status: { $in: [RefundStatus.Pending, RefundStatus.Approved, RefundStatus.Processing] },
+  });
+  if (activeRefund) {
+    throw new ApiError(StatusCodes.CONFLICT, 'An active refund already exists for this transaction');
+  }
+
+  // Partial-refund accounting: completed refunds consume the paid amount, so a
+  // second refund is allowed only for the remaining balance.
+  const completedRefunds = await RefundModel.find({
+    transactionId: payload.transactionId,
+    status: RefundStatus.Completed,
+  }).select('amount').lean();
+  const alreadyRefunded = completedRefunds.reduce((sum, r) => sum + (r.amount || 0), 0);
+  if (amount > payment.amount - alreadyRefunded) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Refund amount exceeds the remaining refundable balance');
+  }
+
+  const bankTranId = getBankTranId(payment.gatewayResponse);
+  const channel =
+    payment.method === 'SSLCommerz' && bankTranId ? RefundChannel.Gateway : RefundChannel.Manual;
+
+  let refund;
+  try {
+    refund = await RefundModel.create({
+      paymentId: payment._id,
+      transactionId: payment.transactionId,
+      enrollmentId: payment.enrollmentId,
+      userId: payment.userId,
+      batchId: payment.batchId,
+      amount,
+      currency: payment.currency,
+      method: payment.method,
+      channel,
+      status: RefundStatus.Pending,
+      reason: payload.reason,
+      requestedBy: new mongoose.Types.ObjectId(actor.id),
+    });
+  } catch (error: any) {
+    // Partial unique index backstop: a concurrent request won the race after
+    // the activeRefund check above.
+    if (error?.code === 11000) {
+      throw new ApiError(StatusCodes.CONFLICT, 'An active refund already exists for this transaction');
+    }
+    throw error;
+  }
+
+  await recordAudit({
+    actor: actor.id,
+    actorRole: actor.role,
+    action: 'refund.create',
+    targetType: 'Refund',
+    targetId: refund._id.toString(),
+    metadata: { transactionId: payload.transactionId, amount, channel },
+    ip,
+  });
+
+  return refund;
+};
+
+const listRefunds = async (query: ListQuery) => {
+  const { status, search } = query;
+  const page = Math.max(1, Math.floor(Number(query.page) || 1));
+  const limit = Math.min(100, Math.max(1, Math.floor(Number(query.limit) || 10)));
+
+  const filters: Record<string, unknown> = {};
+  if (status) filters.status = status;
+
+  const searchFilter: Record<string, unknown> | null = search
+    ? {
+        $or: [
+          { 'matchedUser.name': { $regex: escapeRegExp(search), $options: 'i' } },
+          { 'matchedUser.email': { $regex: escapeRegExp(search), $options: 'i' } },
+          { transactionId: { $regex: escapeRegExp(search), $options: 'i' } },
+        ],
+      }
+    : null;
+
+  const pipeline: PipelineStage[] = [
+    ...(Object.keys(filters).length > 0 ? [{ $match: filters }] : []),
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'user',
+      },
+    },
+    { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'batches',
+        localField: 'batchId',
+        foreignField: '_id',
+        as: 'batch',
+      },
+    },
+    { $unwind: { path: '$batch', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'courses',
+        localField: 'batch.courseId',
+        foreignField: '_id',
+        as: 'course',
+      },
+    },
+    { $unwind: { path: '$course', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'payments',
+        localField: 'paymentId',
+        foreignField: '_id',
+        as: 'payment',
+      },
+    },
+    { $unwind: { path: '$payment', preserveNullAndEmptyArrays: true } },
+    ...(searchFilter ? [{ $match: searchFilter }] : []),
+    { $sort: { createdAt: -1 } },
+    { $skip: (page - 1) * limit },
+    { $limit: limit },
+    {
+      $project: {
+        transactionId: 1,
+        amount: 1,
+        currency: 1,
+        method: 1,
+        channel: 1,
+        status: 1,
+        reason: 1,
+        decisionNote: 1,
+        gatewayRef: 1,
+        processedAt: 1,
+        completedAt: 1,
+        createdAt: 1,
+        student: {
+          _id: '$user._id',
+          name: '$user.name',
+          email: '$user.email',
+          phone: '$user.phone',
+        },
+        batch: {
+          _id: '$batch._id',
+          title: '$batch.title',
+          batchNumber: { $concat: ['Batch #', { $toString: '$batch.batchNumber' }] },
+        },
+        course: {
+          _id: '$course._id',
+          title: '$course.title',
+          slug: '$course.slug',
+        },
+        paymentStatus: '$payment.status',
+      },
+    },
+  ];
+
+  const countPipeline: PipelineStage[] = [
+    ...(Object.keys(filters).length > 0 ? [{ $match: filters }] : []),
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'matchedUser',
+      },
+    },
+    ...(searchFilter ? [{ $match: searchFilter }] : []),
+    { $count: 'total' },
+  ];
+
+  const [data, totalResult] = await Promise.all([
+    RefundModel.aggregate(pipeline),
+    RefundModel.aggregate(countPipeline),
+  ]);
+
+  const total = totalResult[0]?.total ?? 0;
+
+  return {
+    meta: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    },
+    data,
+  };
+};
+
+const getRefundById = async (id: string) => {
+  const refund = await RefundModel.findById(id)
+    .populate('userId', 'name email phone')
+    .populate('requestedBy', 'name email')
+    .populate('processedBy', 'name email')
+    .populate('batchId', 'title batchNumber')
+    .lean();
+  return refund;
+};
+
+const approveRefund = async (id: string, note: string | undefined, actor: Actor, ip?: string) => {
+  const existing = await RefundModel.findById(id).lean();
+  if (!existing) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Refund not found');
+  }
+  if (existing.status !== RefundStatus.Pending) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Only pending refunds can be approved');
+  }
+  assertChecker(existing, actor, 'approve');
+
+  // Atomic transition: exactly one concurrent approver wins; the loser sees
+  // null and gets a clear "already decided" error instead of double audit.
+  const refund = await RefundModel.findOneAndUpdate(
+    { _id: id, status: RefundStatus.Pending },
+    {
+      $set: {
+        status: RefundStatus.Approved,
+        decisionNote: note ?? existing.decisionNote,
+        processedBy: new mongoose.Types.ObjectId(actor.id),
+        processedAt: new Date(),
+      },
+    },
+    { new: true }
+  );
+  if (!refund) {
+    throw new ApiError(StatusCodes.CONFLICT, 'Refund was already decided by another admin');
+  }
+
+  await recordAudit({
+    actor: actor.id,
+    actorRole: actor.role,
+    action: 'refund.approve',
+    targetType: 'Refund',
+    targetId: id,
+    metadata: {
+      transactionId: refund.transactionId,
+      amount: refund.amount,
+      selfApproved: existing.requestedBy?.toString() === actor.id,
+    },
+    ip,
+  });
+
+  return refund;
+};
+
+const rejectRefund = async (id: string, note: string | undefined, actor: Actor, ip?: string) => {
+  const existing = await RefundModel.findById(id).lean();
+  if (!existing) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Refund not found');
+  }
+  if (existing.status !== RefundStatus.Pending) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Only pending refunds can be rejected');
+  }
+  // No maker-checker here: cancelling moves no money.
+
+  const refund = await RefundModel.findOneAndUpdate(
+    { _id: id, status: RefundStatus.Pending },
+    {
+      $set: {
+        status: RefundStatus.Rejected,
+        decisionNote: note ?? existing.decisionNote,
+        processedBy: new mongoose.Types.ObjectId(actor.id),
+        processedAt: new Date(),
+      },
+    },
+    { new: true }
+  );
+  if (!refund) {
+    throw new ApiError(StatusCodes.CONFLICT, 'Refund was already decided by another admin');
+  }
+
+  await recordAudit({
+    actor: actor.id,
+    actorRole: actor.role,
+    action: 'refund.reject',
+    targetType: 'Refund',
+    targetId: id,
+    metadata: { transactionId: refund.transactionId, amount: refund.amount },
+    ip,
+  });
+
+  return refund;
+};
+
+const completeRefund = async (id: string, actor: Actor, ip?: string) => {
+  const existing = await RefundModel.findById(id).lean();
+  if (!existing) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Refund not found');
+  }
+  if (existing.status !== RefundStatus.Approved) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Only approved refunds can be completed');
+  }
+  assertChecker(existing, actor, 'complete');
+
+  // Atomic claim BEFORE any gateway I/O: exactly one concurrent completer
+  // moves Approved -> Processing, so the gateway refund can never fire twice.
+  const claimed = await RefundModel.findOneAndUpdate(
+    { _id: id, status: RefundStatus.Approved },
+    {
+      $set: {
+        status: RefundStatus.Processing,
+        processedBy: new mongoose.Types.ObjectId(actor.id),
+        processedAt: new Date(),
+      },
+    },
+    { new: true }
+  ).lean();
+  if (!claimed) {
+    throw new ApiError(StatusCodes.CONFLICT, 'Refund is already being completed by another admin');
+  }
+
+  let gatewayResponse: unknown = claimed.gatewayResponse;
+  let gatewayRef = claimed.gatewayRef;
+
+  if (claimed.channel === RefundChannel.Gateway) {
+    const payment = await PaymentModel.findById(claimed.paymentId).lean();
+    const bankTranId = getBankTranId(payment?.gatewayResponse);
+    if (!bankTranId) {
+      // Release the claim so the refund can be completed manually instead of
+      // wedging it in Processing forever.
+      await RefundModel.findOneAndUpdate(
+        { _id: id, status: RefundStatus.Processing },
+        { $set: { status: RefundStatus.Approved } }
+      );
+      throw new ApiError(
+        StatusCodes.BAD_REQUEST,
+        'Gateway refund unavailable: bank_tran_id missing. Complete this refund manually instead.'
+      );
+    }
+
+    const result = await requestGatewayRefund(bankTranId, claimed.amount, `Refund for ${claimed.transactionId}`);
+    if (!isGatewayRefundSuccess(result)) {
+      await RefundModel.findOneAndUpdate(
+        { _id: id, status: RefundStatus.Processing },
+        { $set: { status: RefundStatus.Approved, gatewayResponse: result ?? { error: 'no response from SSLCommerz' } } }
+      );
+      throw new ApiError(
+        StatusCodes.BAD_GATEWAY,
+        `Gateway refund failed: ${result?.errorReason ?? 'no response from SSLCommerz'}`
+      );
+    }
+    gatewayResponse = result;
+    gatewayRef = result?.refund_ref_id ?? result?.refund_ref;
+  }
+
+  const session = await mongoose.startSession();
+  try {
+    session.startTransaction();
+
+    const finished = await RefundModel.findOneAndUpdate(
+      { _id: id, status: RefundStatus.Processing },
+      {
+        $set: {
+          status: RefundStatus.Completed,
+          gatewayResponse,
+          gatewayRef,
+          processedBy: new mongoose.Types.ObjectId(actor.id),
+          completedAt: new Date(),
+        },
+      },
+      { new: true, session }
+    );
+    if (!finished) {
+      throw new ApiError(StatusCodes.CONFLICT, 'Refund changed state during completion');
+    }
+
+    // Full refund only: a PARTIAL refund must not revoke the student's access
+    // or corrupt finance state — the payment stays successful with a reduced
+    // refundable balance.
+    const fullPayment = await PaymentModel.findOne({ transactionId: claimed.transactionId }).session(session);
+    const isFullRefund = !!fullPayment && claimed.amount >= fullPayment.amount;
+    if (isFullRefund) {
+      await PaymentModel.findOneAndUpdate(
+        { transactionId: claimed.transactionId },
+        { status: Status.Refunded, updatedAt: new Date() },
+        { session }
+      );
+
+      if (claimed.enrollmentId) {
+        await EnrollmentModel.findOneAndUpdate(
+          { enrollmentId: claimed.enrollmentId },
+          { status: EnrollmentStatus.Refunded },
+          { session }
+        );
+      }
+
+      // The seat is gone: keep Batch.currentEnrollment honest.
+      if (claimed.batchId) {
+        await BatchModel.findByIdAndUpdate(
+          claimed.batchId,
+          { $inc: { currentEnrollment: -1 } },
+          { session }
+        );
+      }
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    await recordAudit({
+      actor: actor.id,
+      actorRole: actor.role,
+      action: 'refund.complete',
+      targetType: 'Refund',
+      targetId: id,
+      metadata: {
+        transactionId: claimed.transactionId,
+        amount: claimed.amount,
+        channel: claimed.channel,
+        gatewayRef,
+        partial: !isFullRefund,
+        selfApproved: claimed.requestedBy?.toString() === actor.id,
+      },
+      ip,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+
+  const user = await UserModel.findById(claimed.userId).lean();
+  if (user) {
+    try {
+      await NotificationService.createNotification({
+        userId: user._id.toString(),
+        type: 'payment_refunded',
+        title: 'Payment refunded',
+        message: `Your payment for transaction ${claimed.transactionId} has been refunded.`,
+        link: '/dashboard/notifications',
+      });
+    } catch {
+      // notification is best-effort
+    }
+  }
+
+  return RefundModel.findById(id).lean();
+};
+
+export const RefundService = {
+  createRefund,
+  listRefunds,
+  getRefundById,
+  approveRefund,
+  rejectRefund,
+  completeRefund,
+};

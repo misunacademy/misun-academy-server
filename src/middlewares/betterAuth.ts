@@ -40,6 +40,7 @@ export const requireAuth = async (
       return res.status(StatusCodes.UNAUTHORIZED).json({
         success: false,
         message: 'Authentication required. Please log in.',
+        correlationId: req.correlationId,
       });
     }
 
@@ -48,6 +49,7 @@ export const requireAuth = async (
       return res.status(StatusCodes.FORBIDDEN).json({
         success: false,
         message: 'Please verify your email address before accessing this resource.',
+        correlationId: req.correlationId,
       });
     }
 
@@ -57,6 +59,7 @@ export const requireAuth = async (
       return res.status(StatusCodes.FORBIDDEN).json({
         success: false,
         message: 'Your account has been suspended. Please contact support.',
+        correlationId: req.correlationId,
       });
     }
 
@@ -64,6 +67,7 @@ export const requireAuth = async (
       return res.status(StatusCodes.FORBIDDEN).json({
         success: false,
         message: 'This account no longer exists.',
+        correlationId: req.correlationId,
       });
     }
 
@@ -85,6 +89,7 @@ export const requireAuth = async (
     return res.status(StatusCodes.UNAUTHORIZED).json({
       success: false,
       message: 'Invalid or expired session.',
+      correlationId: (req as Request).correlationId,
     });
   }
 };
