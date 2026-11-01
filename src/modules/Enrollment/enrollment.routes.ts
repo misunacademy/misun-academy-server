@@ -15,10 +15,22 @@ const manualEnrollmentLimiter = createRateLimiter({
     message: 'Too many manual payment submissions. Please try again later.',
 });
 
+// Each initiation creates a gateway session; a stuck/retrying client must not
+// be able to spawn dozens of them. Generous enough for genuine retries after a
+// failed/cancelled payment.
+const initiateEnrollmentLimiter = createRateLimiter({
+    prefix: 'enroll-initiate',
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    keyByUser: true,
+    message: 'Too many enrollment attempts. Please wait a few minutes and try again.',
+});
+
 // Learner routes
 router.post(
     '/',
     requireAuth,
+    initiateEnrollmentLimiter,
     validateRequest(initiateEnrollmentSchema),
     EnrollmentController.initiateEnrollment
 );

@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import catchAsync from "../../utils/catchAsync.js";
 import sendResponse from "../../utils/sendResponse.js";
 import { PaymentService } from "./payment.service.js";
+import { runPaymentMaintenance } from "./paymentMaintenance.service.js";
 import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
 import { Status } from "../../types/common.js";
@@ -225,6 +226,22 @@ const verifyManualPayment = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+/**
+ * Cron / admin: settle payments captured at the gateway but never recorded
+ * locally, then expire genuinely abandoned enrollments. Idempotent — safe to
+ * run as often as the scheduler wants.
+ */
+const runMaintenance = catchAsync(async (_req: Request, res: Response) => {
+  const result = await runPaymentMaintenance();
+
+  sendResponse(res, {
+    statusCode: StatusCodes.OK,
+    success: true,
+    message: 'Payment maintenance completed',
+    data: result,
+  });
+});
+
 export const PaymentController = {
   getPaymentHistory,
   getPaymentDetail,
@@ -234,4 +251,5 @@ export const PaymentController = {
   getMyPayments,
   sslCommerzWebhook,
   verifyManualPayment,
+  runMaintenance,
 }

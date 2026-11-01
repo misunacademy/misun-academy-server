@@ -727,6 +727,44 @@ const validateSSLCommerzPayment = async (valId: string) => {
     return data;
 };
 
+// ─── GATEWAY TRANSACTION LOOKUP (RECONCILIATION) ───
+
+const GATEWAY_QUERY_TIMEOUT_MS = 10000;
+
+/**
+ * Ask SSLCommerz for the authoritative state of a gateway transaction.
+ *
+ * Used by the reconciliation job to settle payments whose browser redirect and
+ * IPN never reached us (tab closed, network drop, webhook outage). The SDK
+ * swallows transport failures and resolves with the thrown value, so callers
+ * get `null` for "could not determine — retry later" instead of an exception.
+ */
+export const querySSLCommerzTransaction = async (
+    transactionId: string
+): Promise<Record<string, any> | null> => {
+    const store_id = config.SSL_STORE_ID;
+    const store_passwd = config.SSL_STORE_PASSWORD;
+
+    if (!store_id || !store_passwd) {
+        throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Payment gateway not configured');
+    }
+
+    const sslcz = new SSLCommerzPayment(store_id, store_passwd, config.SSL_IS_LIVE === 'true');
+
+    const response = await Promise.race([
+        sslcz.transactionQueryByTransactionId({ tran_id: transactionId }),
+        new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), GATEWAY_QUERY_TIMEOUT_MS)
+        ),
+    ]);
+
+    if (!response || response instanceof Error || typeof response !== 'object') {
+        return null;
+    }
+
+    return response as Record<string, any>;
+};
+
 // ─── FINALIZE SSLCOMMERZ PAYMENT ───
 
 const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) => {
@@ -908,9 +946,94 @@ const getMyPayments = async (userId: string) => {
     });
 };
 
+// ─── GATEWAY ATTEMPT BOOKKEEPING ───
+
+/**
+ * Record a gateway attempt on the enrollment's single payment row.
+ *
+ * One enrollment owns exactly one open payment, and `finalizeSSLCommerzPayment`
+ * rescues payments completed on a superseded gateway session
+ * (`gatewayResponse.supersededTranIds`). Retries therefore must not destroy
+ * the row's audit trail (manual submission history, prior val_id/card data) —
+ * but they also must not mix a whole-document `$set` with a dotted `$addToSet`:
+ * MongoDB rejects overlapping paths ("Updating the path 'gatewayResponse'
+ * would create a conflict at 'gatewayResponse'"), which is exactly the generic
+ * 500 users hit on their second enrollment attempt.
+ */
+export const recordGatewayPaymentAttempt = async (params: {
+    userId: string;
+    batch: { _id: unknown; price?: number; currency?: string };
+    enrollmentId: string;
+    transactionId: string;
+}) => {
+    const { userId, batch, enrollmentId, transactionId } = params;
+
+    const previousAttempt = await PaymentModel.findOne({ enrollmentId })
+        .select('transactionId gatewayResponse')
+        .lean();
+
+    // A legacy row can hold `gatewayResponse: null`; a dotted `$set` into null
+    // throws PathNotViable. Normalise it to an object first.
+    if (previousAttempt && previousAttempt.gatewayResponse === null) {
+        await PaymentModel.updateOne(
+            { _id: previousAttempt._id },
+            { $set: { gatewayResponse: {} } }
+        );
+    }
+
+    const previousTransactionId = previousAttempt?.transactionId;
+    const shouldSupersede =
+        typeof previousTransactionId === 'string' &&
+        previousTransactionId.length > 0 &&
+        previousTransactionId !== transactionId;
+
+    const update: Record<string, unknown> = {
+        $set: {
+            userId,
+            batchId: batch._id,
+            enrollmentId,
+            transactionId,
+            amount: batch.price,
+            currency: batch.currency || 'BDT',
+            status: Status.Pending,
+            method: 'SSLCommerz',
+            'gatewayResponse.retriedAt': new Date(),
+        },
+        $unset: {
+            verifiedAt: '',
+            verifiedBy: '',
+        },
+    };
+
+    if (shouldSupersede) {
+        update.$addToSet = {
+            'gatewayResponse.supersededTranIds': previousTransactionId,
+        };
+    }
+
+    try {
+        return await PaymentModel.findOneAndUpdate({ enrollmentId }, update, {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true,
+        });
+    } catch (error: any) {
+        // Concurrent initiations for the same enrollment race on the unique
+        // enrollmentId index. The row exists now, so apply the same update
+        // once more instead of surfacing a 500 (and losing the attempt).
+        if (error?.code === 11000) {
+            return PaymentModel.findOneAndUpdate({ enrollmentId }, update, { new: true });
+        }
+        throw error;
+    }
+};
+
 // ─── INITIATE SSLCOMMERZ PAYMENT ───
 
-const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) => {
+const initiateSSLCommerzPayment = async (
+    enrollmentId: string,
+    userId: string
+) => {
     const enrollment = await EnrollmentModel.findOne({ enrollmentId, userId })
         .lean()
         .populate('batchId')
@@ -926,6 +1049,27 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         enrollment.status !== EnrollmentStatus.PaymentFailed
     ) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment is not pending payment');
+    }
+
+    const currentPayment = await PaymentModel.findOne({ enrollmentId })
+        .select('status method')
+        .lean();
+
+    // One open payment per enrollment. Never let a gateway attempt overwrite a
+    // manual payment that is queued for admin review (the learner would end up
+    // paying twice), and never charge an enrollment that is already settled.
+    if (currentPayment?.status === Status.Review) {
+        throw new ApiError(
+            StatusCodes.CONFLICT,
+            'Your manual payment is already under verification. Please wait for approval before paying again.'
+        );
+    }
+
+    if (currentPayment?.status === Status.Success) {
+        throw new ApiError(
+            StatusCodes.CONFLICT,
+            'This enrollment has already been paid. Please check your enrollments.'
+        );
     }
 
     const batch = enrollment.batchId;
@@ -983,36 +1127,20 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
     // payment if the user completes the OLDER gateway session (double-click /
     // retry / second tab). Without this the paid tran_id vanishes from the DB
     // and the money is captured but never credited.
-    const existingPayment = await PaymentModel.findOne({ enrollmentId }).select('transactionId').lean();
-
-    await PaymentModel.findOneAndUpdate(
-        { enrollmentId },
-        {
-            $set: {
-                userId,
-                batchId: (batch as any)._id,
-                enrollmentId,
-                transactionId,
-                amount: (batch as any).price,
-                currency: (batch as any).currency || 'BDT',
-                status: Status.Pending,
-                method: 'SSLCommerz',
-                gatewayResponse: { retriedAt: new Date() },
-            },
-            ...(existingPayment && existingPayment.transactionId !== transactionId
-                ? { $addToSet: { 'gatewayResponse.supersededTranIds': existingPayment.transactionId } }
-                : {}),
-            $unset: {
-                verifiedAt: '',
-                verifiedBy: '',
-            },
-        },
-        { upsert: true, setDefaultsOnInsert: true }
-    );
+    await recordGatewayPaymentAttempt({
+        userId,
+        batch: batch as { _id: unknown; price?: number; currency?: string },
+        enrollmentId,
+        transactionId,
+    });
 
     try {
         const response = await sslcz.init(paymentData);
         if (response?.GatewayPageURL) {
+            await PaymentModel.updateOne(
+                { enrollmentId, transactionId },
+                { $set: { 'gatewayResponse.gatewayPageURL': response.GatewayPageURL } }
+            );
             return {
                 paymentUrl: response.GatewayPageURL,
                 enrollmentId,
@@ -1027,6 +1155,23 @@ const initiateSSLCommerzPayment = async (enrollmentId: string, userId: string) =
         }
     } catch (error: any) {
         logger.error(error, 'SSLCommerz error');
+
+        // The learner never received a gateway URL, so this attempt can never
+        // be completed. Record it as failed so Payment History stops showing a
+        // forever-"pending" transaction; a later retry flips the row back.
+        await PaymentModel.updateOne(
+            { enrollmentId, transactionId },
+            {
+                $set: {
+                    status: Status.Failed,
+                    'gatewayResponse.initError': error?.message || 'Gateway init failed',
+                    'gatewayResponse.failedAt': new Date(),
+                },
+            }
+        ).catch((markError) => {
+            logger.error(markError, 'Failed to mark uninitialised gateway attempt as failed');
+        });
+
         throw new ApiError(
             StatusCodes.INTERNAL_SERVER_ERROR,
             error?.message || 'Payment gateway initialization failed. Please contact support.'

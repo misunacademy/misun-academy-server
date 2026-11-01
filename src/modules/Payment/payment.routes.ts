@@ -2,6 +2,7 @@ import express from 'express';
 import { PaymentController } from './payment.controller.js';
 import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 import validateRequest from '../../middlewares/validateRequest.js';
+import { allowCronSecret } from '../../middlewares/cronAuth.js';
 import { verifyPaymentSchema, updatePaymentStatusSchema, paymentHistoryQuerySchema } from '../../validations/payment.validation.js';
 
 const router = express.Router();
@@ -12,6 +13,10 @@ router.post('/webhook', PaymentController.sslCommerzWebhook);
 // Payment status check (redirect endpoint) - SSLCommerz uses POST
 router.post('/status', PaymentController.checkPaymentStatus);
 router.get('/status', PaymentController.checkPaymentStatus);
+
+// Reconcile stale gateway payments + expire abandoned enrollments.
+// Vercel Cron (Bearer CRON_SECRET) or an admin can trigger it.
+router.all('/maintenance/run', allowCronSecret, PaymentController.runMaintenance);
 
 router.get(
     '/verify',
