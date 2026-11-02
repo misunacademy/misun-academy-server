@@ -1117,14 +1117,15 @@ export const recordGatewayPaymentAttempt = async (params: {
 }) => {
     const { userId, batch, enrollmentId, enrollmentRef, transactionId } = params;
 
-    const previousAttempt = await PaymentModel.findOne({ enrollmentId })
+    // Look up previous attempt by enrollmentRef (Enrollment ObjectId)
+    const previousAttempt = await PaymentAttemptModel.findOne({ enrollmentRef })
         .select('transactionId gatewayResponse')
         .lean();
 
     // A legacy row can hold `gatewayResponse: null`; a dotted `$set` into null
     // throws PathNotViable. Normalise it to an object first.
     if (previousAttempt && previousAttempt.gatewayResponse === null) {
-        await PaymentModel.updateOne(
+        await PaymentAttemptModel.updateOne(
             { _id: previousAttempt._id },
             { $set: { gatewayResponse: {} } }
         );
@@ -1135,6 +1136,20 @@ export const recordGatewayPaymentAttempt = async (params: {
         typeof previousTransactionId === 'string' &&
         previousTransactionId.length > 0 &&
         previousTransactionId !== transactionId;
+
+    // Supersede the previous attempt so we always know which attempt is current.
+    if (shouldSupersede) {
+        await PaymentAttemptModel.updateOne(
+            { transactionId: previousTransactionId },
+            {
+                $set: {
+                    status: Status.Superseded,
+                    'gatewayResponse.supersededBy': transactionId,
+                    'gatewayResponse.supersededAt': new Date(),
+                },
+            },
+        );
+    }
 
     const update: Record<string, unknown> = {
         $set: {
