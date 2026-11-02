@@ -72,7 +72,7 @@ describe('expireAbandonedEnrollments', () => {
     expect(summary).toEqual({ checked: 1, expired: 1, skipped: 0 });
 
     const expiredEnrollment = await EnrollmentModel.findById(enrollment._id).lean();
-    expect(expiredEnrollment?.status).toBe(EnrollmentStatus.PaymentFailed);
+    expect(expiredEnrollment?.status).toBe(EnrollmentStatus.Expired);
     expect(expiredEnrollment?.statusChangeReason).toContain('Auto-expired');
 
     const expiredPayment = await PaymentModel.findById(payment._id).lean();
@@ -166,7 +166,7 @@ describe('expireAbandonedEnrollments', () => {
 
     expect(summary.expired).toBe(1);
     const expired = await EnrollmentModel.findById(enrollment._id).lean();
-    expect(expired?.status).toBe(EnrollmentStatus.PaymentFailed);
+    expect(expired?.status).toBe(EnrollmentStatus.Expired);
   });
 });
 
