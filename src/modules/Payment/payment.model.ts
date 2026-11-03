@@ -4,6 +4,7 @@ import { Status } from "../../types/common.js";
 export interface IPayment {
     userId: Types.ObjectId;
     batchId: Types.ObjectId;
+    enrollmentRef?: Types.ObjectId;
     enrollmentId?: string;
     transactionId: string;
     amount: number;
@@ -14,6 +15,9 @@ export interface IPayment {
     verifiedAt?: Date;
     verifiedBy?: Types.ObjectId;
     archivedAt?: Date;
+    expiresAt?: Date;
+    cancelledAt?: Date;
+    failedAt?: Date;
     createdAt?: Date;
     updatedAt?: Date;
 }
@@ -32,8 +36,11 @@ const paymentSchema = new Schema<IPayment>(
         },
         enrollmentId: {
             type: String,
-            unique: true,
-            sparse: true,
+            // Uniqueness enforced by sparse index below (allows multiple null/missing during creation)
+        },
+        enrollmentRef: {
+            type: Schema.Types.ObjectId,
+            ref: "Enrollment",
         },
         transactionId: {
             type: String,
@@ -71,6 +78,15 @@ const paymentSchema = new Schema<IPayment>(
         archivedAt: {
             type: Date,
         },
+        expiresAt: {
+            type: Date,
+        },
+        cancelledAt: {
+            type: Date,
+        },
+        failedAt: {
+            type: Date,
+        },
     },
     {
         timestamps: true,
@@ -97,6 +113,21 @@ paymentSchema.index(
     {
         unique: true,
         partialFilterExpression: { 'gatewayResponse.phonePeTransactionId': { $type: 'string' } },
+    }
+);
+// enrollmentId is unique only among documents that actually hold one
+// (null/"" / absent are ignored — never consume the counter on unpaid attempts).
+paymentSchema.index({ enrollmentId: 1 }, { unique: true, partialFilterExpression: { enrollmentId: { $type: 'string' } } });
+// At most one live attempt per enrollment (Pending or Review) to prevent
+// double-charging. Terminal/cancelled/failed/expired attempts don't count.
+// This index also serves as the enrollmentRef lookup index.
+paymentSchema.index(
+    { enrollmentRef: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            status: { $in: ['pending', 'review'] },
+        },
     }
 );
 

@@ -31,7 +31,10 @@ const EnvSchema = z.object({
     EP_FRONTEND_URL: z.string(),
     // Payment maintenance job (optional, sensible defaults)
     PAYMENT_RECONCILE_AFTER_MINUTES: z.string().optional(),
+    PAYMENT_SESSION_EXPIRY_MINUTES: z.string().optional(),
     ENROLLMENT_EXPIRY_HOURS: z.string().optional(),
+    BOOTCAMP_PURCHASE_EXPIRY_MINUTES: z.string().optional(),
+    PAYMENT_ARTIFACT_RETENTION_DAYS: z.string().optional(),
     // Email provider settings (optional - sensible defaults used)
     EMAIL_USER: z.string(),
     EMAIL_PASS: z.string(),

@@ -180,7 +180,8 @@ const listBootcampVideos = catchAsync(async (req: Request, res: Response) => {
 
 const getMyBootcampPurchases = catchAsync(async (req: Request, res: Response) => {
     const { id: userId } = req.user as { id: string };
-    const result = await BootcampCatalogService.getMyBootcampPurchases(userId);
+    const includeHistory = String(req.query.history ?? '').toLowerCase() === 'true';
+    const result = await BootcampCatalogService.getMyBootcampPurchases(userId, includeHistory);
     sendResponse(res, {
         statusCode: StatusCodes.OK,
         success: true,
@@ -386,4 +387,3 @@ export const BootcampCatalogController = {
     bootcampPaymentWebhook,
     publishRecording,
 };
-

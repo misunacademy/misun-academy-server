@@ -46,13 +46,11 @@ const hydrateProfileWithEnrollmentDetails = async (profileDoc: any) => {
   const enrollmentRefs = toEnrollmentRefs(profile.enrollments || []);
   const enrollmentIds = enrollmentRefs.map((entry) => entry.enrollmentId);
 
-  if (!enrollmentIds.length) {
-    profile.enrollments = [];
-    return profile;
-  }
-
   const enrollments = await EnrollmentModel.find({
-    enrollmentId: { $in: enrollmentIds },
+    $or: [
+      ...(enrollmentIds.length ? [{ enrollmentId: { $in: enrollmentIds } }] : []),
+      { userId: profile.user?._id, status: { $nin: [EnrollmentStatus.PaymentFailed, EnrollmentStatus.Expired] } },
+    ],
   })
     .populate({
       path: 'batchId',
@@ -69,12 +67,21 @@ const hydrateProfileWithEnrollmentDetails = async (profileDoc: any) => {
     .lean();
 
   const enrollmentMap = new Map(
-    enrollments.map((enrollment: any) => [enrollment.enrollmentId, enrollment])
+    enrollments.map((enrollment: any) => [
+      enrollment.enrollmentId || enrollment._id.toString(),
+      enrollment,
+    ])
   );
 
-  profile.enrollments = enrollmentIds
+  const referenced = enrollmentIds
     .map((id: string) => enrollmentMap.get(id))
     .filter(Boolean);
+  const referencedIds = new Set(referenced.map((enrollment: any) => enrollment._id.toString()));
+  const direct = enrollments.filter(
+    (enrollment: any) => !referencedIds.has(enrollment._id.toString())
+  );
+
+  profile.enrollments = [...referenced, ...direct];
 
   return profile;
 };
@@ -121,6 +128,11 @@ const getProfile = async (userId: string) => {
         .populate({ path: 'user' })
         .lean();
     }
+  }
+
+  if (!profile) {
+    const user = await UserModel.findById(userId).select('name email studentId phone').lean();
+    return hydrateProfileWithEnrollmentDetails({ user, enrollments: [] });
   }
 
   return hydrateProfileWithEnrollmentDetails(profile);

@@ -136,6 +136,8 @@ export interface IBootcampPurchase {
     adminNote?: string;
     reviewedBy?: Types.ObjectId;
     reviewedAt?: Date;
+    archivedAt?: Date;
+    valId?: string;
     createdAt?: Date;
     updatedAt?: Date;
 }

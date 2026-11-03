@@ -82,36 +82,91 @@ const getMyPayments = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
-  const transactionId = (req.query.t || req.body?.tran_id) as string;
-  const valId = (req.body?.val_id || req.query?.val_id) as string | undefined;
+const normalizeStatus = (status: string | undefined): string | undefined => {
+    if (!status) return undefined;
+    const lower = status.toLowerCase();
+    if (/^cancel(lled|canceled)?$/.test(lower)) return 'cancel';
+    if (/^fail(ed|ure)?$/.test(lower)) return 'failed';
+    return undefined;
+  };
 
-  if (!transactionId) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, "Transaction ID is required");
-  }
+  const checkPaymentStatus = catchAsync(async (req: Request, res: Response) => {
+    const transactionId = (req.query.t || req.body?.tran_id) as string;
+    const valId = (req.body?.val_id || req.query?.val_id) as string | undefined;
 
-  if (valId) {
+    // Decide callback intent: query param first (cancel_url has status=cancel,
+    // fail_url has status=failed, success_url has none), normalized case-insensitively.
+    // Only fall back to body.status when the query has none. Never let the body
+    // override the query param.
+    const queryStatus = normalizeStatus(req.query?.status as string | undefined);
+    const bodyStatusNormalized = normalizeStatus(req.body?.status as string | undefined);
+    const status = queryStatus || bodyStatusNormalized;
+
+    if (!transactionId) {
+      return res.redirect(`${env.MA_FRONTEND_URL}/payment?status=not_found`);
+    }
+
     try {
-      await PaymentService.finalizeSSLCommerzPayment(transactionId, valId);
+      logger.debug(
+        {
+          transactionId,
+          rawQueryStatus: req.query?.status,
+          rawBodyStatus: req.body?.status,
+          normalizedStatus: status,
+        },
+        'Payment status callback'
+      );
+
+      // SSLCommerz redirects the browser to cancel_url / fail_url as a POST with
+      // status=cancel / status=failed. Apply the transition conditionally
+      // (Pending → Cancel/Failed only), then redirect to the frontend. Never trust
+      // the browser's status query param to mutate state.
+      if (status === 'cancel') {
+        const callbackKey = (req.query.k || req.body?.k) as string | undefined;
+        const expectedKey = PaymentService.getStatusCallbackKey(transactionId);
+
+        if (!callbackKey || callbackKey !== expectedKey) {
+          return res.redirect(`${env.MA_FRONTEND_URL}/payment?status=not_found&t=${encodeURIComponent(transactionId)}`);
+        }
+
+        await PaymentService.handleCancelPayment(transactionId);
+      } else if (status === 'failed') {
+        const callbackKey = (req.query.k || req.body?.k) as string | undefined;
+        const expectedKey = PaymentService.getStatusCallbackKey(transactionId);
+
+        if (!callbackKey || callbackKey !== expectedKey) {
+          return res.redirect(`${env.MA_FRONTEND_URL}/payment?status=not_found&t=${encodeURIComponent(transactionId)}`);
+        }
+
+        await PaymentService.handleFailPayment(transactionId);
+      } else if (valId) {
+        try {
+          await PaymentService.finalizeSSLCommerzPayment(transactionId, valId);
+        } catch (error) {
+          logger.error(error, 'Failed to finalize payment on status callback');
+        }
+      } else {
+        const callbackKey = (req.query.k || req.body?.k) as string | undefined;
+        const expectedKey = PaymentService.getStatusCallbackKey(transactionId);
+
+        if (!callbackKey || callbackKey !== expectedKey) {
+          return res.redirect(`${env.MA_FRONTEND_URL}/payment?status=not_found&t=${encodeURIComponent(transactionId)}`);
+        }
+        // Without val_id this is only a browser redirect. Do not trust status
+        // query parameters to mutate payment state; reconciliation handles
+        // abandoned gateway attempts authoritatively.
+      }
+
+      const result = await PaymentService.checkPaymentStatus(transactionId);
+      return res.redirect(`${env.MA_FRONTEND_URL}${result.redirectUrl}`);
     } catch (error) {
-      logger.error(error, 'Failed to finalize payment on status callback');
+      logger.error(error, 'Payment status callback failed');
+      // Never return JSON to the browser on a callback — always redirect.
+      return res.redirect(
+        `${env.MA_FRONTEND_URL}/payment?status=not_found&t=${encodeURIComponent(transactionId ?? '')}`
+      );
     }
-  } else {
-    const callbackKey = (req.query.k || req.body?.k) as string | undefined;
-    const expectedKey = PaymentService.getStatusCallbackKey(transactionId);
-
-    if (!callbackKey || callbackKey !== expectedKey) {
-      throw new ApiError(StatusCodes.FORBIDDEN, "Invalid status callback key");
-    }
-    // Without val_id this is only a browser redirect. Do not trust status
-    // query parameters to mutate payment state; reconciliation handles
-    // abandoned gateway attempts authoritatively.
-  }
-
-  const result = await PaymentService.checkPaymentStatus(transactionId);
-
-  return res.redirect(`${env.MA_FRONTEND_URL}${result.redirectUrl}`);
-});
+  });
 
 const verifyPaymentSuccessForCurrentUser = catchAsync(async (req: Request, res: Response) => {
   const transactionId = req.query.t as string;
@@ -190,6 +245,27 @@ export const sslCommerzWebhook = catchAsync(
     }
 
     try {
+      // SSLCommerz IPN may report success (VAL/VALIDATED) or terminal failure
+      // (cancelled/failed/expired). finalizeSSLCommerzPayment validates the
+      // gateway and sets Success; for non-VALID statuses we apply cancel/fail
+      // conditionally and never overwrite Success.
+      if (sslStatus && /^(cancel|failed|cancelled|canceled|expired)$/i.test(String(sslStatus))) {
+        const normalized = String(sslStatus).toLowerCase();
+        if (normalized === 'cancel' || normalized === 'cancelled' || normalized === 'canceled') {
+          await PaymentService.handleCancelPayment(tran_id);
+        } else if (normalized === 'failed') {
+          await PaymentService.handleFailPayment(tran_id);
+        }
+        // Expired is handled by the maintenance job, not the webhook.
+
+        return sendResponse(res, {
+          statusCode: StatusCodes.OK,
+          success: true,
+          message: "Payment status updated",
+          data: null,
+        });
+      }
+
       await PaymentService.finalizeSSLCommerzPayment(tran_id, val_id);
 
       return sendResponse(res, {

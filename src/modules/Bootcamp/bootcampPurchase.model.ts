@@ -13,10 +13,22 @@ const bootcampPurchaseSchema = new Schema<IBootcampPurchase>(
         adminNote: { type: String, trim: true },
         reviewedBy: { type: Schema.Types.ObjectId, ref: 'User' },
         reviewedAt: { type: Date },
+        archivedAt: { type: Date },
+        valId: { type: String, sparse: true, unique: true },
     },
     { timestamps: true }
 );
 
 bootcampPurchaseSchema.index({ createdAt: -1 });
+bootcampPurchaseSchema.index(
+    { user: 1, bootcamp: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            status: BootcampPurchaseStatus.Pending,
+        },
+        name: 'one_pending_bootcamp_purchase_per_user',
+    }
+);
 
 export const BootcampPurchaseModel = model<IBootcampPurchase>('BootcampPurchase', bootcampPurchaseSchema);

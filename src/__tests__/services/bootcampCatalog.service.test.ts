@@ -369,6 +369,42 @@ describe('BootcampCatalogService purchase gating (no gateway network)', () => {
         expect(list[0].transactionId).toBeTruthy();
     });
 
+    it('keeps rejected attempts out of active purchases but includes them in history', async () => {
+        const bootcamp: any = await publishedCatalog();
+        const buyer = await createUser({ email: `history-${uniq()}@example.com` });
+        await BootcampPurchaseModel.create([
+            {
+                user: buyer._id,
+                bootcamp: bootcamp._id,
+                amount: 1500,
+                method: 'SSLCommerz',
+                transactionId: `BC-PAID-${uniq()}`,
+                status: BootcampPurchaseStatus.Paid,
+            },
+            {
+                user: buyer._id,
+                bootcamp: bootcamp._id,
+                amount: 1500,
+                method: 'SSLCommerz',
+                transactionId: `BC-REJECTED-${uniq()}`,
+                status: BootcampPurchaseStatus.Rejected,
+            },
+        ]);
+
+        const active: any[] = await BootcampCatalogService.getMyBootcampPurchases(
+            buyer._id.toString()
+        );
+        const history: any[] = await BootcampCatalogService.getMyBootcampPurchases(
+            buyer._id.toString(),
+            true
+        );
+
+        expect(active).toHaveLength(1);
+        expect(active[0].status).toBe(BootcampPurchaseStatus.Paid);
+        expect(history).toHaveLength(1);
+        expect(history[0].status).toBe(BootcampPurchaseStatus.Paid);
+    });
+
     it('initiateBootcampSSLCommerz rejects buyers who already own the recording', async () => {
         const bootcamp: any = await publishedCatalog();
         const buyer = await createUser({ email: `buyer-${uniq()}@example.com` });
@@ -440,6 +476,21 @@ describe('BootcampCatalogService purchase gating (no gateway network)', () => {
         await BootcampCatalogService.finalizeBootcampSSLCommerz(txn, 'failed');
         const failed: any = await BootcampPurchaseModel.findOne({ transactionId: txn }).lean();
         expect(failed.status).toBe(BootcampPurchaseStatus.Rejected);
+
+        const cancelledTxn = `BC-${uniq()}`;
+        await BootcampPurchaseModel.create({
+            user: buyer._id,
+            bootcamp: bootcamp._id,
+            amount: 1500,
+            method: 'SSLCommerz',
+            transactionId: cancelledTxn,
+            status: BootcampPurchaseStatus.Pending,
+        });
+        await BootcampCatalogService.finalizeBootcampSSLCommerz(cancelledTxn, 'cancelled');
+        const cancelled: any = await BootcampPurchaseModel.findOne({
+            transactionId: cancelledTxn,
+        }).lean();
+        expect(cancelled.status).toBe(BootcampPurchaseStatus.Rejected);
 
         await expect(
             BootcampCatalogService.finalizeBootcampSSLCommerz(txn, 'success')

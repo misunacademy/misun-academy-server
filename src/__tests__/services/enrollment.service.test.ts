@@ -41,8 +41,8 @@ describe('EnrollmentService.initiateEnrollment', () => {
     );
 
     expect(result.isExisting).toBe(false);
-    expect(result.enrollment.status).toBe(EnrollmentStatus.Pending);
-    expect(result.enrollment.enrollmentId).toMatch(/^MA-\d+20\d{2}\d{5}$/);
+    expect(result.enrollment.status).toBe(EnrollmentStatus.PaymentPending);
+    expect(result.enrollment.enrollmentId).toBeUndefined();
     const pendingUser: any = await mongoose.model('User').findById(user._id).lean();
     expect(pendingUser?.studentId).toBeUndefined();
     expect(result.enrollment.userId.toString()).toBe(user._id.toString());
@@ -145,7 +145,7 @@ describe('EnrollmentService.initiateEnrollment', () => {
 
     expect(result.isExisting).toBe(false);
     expect(result.enrollment._id.toString()).not.toBe(terminal._id.toString());
-    expect(result.enrollment.status).toBe(EnrollmentStatus.Pending);
+    expect(result.enrollment.status).toBe(EnrollmentStatus.PaymentPending);
 
     // The terminal row stays for the retention job, but is never resurrected.
     const oldRow = await EnrollmentModel.findById(terminal._id).lean();
@@ -577,16 +577,17 @@ describe('EnrollmentService.updateEnrollmentStatus', () => {
                 enrollmentEndDate: new Date('2027-01-01'),
             });
 
+            // Admin special-access generates enrollmentId immediately; self-enrollment does not.
             const result = await EnrollmentService.createEnrollment({
                 userId: user._id.toString(),
                 batchId: batch._id.toString(),
-                source: 'self',
-                accessType: 'standard',
+                source: 'admin',
+                accessType: 'special',
             });
 
             const enrollment = result.enrollment;
             expect(enrollment.enrollmentId).toMatch(/^MA-\d+/);
-            expect(enrollment.status).toBe(EnrollmentStatus.Pending);
+            expect(enrollment.status).toBe(EnrollmentStatus.Active);
 
             const history = await EnrollmentStatusHistoryModel.find({
                 enrollmentId: enrollment._id,
@@ -605,11 +606,11 @@ describe('EnrollmentService.updateEnrollmentStatus', () => {
             const first = await EnrollmentService.initiateEnrollment(
                 user._id.toString(), batch._id.toString()
             );
-            expect(first.enrollment.status).toBe(EnrollmentStatus.Pending);
+            expect(first.enrollment.status).toBe(EnrollmentStatus.PaymentPending);
 
             await EnrollmentService.transitionEnrollment(
                 first.enrollment._id.toString(),
-                EnrollmentStatus.Pending,
+                EnrollmentStatus.PaymentPending,
                 EnrollmentStatus.Active,
                 { id: user._id.toString(), role: 'learner' },
                 'Payment confirmed'
@@ -645,7 +646,7 @@ describe('EnrollmentService.updateEnrollmentStatus', () => {
             const e1 = await EnrollmentService.initiateEnrollment(user1._id.toString(), batch._id.toString());
             await EnrollmentService.transitionEnrollment(
                 e1.enrollment._id.toString(),
-                EnrollmentStatus.Pending,
+                EnrollmentStatus.PaymentPending,
                 EnrollmentStatus.Active,
                 { id: user1._id.toString(), role: 'learner' },
                 'Payment confirmed'
@@ -655,7 +656,7 @@ describe('EnrollmentService.updateEnrollmentStatus', () => {
             const e2 = await EnrollmentService.initiateEnrollment(user2._id.toString(), batch._id.toString());
             await EnrollmentService.transitionEnrollment(
                 e2.enrollment._id.toString(),
-                EnrollmentStatus.Pending,
+                EnrollmentStatus.PaymentPending,
                 EnrollmentStatus.Completed,
                 { id: user2._id.toString(), role: 'learner' },
                 'Course completed'
@@ -679,7 +680,7 @@ describe('EnrollmentService.updateEnrollmentStatus', () => {
             const e = await EnrollmentService.initiateEnrollment(user._id.toString(), batch._id.toString());
             await EnrollmentService.transitionEnrollment(
                 e.enrollment._id.toString(),
-                EnrollmentStatus.Pending,
+                EnrollmentStatus.PaymentPending,
                 EnrollmentStatus.Active,
                 { id: user._id.toString(), role: 'learner' },
                 'Payment confirmed'
@@ -881,7 +882,7 @@ describe('Fix 12: Admin and support tools', () => {
         );
         await EnrollmentService.transitionEnrollment(
             enrollment.enrollment._id.toString(),
-            EnrollmentStatus.Pending,
+            EnrollmentStatus.PaymentPending,
             EnrollmentStatus.Active,
             { id: user._id.toString(), role: 'learner' },
             'Payment confirmed'
@@ -921,7 +922,7 @@ describe('Fix 12: Admin and support tools', () => {
         );
         await EnrollmentService.transitionEnrollment(
             enrollment.enrollment._id.toString(),
-            EnrollmentStatus.Pending,
+            EnrollmentStatus.PaymentPending,
             EnrollmentStatus.Active,
             { id: user._id.toString(), role: 'learner' },
             'Payment confirmed'
@@ -953,7 +954,7 @@ describe('Fix 12: Admin and support tools', () => {
         );
         await EnrollmentService.transitionEnrollment(
             enrollment.enrollment._id.toString(),
-            EnrollmentStatus.Pending,
+            EnrollmentStatus.PaymentPending,
             EnrollmentStatus.Active,
             { id: user._id.toString(), role: 'learner' },
             'Payment confirmed'
@@ -987,7 +988,7 @@ describe('Fix 12: Admin and support tools', () => {
         await PaymentModel.create({
             userId: user1._id,
             batchId: batch._id,
-            enrollmentId: enrollment1.enrollment.enrollmentId,
+            enrollmentRef: enrollment1.enrollment._id,
             transactionId: 'TXN-PAID-NO-ACTIVE',
             amount: 5000,
             currency: 'BDT',
@@ -1002,7 +1003,7 @@ describe('Fix 12: Admin and support tools', () => {
         );
         await EnrollmentService.transitionEnrollment(
             enrollment2.enrollment._id.toString(),
-            EnrollmentStatus.Pending,
+            EnrollmentStatus.PaymentPending,
             EnrollmentStatus.Active,
             { id: user2._id.toString(), role: 'learner' },
             'Payment confirmed'

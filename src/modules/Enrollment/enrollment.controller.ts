@@ -18,10 +18,9 @@ const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
     const result = await EnrollmentService.initiateEnrollment(id, batchId);
 
     const paymentResult = await PaymentService.initiateSSLCommerzPayment(
-        result.enrollment.enrollmentId as string,
+        result.enrollment?._id,
         id
     );
-
     sendResponse(res, {
         statusCode: result.isExisting ? StatusCodes.OK : StatusCodes.CREATED,
         success: true,
@@ -69,7 +68,7 @@ const getEnrollmentDetails = catchAsync(async (req: Request, res: Response) => {
     const { enrollmentId } = req.params as { enrollmentId: string };
     const isStaff = role === 'admin' || role === 'superadmin' || role === 'instructor' || role === 'employee';
 
-    const enrollment = await EnrollmentService.getEnrollmentDetails(enrollmentId, id, isStaff);
+    const enrollment = await EnrollmentService.getEnrollmentDetails(enrollmentId, id, isStaff, role);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,

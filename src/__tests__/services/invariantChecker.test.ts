@@ -10,8 +10,6 @@ import { runEnrollmentInvariants } from '../../services/invariantChecker.js';
 import { EnrollmentStatus, Status, CertificateStatus, UserStatus } from '../../types/common.js';
 import { InvariantResult } from '../../services/invariantChecker.js';
 
-const HOUR_MS = 60 * 60 * 1000;
-
 let adminId: mongoose.Types.ObjectId;
 
 beforeAll(async () => {

@@ -1,15 +1,13 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import mongoose from 'mongoose';
 import { connectTestDB, disconnectTestDB, clearTestDB } from '../helpers/db.js';
-import { createUser, createAdmin, createCourse, createBatch, createPayment } from '../helpers/factories.js';
-import { PaymentService, recordGatewayPaymentAttempt, failEnrollment } from '../../modules/Payment/payment.service.js';
+import { createUser, createAdmin, createCourse, createBatch, createPayment, createActiveEnrollment } from '../helpers/factories.js';
+import { PaymentService, recordGatewayPaymentAttempt } from '../../modules/Payment/payment.service.js';
 import { PaymentModel } from '../../modules/Payment/payment.model.js';
 import { PaymentAttemptModel } from '../../modules/Payment/paymentAttempt.model.js';
-import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
-import { EnrollmentStatusHistoryModel } from '../../modules/Enrollment/enrollmentStatusHistory.model.js';
 import { EnrollmentService } from '../../modules/Enrollment/enrollment.service.js';
 import { Status } from '../../types/common.js';
-import { EnrollmentStatus, BatchStatus } from '../../types/common.js';
+import { EnrollmentStatus } from '../../types/common.js';
 
 let adminId: mongoose.Types.ObjectId;
 
@@ -113,8 +111,8 @@ describe('PaymentService.getMyPayments', () => {
 
             expect(result).toBeTruthy();
             expect(result.enrollment).toBeTruthy();
-            expect(result.enrollment.enrollmentId).toMatch(/^MA-\d+/);
-            expect(result.enrollment.status).toBe(EnrollmentStatus.Pending);
+            expect(result.enrollment.enrollmentId).toBeUndefined();
+            expect(result.enrollment.status).toBe(EnrollmentStatus.PaymentPending);
         });
 
         it('throws ENROLLMENT_ALREADY_EXISTS for active enrollment', async () => {
@@ -122,19 +120,11 @@ describe('PaymentService.getMyPayments', () => {
             const course = await createCourse(adminId);
             const batch = await createBatch(course._id);
 
-            await createPayment(user._id, batch._id, {
-                transactionId: 'TXN-EXISTING',
-                amount: 5000,
-                currency: 'BDT',
-                status: Status.Success,
-                method: 'SSLCommerz',
-            });
-
-            await EnrollmentService.initiateEnrollment(user._id.toString(), batch._id.toString());
+            await createActiveEnrollment(user._id, batch._id);
 
             await expect(
                 EnrollmentService.initiateEnrollment(user._id.toString(), batch._id.toString())
-            ).rejects.toThrow();
+            ).rejects.toThrow(/already enrolled/i);
         });
     });
 });
@@ -202,18 +192,18 @@ describe('Fix 19: PaymentAttempt one source of truth', () => {
         });
 
         expect(secondAttempt).toBeTruthy();
-        expect(secondAttempt.transactionId).toBe('MA_RETRY_SECOND');
+        expect(secondAttempt?.transactionId).toBe('MA_RETRY_SECOND');
 
         // First attempt should now be superseded
         const firstAttemptAfter = await PaymentAttemptModel.findOne({
             transactionId: 'MA_RETRY_FIRST',
         }).lean();
         expect(firstAttemptAfter).toBeTruthy();
-        expect(firstAttemptAfter.status).toBe(Status.Superseded);
-        expect((firstAttemptAfter.gatewayResponse as any)?.supersededBy).toBe('MA_RETRY_SECOND');
+        expect(firstAttemptAfter?.status).toBe(Status.Superseded);
+        expect((firstAttemptAfter?.gatewayResponse as any)?.supersededBy).toBe('MA_RETRY_SECOND');
 
         // Payment row should point to the latest transactionId
-        const payment = await PaymentModel.findOne({ enrollmentId }).lean();
+        const payment = await PaymentModel.findOne({ enrollmentRef }).lean();
         expect(payment?.transactionId).toBe('MA_RETRY_SECOND');
 
         // Only one active (non-superseded) attempt per enrollment

@@ -12,6 +12,7 @@ export interface IPaymentAttempt {
     method: string;
     gatewayResponse?: Record<string, unknown>;
     archivedAt?: Date;
+    valId?: string;
     createdAt?: Date;
     updatedAt?: Date;
 }

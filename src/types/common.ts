@@ -23,7 +23,8 @@ export enum Status {
     Risk = "risk",
     Cancel = "cancel",
     Refunded = "refunded",
-    Superseded = "superseded"
+    Superseded = "superseded",
+    Expired = "expired"
 }
 
 export enum UserStatus {

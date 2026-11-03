@@ -144,18 +144,21 @@ const parseBatchNumber = (batch: any): string => {
  */
 const generateEnrollmentId = async (
     batch: string = '',
-    brand: CourseBrand = CourseBrand.MA
+    brand: CourseBrand = CourseBrand.MA,
+    session?: mongoose.ClientSession
 ): Promise<string> => {
     const year = new Date().getFullYear();
 
     const prefix = brand === CourseBrand.EP ? 'EP' : 'MA';
     const counterId = `${prefix}-${batch}`;
 
-    // Use findByIdAndUpdate for atomic increment per batch
+    // Use findByIdAndUpdate for atomic increment per batch. The increment runs
+    // inside the caller's transaction when a session is supplied, so an abort
+    // rolls the counter back too.
     const counter = await EnrollmentCounterModel.findByIdAndUpdate(
-        { _id: counterId }, // Counter per batch and course prefix
+        { _id: counterId },
         { $inc: { count: 1 } },
-        { new: true, upsert: true }
+        { new: true, upsert: true, session }
     );
 
     const paddedCount = String(counter.count).padStart(5, '0');
@@ -270,22 +273,26 @@ const createEnrollment = async ({
             );
         }
 
-        // 5. Derive initial status from source/accessType
+        // 5. Derive initial status from source/accessType.
+        // Self-initiated enrollments require SSLCommerz payment before the
+        // enrollment ID is assigned — they start as PaymentPending with no
+        // enrollmentId. Admin special-access grants are Active immediately
+        // (no payment required) and get an enrollmentId here.
         let initialStatus: EnrollmentStatus;
+        let enrollmentId: string | undefined;
         if (source === 'admin' && accessType === 'special') {
             initialStatus = EnrollmentStatus.Active;
-        } else if (source === 'manual-payment') {
-            initialStatus = EnrollmentStatus.PaymentPending;
+            const batchNumber = parseBatchNumber(batch);
+            const courseBrand = deriveCourseBrand(batch.courseId as any);
+            enrollmentId = await generateEnrollmentId(batchNumber, courseBrand);
         } else {
-            initialStatus = EnrollmentStatus.Pending;
+            // All payment-required channels (SSLCommerz, manual-payment) start
+            // as PaymentPending with no enrollmentId — the ID is consumed only
+            // after verified payment success.
+            initialStatus = EnrollmentStatus.PaymentPending;
         }
 
-        // 6. Generate enrollment ID
-        const batchNumber = parseBatchNumber(batch);
-        const courseBrand = deriveCourseBrand(batch.courseId as any);
-        const enrollmentId = await generateEnrollmentId(batchNumber, courseBrand);
-
-        // 7. Create enrollment
+        // 7. Create enrollment (no enrollmentId unless admin special-access).
         const created = await EnrollmentModel.create(
             [
                 {
@@ -293,7 +300,7 @@ const createEnrollment = async ({
                     batchId,
                     status: initialStatus,
                     accessType,
-                    enrollmentId,
+                    ...(enrollmentId ? { enrollmentId } : {}),
                     ...(initialStatus === EnrollmentStatus.Active
                         ? { enrolledAt: new Date() }
                         : {}),
@@ -361,24 +368,29 @@ const createEnrollment = async ({
  * Initiate enrollment for a batch
  * With idempotency - returns existing pending enrollment if found
  */
-const initiateEnrollment = async (userId: string, batchId: string) => {
+const initiateEnrollment = async (
+    userId: string,
+    batchId: string
+) => {
     const session = await mongoose.startSession();
 
     try {
         session.startTransaction();
 
-        // 1. Terminal enrollment check — throws ENROLLMENT_ALREADY_EXISTS
-        // with stable error code and details for the client.
+        // 0. User must be Active
+        const user = await UserModel.findById(userId).session(session).lean();
+        if (!user || user.status !== UserStatus.Active) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'You cannot enroll in this batch'
+            );
+        }
+
+        // 1. Check terminal enrollment
         const terminal = await EnrollmentModel.findOne({
             userId,
             batchId,
-            status: {
-                $in: [
-                    EnrollmentStatus.Active,
-                    EnrollmentStatus.Completed,
-                    EnrollmentStatus.Suspended,
-                ],
-            },
+            status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed, EnrollmentStatus.Suspended] },
         })
             .select('_id enrollmentId batchId status')
             .session(session)
@@ -400,99 +412,85 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
             );
         }
 
-        // 2. Idempotency + failed-payment replacement for pending rows.
+        // 2. Check for existing pending enrollment (idempotent - return existing)
         const existingPending = await EnrollmentModel.findOne({
             userId,
             batchId,
-            status: {
-                $in: [
-                    EnrollmentStatus.Pending,
-                    EnrollmentStatus.PaymentPending,
-                ],
-            },
+            status: { $in: [EnrollmentStatus.Pending, EnrollmentStatus.PaymentPending] },
         })
             .populate({ path: 'batchId', populate: { path: 'courseId', select: 'title slug brand' } })
-            .session(session);
+            .session(session)
+            .lean();
 
         if (existingPending) {
-            // If a previous payment failed, mark the stale row PaymentFailed
-            // and start a fresh enrollment instead of resurrecting it.
-            const existingPayment = await PaymentModel.findOne({
-                $or: [
-                    ...(existingPending.enrollmentId
-                        ? [{ enrollmentId: existingPending.enrollmentId }]
-                        : []),
-                    { userId, batchId },
-                ],
-                status: { $in: [Status.Failed, Status.Cancel] },
-            })
-                .select('status')
-                .session(session)
-                .lean();
+            // If the pending enrollment has a failed payment, treat as retry:
+            // mark the old row as PaymentFailed and create a fresh enrollment.
+            const failedPayment = await PaymentModel.findOne({
+                userId,
+                batchId,
+                status: Status.Failed,
+            }).session(session).lean();
 
-            if (
-                existingPayment?.status === Status.Failed ||
-                existingPayment?.status === Status.Cancel
-            ) {
-                await EnrollmentModel.updateOne(
-                    { _id: existingPending._id },
-                    {
-                        $set: {
-                            status: EnrollmentStatus.PaymentFailed,
-                            statusChangeReason: `Retry started after payment ${existingPayment.status}`,
-                        },
-                    },
+            if (failedPayment && existingPending.status === EnrollmentStatus.Pending) {
+                await EnrollmentModel.findByIdAndUpdate(
+                    existingPending._id,
+                    { status: EnrollmentStatus.PaymentFailed },
                     { session }
                 );
-
-                // Create a fresh Pending enrollment through the shared path.
-                const { enrollment, batch: batchObj } = await createEnrollment({
-                    userId,
-                    batchId,
-                    source: 'self',
-                    accessType: 'standard',
-                    externalSession: session,
-                });
-
-                await session.commitTransaction();
-
+            } else {
                 return {
-                    enrollment,
-                    batch: batchObj,
-                    isExisting: false,
+                    enrollment: existingPending,
+                    batch: existingPending.batchId as any,
+                    isExisting: true,
                 };
             }
-
-            // Idempotent: return the existing pending enrollment.
-            await session.commitTransaction();
-            return {
-                enrollment: existingPending,
-                batch: existingPending.batchId,
-                isExisting: true,
-            };
         }
 
-        // 3. No existing row — create through the shared entry point.
-        const { enrollment, batch: batchObj } = await createEnrollment({
-            userId,
-            batchId,
-            source: 'self',
-            accessType: 'standard',
-            externalSession: session,
-        });
+        // 3. Check batch status
+        const batch = await BatchModel.findById(batchId)
+            .populate('courseId')
+            .session(session)
+            .lean();
+
+        if (!batch) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
+        }
+
+        const isEvergreen = (batch as any).isEvergreen === true || (batch as any).deliveryMode === 'recorded';
+        if (!isEvergreen && batch.status !== BatchStatus.Upcoming && batch.status !== BatchStatus.Running) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'This batch is not accepting new enrollments');
+        }
+
+        const now = new Date();
+        if (!isEvergreen && batch.enrollmentEndDate && now > batch.enrollmentEndDate) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment period has ended for this batch');
+        }
+
+
+        // 4. Create enrollment — PaymentPending, no enrollmentId until payment
+        //    is verified. The controller initiates the SSLCommerz session and
+        //    links the Payment to this enrollment via enrollmentRef.
+        const created = await EnrollmentModel.create([
+            {
+                userId,
+                batchId,
+                status: EnrollmentStatus.PaymentPending,
+            }],
+        { session });
+
+        const enrollmentDoc = created[0];
+
+        // 5. (Payment initiation is handled by the controller to avoid
+        //    double gateway attempts. See enrollment.controller.ts.)
 
         await session.commitTransaction();
-
         return {
-            enrollment,
-            batch: batchObj,
+            enrollment: enrollmentDoc.toObject(),
+            batch,
             isExisting: false,
         };
-    } catch (error) {
-        if (session.inTransaction()) {
-            await session.abortTransaction();
-        }
-
+    } catch (error: any) {
+        if (session.inTransaction()) await session.abortTransaction();
         throw error;
     } finally {
         session.endSession();
@@ -630,17 +628,17 @@ const enrollWithManualPayment = async (
 
         try {
             await PaymentModel.findOneAndUpdate(
-                { enrollmentId: enrollment.enrollmentId },
+                { enrollmentRef: enrollment._id },
                 {
                     $set: {
                         userId,
                         batchId,
+                        enrollmentRef: enrollment._id,
                         transactionId: paymentTransactionId,
                         amount: manualPaymentAmount,
                         currency: manualCurrency,
                         status: Status.Review,
                         method: 'PhonePay',
-                        enrollmentId: enrollment.enrollmentId,
                         // Dot-notation so the submissions history below survives.
                         'gatewayResponse.senderNumber': senderNumber,
                         'gatewayResponse.phonePeTransactionId': submittedUtr,
@@ -1165,10 +1163,10 @@ const getStuckEnrollments = async (batchId: string) => {
     const paidNotActive: any[] = [];
     for (const p of paidPayments) {
         const enrollment = await EnrollmentModel.findOne({
-            enrollmentId: p.enrollmentId,
+            _id: p.enrollmentRef,
         }).lean();
         if (!enrollment || enrollment.status !== EnrollmentStatus.Active) {
-            paidNotActive.push(enrollment || { _id: p._id, enrollmentId: p.enrollmentId, status: 'no_enrollment' });
+            paidNotActive.push(enrollment || { _id: p._id, enrollmentRef: p.enrollmentRef, status: 'no_enrollment' });
         }
     }
 
@@ -1181,7 +1179,7 @@ const getStuckEnrollments = async (batchId: string) => {
     const activeNoPayment: any[] = [];
     for (const e of activeEnrollments) {
         const payment = await PaymentModel.findOne({
-            enrollmentId: e.enrollmentId,
+            enrollmentRef: e._id,
             status: Status.Success,
         }).lean();
         if (!payment) {
@@ -1477,6 +1475,9 @@ const transitionEnrollment = async (
             {
                 $set: {
                     status: to,
+                    ...(to === EnrollmentStatus.Active && from !== EnrollmentStatus.Active
+                        ? { enrolledAt: new Date() }
+                        : {}),
                     ...(reason !== undefined ? { statusChangeReason: reason } : {}),
                 },
             },
@@ -1637,5 +1638,6 @@ export const EnrollmentService = {
     getStuckEnrollments,
     initializeModuleProgress,
     generateEnrollmentId,
+    parseBatchNumber,
     ensureStudentIdForUser,
 };

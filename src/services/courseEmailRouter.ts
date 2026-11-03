@@ -89,12 +89,13 @@ export const sendCoursePaymentFailedEmail = async (
     student: any,
     courseName: string,
     reason: string,
+    transactionId?: string,
 ) => {
     if (isEnglishCourse(context)) {
-        return sendEsunPaymentFailedEmail(student, courseName, reason);
+        return sendEsunPaymentFailedEmail(student, courseName, reason, transactionId);
     }
 
-    return sendMisunPaymentFailedEmail(student, courseName, reason);
+    return sendMisunPaymentFailedEmail(student, courseName, reason, transactionId);
 };
 
 export const sendCourseEnrollmentConfirmationEmail = async (

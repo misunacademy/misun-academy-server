@@ -130,8 +130,10 @@ export const reconcilePendingPayments = async (
     const pendingPayments = await PaymentModel.find({
         status: Status.Pending,
         method: 'SSLCommerz',
-        enrollmentId: { $exists: true, $ne: null },
-        updatedAt: { $lte: cutoff },
+        $or: [
+            { expiresAt: { $lte: cutoff } },
+            { updatedAt: { $lte: cutoff } },
+        ],
     })
         .sort({ updatedAt: 1 })
         .limit(limit)
