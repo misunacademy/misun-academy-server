@@ -3,21 +3,9 @@ import validateRequest from '../../middlewares/validateRequest.js';
 import { BatchController } from './batch.controller.js';
 import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
 import { createBatchSchema, updateBatchSchema, updateBatchStatusSchema } from './batch.validation.js';
-import env from '../../config/env.js';
+import { allowCronSecret } from '../../middlewares/cronAuth.js';
 
 const router = express.Router();
-
-const allowCronSecret = (
-    req: express.Request,
-    res: express.Response,
-    next: express.NextFunction
-) => {
-    const authHeader = req.headers.authorization;
-    if (env.CRON_SECRET && authHeader === `Bearer ${env.CRON_SECRET}`) {
-        return next();
-    }
-    requireAuth(req, res, () => requireAdmin(req, res, next));
-};
 
 // Public access for listing batches (used by student-facing views)
 router.get('/', BatchController.getAllBatches);

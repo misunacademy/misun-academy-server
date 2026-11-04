@@ -4,7 +4,7 @@ import { RefundChannel, RefundStatus, IRefund } from './refund.interface.js';
 const refundSchema = new Schema<IRefund>(
   {
     paymentId: { type: Schema.Types.ObjectId, ref: 'Payment', required: true, index: true },
-    transactionId: { type: String, required: true, index: true },
+    transactionId: { type: String, required: true },
     enrollmentId: { type: String },
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     batchId: { type: Schema.Types.ObjectId, ref: 'Batch', required: true },
