@@ -40,33 +40,9 @@ const completeLesson = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
-/**
- * Record a server-validated watch-time heartbeat for a lesson.
- */
-const recordWatchTime = catchAsync(async (req: Request, res: Response) => {
-    const { id } = req.user as any;
-    const { courseId } = req.params;
-    const { moduleId, lessonId, watchTime, lastWatchedPosition } = req.body;
 
-    const result = await CourseEnrollmentService.recordWatchTime(
-        id,
-        courseId as string,
-        moduleId as string,
-        lessonId as string,
-        Number(watchTime),
-        Number(lastWatchedPosition)
-    );
-
-    sendResponse(res, {
-        statusCode: StatusCodes.OK,
-        success: true,
-        message: 'Watch time recorded successfully',
-        data: result,
-    });
-});
 
 export const CourseEnrollmentController = {
     getCourseProgress,
     completeLesson,
-    recordWatchTime,
 };

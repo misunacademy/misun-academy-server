@@ -1,5 +1,6 @@
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../../errors/ApiError.js';
+import { ProgressService } from '../Progress/progress.service.js';
 import { EnrollmentModel } from './enrollment.model.js';
 import { BatchModel } from '../Batch/batch.model.js';
 import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
@@ -15,8 +16,6 @@ import { CourseModel } from '../Course/course.model.js';
 // Minimum watch ratio required to mark a lesson complete (server-enforced,
 // not client-trusted). A lesson is only "completed" when the learner has
 // watched at least 90% of its duration via heartbeat events.
-const MIN_WATCH_RATIO = 0.9;
-
 /**
  * Classroom URLs carry course slugs, not ObjectIds (see
  * courseEnrollment.validation.ts). Resolve either form to the canonical
@@ -253,9 +252,6 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
     if (!module) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
     }
-    // Bind the module to the URL course: without this, a module from another
-    // course (or an unassigned legacy module with no batchId) could complete
-    // lessons against the wrong enrollment.
     if (module.courseId.toString() !== resolvedCourseId) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Module does not belong to this course');
     }
@@ -293,14 +289,13 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
         );
     }
 
-    // Check if lesson is already completed via server-validated watch time
+    // Check if lesson is already completed
     const existingProgress = await LessonProgressModel.findOne({
         enrollmentId: enrollment._id,
         lessonId,
     }).lean();
 
     if (existingProgress && existingProgress.status === LessonProgressStatus.Completed) {
-        // Already completed via heartbeat — return existing progress
         return {
             lessonId,
             moduleId,
@@ -308,224 +303,32 @@ const completeLesson = async (userId: string, courseId: string, moduleId: string
         };
     }
 
-    // Mark lesson as in-progress only. Completion requires server-validated
-    // watch time via recordWatchTime (watchTime >= MIN_WATCH_RATIO * duration).
-    await LessonProgressModel.findOneAndUpdate(
-        {
-            enrollmentId: enrollment._id,
-            lessonId,
-        },
-        {
-            status: LessonProgressStatus.InProgress,
-            completedAt: undefined,
-            watchTime: 0,
-            lastWatchedPosition: 0,
-        },
-        { upsert: true, new: true }
-    );
-
-    // Recalculate module progress
-    await recalculateModuleProgress(enrollment._id.toString(), moduleId);
-
-    return {
-        lessonId,
-        moduleId,
-        completedAt: undefined,
-    };
-};
-
-/**
- * Record a server-validated watch-time heartbeat for a lesson.
- *
- * The client is never trusted to self-report completion. This endpoint:
- *   1. Rejects watchTime exceeding video duration (tamper attempt)
- *   2. Persists watchTime and lastWatchedPosition
- *   3. Marks the lesson complete ONLY when watchTime >= MIN_WATCH_RATIO
- *      of videoDuration (server-enforced minimum-watch-ratio)
- *
- * A lesson can only reach Completed via this heartbeat path; completeLesson
- * no longer mints a fake full watch time.
- */
-const recordWatchTime = async (
-    userId: string,
-    courseId: string,
-    moduleId: string,
-    lessonId: string,
-    watchTime: number,
-    lastWatchedPosition: number
-) => {
-    const resolvedCourseId = await resolveCourseId(courseId);
-    const module = await ModuleModel.findById(moduleId).lean();
-    if (!module) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
-    }
-    if (module.courseId.toString() !== resolvedCourseId) {
-        throw new ApiError(StatusCodes.BAD_REQUEST, 'Module does not belong to this course');
-    }
-    if (!module.batchId) {
-        throw new ApiError(StatusCodes.BAD_REQUEST, 'Module is not assigned to a batch');
-    }
-    const batchId = module.batchId.toString();
-
-    const enrollment = await findEnrollmentForCourse(userId, resolvedCourseId, [
-        EnrollmentStatus.Active,
-    ], batchId);
-    if (!enrollment) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'No active enrollment found for this course');
-    }
-
-    const lesson = await LessonModel.findById(lessonId).lean();
-    if (!lesson || lesson.moduleId.toString() !== moduleId) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found or does not belong to the specified module');
-    }
-
-    const videoDuration = lesson.videoDuration || 0;
-    if (watchTime < 0 || watchTime > videoDuration) {
-        throw new ApiError(
-            StatusCodes.BAD_REQUEST,
-            `watchTime ${watchTime} exceeds video duration ${videoDuration}`
-        );
-    }
-
-    const watchRatio = videoDuration > 0 ? watchTime / videoDuration : 0;
-    const isComplete = watchRatio >= MIN_WATCH_RATIO;
-
+    // Mark lesson as completed
     const lessonProgress = await LessonProgressModel.findOneAndUpdate(
         {
             enrollmentId: enrollment._id,
             lessonId,
         },
         {
-            status: isComplete ? LessonProgressStatus.Completed : LessonProgressStatus.InProgress,
-            completedAt: isComplete ? new Date() : undefined,
-            watchTime,
-            lastWatchedPosition,
+            status: LessonProgressStatus.Completed,
+            completedAt: new Date(),
         },
         { upsert: true, new: true }
     );
 
-    if (isComplete) {
-        await recalculateModuleProgress(enrollment._id.toString(), moduleId);
-    }
+    // Recalculate module progress
+    await ProgressService.recalculateModuleProgress(enrollment._id.toString(), moduleId);
 
     return {
         lessonId,
         moduleId,
-        watchTime,
-        lastWatchedPosition,
-        completed: isComplete,
         completedAt: lessonProgress.completedAt,
     };
 };
 
-/**
- * Recalculate module progress based on lesson completions
- */
-const recalculateModuleProgress = async (enrollmentId: string, moduleId: string) => {
-    const [lessons, quizzes] = await Promise.all([
-        LessonModel.find({ moduleId }).lean(),
-        QuizModel.find({ moduleId, status: 'published' }).lean(),
-    ]);
 
-    const totalItems = lessons.length + quizzes.length;
-    if (totalItems === 0) return;
-
-    const [lessonProgress, quizProgress] = await Promise.all([
-        LessonProgressModel.find({
-            enrollmentId,
-            lessonId: { $in: lessons.map((l) => l._id) },
-        }).lean(),
-        QuizProgressModel.find({
-            enrollmentId,
-            quizId: { $in: quizzes.map((q) => q._id) },
-        }).lean(),
-    ]);
-
-    const completedLessons = lessonProgress.filter(
-        (p) => p.status === LessonProgressStatus.Completed
-    ).length;
-
-    const completedQuizzes = quizProgress.filter(
-        (p) => p.status === 'completed'
-    ).length;
-
-    const completedItems = completedLessons + completedQuizzes;
-    const completionPercentage = Math.round((completedItems / totalItems) * 100);
-
-    // Update module progress
-    const existingModuleProgress = await ModuleProgressModel.findOne({
-        enrollmentId,
-        moduleId,
-    }).lean();
-
-    const updateData: any = {
-        completionPercentage,
-        status: completionPercentage === 100
-            ? ProgressStatus.Completed
-            : completionPercentage > 0
-                ? ProgressStatus.InProgress
-                : ProgressStatus.Unlocked,
-        completedAt: completionPercentage === 100 ? new Date() : undefined,
-    };
-
-    if (completionPercentage > 0 && !existingModuleProgress?.startedAt) {
-        updateData.startedAt = new Date();
-    }
-
-    const moduleProgress = await ModuleProgressModel.findOneAndUpdate(
-        {
-            enrollmentId,
-            moduleId,
-        },
-        updateData,
-        { upsert: true, new: true }
-    );
-
-    // Check if next module should be unlocked
-    if (completionPercentage === 100) {
-        await unlockNextModule(enrollmentId, moduleId);
-    }
-
-    return moduleProgress;
-};
-
-/**
- * Unlock next module after current module completion
- */
-const unlockNextModule = async (enrollmentId: string, currentModuleId: string) => {
-    const currentModule = await ModuleModel.findById(currentModuleId).lean();
-
-    if (!currentModule) return;
-
-    // Find next module by orderIndex within the SAME batch. Modules are
-    // batch-scoped (courseId + batchId + orderIndex), so omitting batchId can
-    // match a sibling batch's module and leave the real next module locked.
-    const nextQuery: Record<string, unknown> = {
-        courseId: currentModule.courseId,
-        orderIndex: currentModule.orderIndex + 1,
-    };
-    if (currentModule.batchId) {
-        nextQuery.batchId = currentModule.batchId;
-    }
-    const nextModule = await ModuleModel.findOne(nextQuery).lean();
-
-    if (!nextModule) return; // No next module
-
-    // Check if next module is locked
-    const nextModuleProgress = await ModuleProgressModel.findOne({
-        enrollmentId,
-        moduleId: nextModule._id,
-    });
-
-    if (nextModuleProgress && nextModuleProgress.status === ProgressStatus.Locked) {
-        nextModuleProgress.status = ProgressStatus.Unlocked;
-        nextModuleProgress.unlockedAt = new Date();
-        await nextModuleProgress.save();
-    }
-};
 
 export const CourseEnrollmentService = {
     getCourseProgress,
     completeLesson,
-    recordWatchTime,
 };

@@ -91,6 +91,12 @@ const getQuizInfo = async (quizId: string) => {
     if (!quiz || quiz.status !== 'published') {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Quiz not found');
     }
+
+    const questionCount = await QuestionModel.countDocuments({ quizId });
+    if (questionCount === 0) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'This quiz has no questions');
+    }
+
     return quiz;
 };
 
@@ -120,6 +126,14 @@ const updateQuiz = async (quizId: string, updateData: any) => {
         }).lean();
         if (existing) {
             throw new ApiError(StatusCodes.CONFLICT, 'Quiz with this order index already exists');
+        }
+    }
+
+    // Prevent publishing a quiz that has no questions configured.
+    if (updateData.status === 'published' && quiz.status !== 'published') {
+        const questionCount = await QuestionModel.countDocuments({ quizId });
+        if (questionCount === 0) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Cannot publish a quiz with no questions');
         }
     }
 

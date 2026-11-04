@@ -27,7 +27,8 @@
     "backfill:videoIds": "tsx src/scripts/backfillVideoIds.ts",
     "report:payment-enrollment-drift": "tsx src/scripts/reportPaymentEnrollmentDrift.ts",
     "migrate:enrollmentIdIndex": "tsx src/scripts/migrateEnrollmentIdIndex.ts",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --forceExit"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --forceExit",
+    "repair:empty-quizzes": "tsx src/scripts/repairEmptyQuizzes.ts"
   },
   "overrides": {
     "tar": "7.5.22"

@@ -57,15 +57,6 @@ describe('CourseEnrollmentService — batch-scoped unlocking', () => {
         await initializeModuleProgress(enrollmentA._id.toString());
         const lessonA0 = await buildLesson(modA0._id, 'A Lesson 0');
 
-        // Server-validated watch time heartbeat (>= 90% of 600s)
-        await CourseEnrollmentService.recordWatchTime(
-            user._id.toString(),
-            course._id.toString(),
-            modA0._id.toString(),
-            lessonA0._id.toString(),
-            541,
-            541
-        );
 
         await CourseEnrollmentService.completeLesson(
             user._id.toString(),
