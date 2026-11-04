@@ -18,10 +18,9 @@ const initiateEnrollment = catchAsync(async (req: Request, res: Response) => {
     const result = await EnrollmentService.initiateEnrollment(id, batchId);
 
     const paymentResult = await PaymentService.initiateSSLCommerzPayment(
-        result.enrollment.enrollmentId as string,
+        result.enrollment?._id,
         id
     );
-
     sendResponse(res, {
         statusCode: result.isExisting ? StatusCodes.OK : StatusCodes.CREATED,
         success: true,
@@ -69,7 +68,7 @@ const getEnrollmentDetails = catchAsync(async (req: Request, res: Response) => {
     const { enrollmentId } = req.params as { enrollmentId: string };
     const isStaff = role === 'admin' || role === 'superadmin' || role === 'instructor' || role === 'employee';
 
-    const enrollment = await EnrollmentService.getEnrollmentDetails(enrollmentId, id, isStaff);
+    const enrollment = await EnrollmentService.getEnrollmentDetails(enrollmentId, id, isStaff, role);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,
@@ -136,7 +135,7 @@ const updateEnrollmentStatus = catchAsync(async (req: Request, res: Response) =>
     const { status, reason } = req.body;
     const admin = (req as any).user as { id: string; role: string } | undefined;
 
-    const enrollment = await EnrollmentService.updateEnrollmentStatus(enrollmentId, status, reason);
+    const enrollment = await EnrollmentService.updateEnrollmentStatus(enrollmentId, status, reason, admin);
 
     await recordAudit({
         actor: admin?.id,
@@ -185,9 +184,9 @@ const grantAccessByEmail = catchAsync(async (req: Request, res: Response) => {
             ? 'Student already has access to this batch'
             : 'Access granted successfully',
         data: {
-            enrollmentId: result.enrollment.enrollmentId,
-            status: result.enrollment.status,
-            accessType: (result.enrollment as any).accessType,
+            enrollmentId: result.enrollment?.enrollmentId,
+            status: result.enrollment?.status,
+            accessType: (result.enrollment as any)?.accessType,
             user: {
                 id: result.user._id,
                 name: result.user.name,
@@ -232,7 +231,7 @@ const enrollWithManualPayment = catchAsync(async (req: Request, res: Response) =
         success: true,
         message: result.message,
         data: {
-            enrollmentId: result.enrollment._id,
+            enrollmentId: result.enrollment.enrollmentId,
             status: result.enrollment.status,
             batch: {
                 title: result.batch.title,

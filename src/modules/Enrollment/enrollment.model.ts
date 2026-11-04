@@ -16,7 +16,7 @@ const enrollmentSchema = new Schema<IEnrollment>(
         },
         enrollmentId: {
             type: String,
-            // Uniqueness enforced by sparse index below (allows multiple null/missing during creation)
+            // Uniqueness enforced by sparse index below (assigned only after verified payment)
         },
         paymentId: {
             type: Schema.Types.ObjectId,
@@ -30,6 +30,9 @@ const enrollmentSchema = new Schema<IEnrollment>(
         statusChangeReason: {
             type: String,
         },
+        archivedAt: {
+            type: Date,
+        },
         accessType: {
             type: String,
             enum: ['standard', 'special'],
@@ -37,7 +40,8 @@ const enrollmentSchema = new Schema<IEnrollment>(
         },
         enrolledAt: {
             type: Date,
-            default: Date.now,
+            // Only set when the enrollment is activated after verified payment.
+            // Unpaid PaymentPending rows must not have an enrolledAt.
         },
         completedAt: {
             type: Date,
@@ -51,6 +55,20 @@ const enrollmentSchema = new Schema<IEnrollment>(
         },
         // Lifetime access - no expiry field needed
         // Access is only revoked if user/enrollment is suspended by admin
+        deferUntil: {
+            type: Date,
+        },
+        accessExtendedUntil: {
+            type: Date,
+        },
+        transferredToBatchId: {
+            type: Schema.Types.ObjectId,
+            ref: 'Batch',
+        },
+        transferredFromBatchId: {
+            type: Schema.Types.ObjectId,
+            ref: 'Batch',
+        },
     },
     {
         timestamps: true,
@@ -58,9 +76,29 @@ const enrollmentSchema = new Schema<IEnrollment>(
 );
 
 // Indexes
-enrollmentSchema.index({ enrollmentId: 1 }, { unique: true, sparse: true });
+// enrollmentId is unique only among documents that actually hold one.
+enrollmentSchema.index({ enrollmentId: 1 }, { unique: true, partialFilterExpression: { enrollmentId: { $type: 'string' } } });
 enrollmentSchema.index({ userId: 1, status: 1 });
 enrollmentSchema.index({ batchId: 1, status: 1 });
-enrollmentSchema.index({ userId: 1, batchId: 1 }, { unique: true });
+// Only one non-terminal enrollment may exist for a learner/batch pair.
+// Terminal payment records are retained for audit/support and must not block
+// a later checkout attempt.
+enrollmentSchema.index(
+    { userId: 1, batchId: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            status: {
+                $in: [
+                    EnrollmentStatus.Pending,
+                    EnrollmentStatus.PaymentPending,
+                    EnrollmentStatus.Active,
+                    EnrollmentStatus.Completed,
+                    EnrollmentStatus.Suspended,
+                ],
+            },
+        },
+    }
+);
 
 export const EnrollmentModel = model<IEnrollment>('Enrollment', enrollmentSchema);

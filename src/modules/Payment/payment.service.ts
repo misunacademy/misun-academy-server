@@ -1,9 +1,10 @@
 import mongoose, { PipelineStage } from "mongoose";
-import SSLCommerzPayment from 'sslcommerz-lts';
 import config from '../../config/env.js';
 import { PaymentModel } from "./payment.model.js";
+import { PaymentAttemptModel } from "./paymentAttempt.model.js";
 import { Status, EnrollmentStatus } from "../../types/common.js";
 import { EnrollmentModel } from "../Enrollment/enrollment.model.js";
+import { EnrollmentStatusHistoryModel } from "../Enrollment/enrollmentStatusHistory.model.js";
 import ApiError from "../../errors/ApiError.js";
 import { StatusCodes } from "http-status-codes";
 import { UserModel } from "../User/user.model.js";
@@ -17,12 +18,14 @@ import { BatchModel } from "../Batch/batch.model.js";
 import { ProfileService } from "../Profile/profile.service.js";
 import axios from 'axios';
 import env from '../../config/env.js';
+import { paymentGatewayAdapter } from '../../services/paymentGatewayAdapter.js';
 import { EnrollmentService } from "../Enrollment/enrollment.service.js";
 import { logger } from "../../config/logger.js";
 import { deriveCourseBrand } from "../../utils/courseBrand.js";
 import { recordAudit } from "../../models/auditLog.model.js";
 import { IPayment } from "./payment.model.js";
 import { NotificationService } from '../Notification/notification.service.js';
+import * as Sentry from '@sentry/node';
 
 interface PaymentHistoryQuery {
     page?: number;
@@ -43,6 +46,8 @@ interface ActivateEnrollmentParams {
     session: mongoose.ClientSession;
     context: string;
     initializeModules?: boolean;
+    actorType?: 'user' | 'admin' | 'system' | 'gateway' | 'cron';
+    actorId?: string;
 }
 
 /**
@@ -59,42 +64,57 @@ type PaymentNotifyIntent =
         payment: { _id: unknown; amount: number; currency?: string; transactionId: string; method: string };
         enrollmentId: string;
     }
-    | { kind: 'failed'; user: any; batch: any; reason: string; paymentId: unknown };
+    | { kind: 'failed'; user: any; batch: any; reason: string; paymentId: unknown }
+    | {
+        kind: 'review';
+        paymentId: unknown;
+        transactionId: string;
+        enrollmentId: string;
+        reason: string;
+    };
 
 const flushPaymentNotify = async (intent: PaymentNotifyIntent | null) => {
     if (!intent) return;
     if (intent.kind === 'success') {
         await sendPaymentSuccessNotifications(intent.user, intent.batch, intent.payment as any, intent.enrollmentId);
-        setImmediate(async () => {
-            try {
-                await NotificationService.createNotification({
-                    userId: intent.user._id.toString(),
-                    type: 'payment_success',
-                    title: 'Payment Successful',
-                    message: `Your payment of ${intent.payment.amount} ${intent.payment.currency || 'BDT'} has been confirmed. Welcome to ${getCourseBatchLabel(intent.batch)}!`,
-                    link: '/my-classes',
-                    relatedTo: { model: 'Payment', id: intent.payment._id!.toString() },
-                });
-            } catch (error) {
-                logger.error(error, 'Failed to send payment success notification');
-            }
-        });
-    } else {
+        try {
+            await NotificationService.createNotification({
+                userId: intent.user._id.toString(),
+                type: 'payment_success',
+                title: 'Payment Successful',
+                message: `Your payment of ${intent.payment.amount} ${intent.payment.currency || 'BDT'} has been confirmed. Welcome to ${getCourseBatchLabel(intent.batch)}!`,
+                link: '/my-classes',
+                relatedTo: { model: 'Payment', id: intent.payment._id!.toString() },
+            });
+        } catch (error) {
+            logger.error(error, 'Failed to send payment success notification');
+        }
+    } else if (intent.kind === 'failed') {
         await sendPaymentFailedNotifications(intent.user, intent.batch, intent.reason);
-        setImmediate(async () => {
-            try {
-                await NotificationService.createNotification({
-                    userId: intent.user._id.toString(),
-                    type: 'payment_failed',
-                    title: 'Payment Failed',
-                    message: `Your payment for ${getCourseBatchLabel(intent.batch)} was not completed. Reason: ${intent.reason}`,
-                    link: '/payment',
-                    relatedTo: { model: 'Payment', id: intent.paymentId!.toString() },
-                });
-            } catch (error) {
-                logger.error(error, 'Failed to send payment failed notification');
-            }
-        });
+        try {
+            await NotificationService.createNotification({
+                userId: intent.user._id.toString(),
+                type: 'payment_failed',
+                title: 'Payment Failed',
+                message: `Your payment for ${getCourseBatchLabel(intent.batch)} was not completed. Reason: ${intent.reason}`,
+                link: '/payment',
+                relatedTo: { model: 'Payment', id: intent.paymentId!.toString() },
+            });
+        } catch (error) {
+            logger.error(error, 'Failed to send payment failed notification');
+        }
+    } else {
+        try {
+            await NotificationService.createNotificationForAdmins({
+                type: 'payment_review',
+                title: 'Payment Requires Review',
+                message: `Payment ${intent.transactionId} requires review because enrollment ${intent.enrollmentId} is ${intent.reason}.`,
+                link: `/dashboard/admin/payments/${encodeURIComponent(intent.transactionId)}`,
+                relatedTo: { model: 'Payment', id: intent.paymentId!.toString() },
+            });
+        } catch (error) {
+            logger.error(error, 'Failed to send payment review notification');
+        }
     }
 };
 
@@ -202,38 +222,236 @@ const sendPaymentFailedNotifications = async (
     }
 };
 
-const activateEnrollmentForPayment = async (params: ActivateEnrollmentParams) => {
-    const { payment, enrollmentId, session, context, initializeModules } = params;
+const settlePaymentSuccess = async (params: {
+    payment: IPayment & mongoose.Document;
+    session: mongoose.ClientSession;
+    context: string;
+    actorType?: 'user' | 'admin' | 'system' | 'gateway' | 'cron';
+    actorId?: string;
+    initializeModules?: boolean;
+}): Promise<{ enrollment: any; notify: PaymentNotifyIntent | null }> => {
+    const { payment, session, context, actorType = 'gateway', actorId, initializeModules } = params;
+
+    // Find the enrollment via the stable ObjectId link (enrollmentRef), never
+    // the MA- string — the MA- id is not assigned until this very transaction.
+    const enrollment = await EnrollmentModel.findById(payment.enrollmentRef).session(session);
+    if (!enrollment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found for payment settlement');
+    }
+
+    const batchForId = await BatchModel.findById(enrollment.batchId)
+        .populate('courseId')
+        .session(session)
+        .lean();
+    if (!batchForId) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found for enrollment');
+    }
+    const batchNumber = EnrollmentService.parseBatchNumber(batchForId as any);
+    const courseBrand = deriveCourseBrand((batchForId as any)?.courseId);
+
+    // Generate enrollment ID (atomic $inc on EnrollmentCounterModel) inside the
+    // transaction so an abort rolls the counter back too.
+    const newEnrollmentId = await EnrollmentService.generateEnrollmentId(batchNumber, courseBrand, session);
+
+    // Set enrollmentId on the payment (partial unique index — first write wins).
+    payment.enrollmentId = newEnrollmentId;
+    await payment.save({ session });
+
+    // Activate enrollment: set status Active, enrollmentId, paymentId.
+    const updatedEnrollment = await EnrollmentModel.findOneAndUpdate(
+        {
+            _id: enrollment._id,
+            status: {
+                $in: [
+                    EnrollmentStatus.PaymentPending,
+                    EnrollmentStatus.Pending,
+                    EnrollmentStatus.PaymentFailed,
+                    EnrollmentStatus.Expired,
+                    EnrollmentStatus.Active,
+                ],
+            },
+        },
+        {
+            $set: {
+                status: EnrollmentStatus.Active,
+                enrollmentId: newEnrollmentId,
+                paymentId: payment._id,
+                enrolledAt: enrollment.enrolledAt || new Date(),
+            },
+        },
+        { new: true, session }
+    );
+
+    if (!updatedEnrollment) {
+        throw new ApiError(StatusCodes.CONFLICT, 'Enrollment changed while payment was activating');
+    }
+
+    // Append-only status history inside the same transaction.
+    await EnrollmentStatusHistoryModel.create([
+        {
+            enrollmentId: updatedEnrollment._id,
+            userId: updatedEnrollment.userId,
+            batchId: updatedEnrollment.batchId as mongoose.Types.ObjectId,
+            from: enrollment.status,
+            to: EnrollmentStatus.Active,
+            actorType: actorType as 'user' | 'admin' | 'system' | 'gateway' | 'cron',
+            actorId: actorId ? new mongoose.Types.ObjectId(actorId) : undefined,
+            reason: `Payment verified via ${context}`,
+            source: context,
+            paymentId: payment._id,
+        },
+    ], { session });
+
+    await EnrollmentService.ensureStudentIdForUser(updatedEnrollment.userId.toString(), session);
+
+    if (initializeModules) {
+        await EnrollmentService.initializeModuleProgress(updatedEnrollment._id.toString());
+    }
+
+    const user = await UserModel.findById(payment.userId).lean().session(session);
+    const batch = await BatchModel.findById(payment.batchId)
+        .populate('courseId', 'title slug')
+        .lean()
+        .session(session);
+
+    const notify: PaymentNotifyIntent | null =
+        user && batch
+            ? {
+                kind: 'success',
+                user,
+                batch,
+                payment: {
+                    _id: payment._id,
+                    amount: payment.amount,
+                    currency: payment.currency,
+                    transactionId: payment.transactionId,
+                    method: payment.method,
+                },
+                enrollmentId: newEnrollmentId,
+            }
+            : null;
+
+    logger.info(
+        {
+            event: 'payment.settled',
+            tran_id: payment.transactionId,
+            enrollmentId: newEnrollmentId,
+            amount: payment.amount,
+            currency: payment.currency,
+            method: payment.method,
+            status: Status.Success,
+            context,
+        },
+        'Payment settled via shared settlement path'
+    );
+
+    return { enrollment: updatedEnrollment, notify };
+};
+
+ const activateEnrollmentForPayment = async (params: ActivateEnrollmentParams) => {
+    const { payment, enrollmentId, session, context, initializeModules, actorType = 'gateway', actorId } = params;
 
     const enrollment = await EnrollmentModel.findOne({ enrollmentId }).session(session);
     if (!enrollment) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found for activation');
     }
 
-    const wasAlreadyActive = enrollment.status === EnrollmentStatus.Active;
+    const recoverableStatuses = [
+        EnrollmentStatus.Pending,
+        EnrollmentStatus.PaymentPending,
+        EnrollmentStatus.PaymentFailed,
+        EnrollmentStatus.Expired,
+        EnrollmentStatus.Active,
+    ];
+    const reviewStatuses = [
+        EnrollmentStatus.Refunded,
+        EnrollmentStatus.Suspended,
+        EnrollmentStatus.Completed,
+    ];
 
-    enrollment.status = EnrollmentStatus.Active;
-    enrollment.paymentId = payment._id as any;
-    enrollment.enrolledAt = enrollment.enrolledAt || new Date();
-    await enrollment.save({ session });
+    if (reviewStatuses.includes(enrollment.status)) {
+        const reason = enrollment.status;
+        payment.status = Status.Review;
+        payment.gatewayResponse = {
+            ...payment.gatewayResponse,
+            reviewRequired: true,
+            reviewReason: `Enrollment is ${reason}`,
+            reviewAt: new Date(),
+        };
+        await payment.save({ session });
 
-    await EnrollmentService.ensureStudentIdForUser(enrollment.userId.toString(), session);
-
-    if (!wasAlreadyActive) {
-        await BatchModel.findByIdAndUpdate(
-            payment.batchId,
-            { $inc: { currentEnrollment: 1 } },
-            { session }
+        logger.warn(
+            {
+                event: 'payment.activation_review',
+                transactionId: payment.transactionId,
+                enrollmentId,
+                enrollmentStatus: enrollment.status,
+            },
+            'Verified payment requires manual review because enrollment is not activatable'
         );
+
+        return {
+            enrollment,
+            notify: {
+                kind: 'review' as const,
+                paymentId: payment._id,
+                transactionId: payment.transactionId,
+                enrollmentId,
+                reason,
+            },
+        };
     }
 
+    const updatedEnrollment = await EnrollmentModel.findOneAndUpdate(
+        { _id: enrollment._id, status: { $in: recoverableStatuses } },
+        {
+            $set: {
+                status: EnrollmentStatus.Active,
+                paymentId: payment._id,
+                enrolledAt: enrollment.enrolledAt || new Date(),
+                ...(enrollment.status === EnrollmentStatus.Expired ||
+                enrollment.status === EnrollmentStatus.PaymentFailed
+                    ? { statusChangeReason: `Recovered after verified payment (${context})` }
+                    : {}),
+            },
+        },
+        { new: true, session }
+    );
+
+    if (!updatedEnrollment) {
+        throw new ApiError(StatusCodes.CONFLICT, 'Enrollment changed while payment was activating');
+    }
+
+    // Append-only status history inside the same transaction
+    await EnrollmentStatusHistoryModel.create([
+        {
+            enrollmentId: updatedEnrollment._id,
+            userId: updatedEnrollment.userId,
+            batchId: updatedEnrollment.batchId as mongoose.Types.ObjectId,
+            from: enrollment.status,
+            to: EnrollmentStatus.Active,
+            actorType: actorType as 'user' | 'admin' | 'system' | 'gateway' | 'cron',
+            actorId: actorId ? new mongoose.Types.ObjectId(actorId) : undefined,
+            reason: `Payment verified via ${context}`,
+            source: context,
+            paymentId: payment._id,
+        },
+    ], { session });
+
+    const _wasAlreadyActive = enrollment.status === EnrollmentStatus.Active;
+
+    await EnrollmentService.ensureStudentIdForUser(updatedEnrollment.userId.toString(), session);
+
+    // Seat counter deprecated: use EnrollmentService.countActiveEnrollments() instead.
+    // Removed $inc { currentEnrollment: 1 } to avoid drift.
+
     if (initializeModules) {
-        await EnrollmentService.initializeModuleProgress(enrollment._id.toString());
+        await EnrollmentService.initializeModuleProgress(updatedEnrollment._id.toString());
     }
 
     await syncProfileEnrollmentReference(
-        enrollment.userId.toString(),
-        enrollment.enrollmentId!,
+        updatedEnrollment.userId.toString(),
+        updatedEnrollment.enrollmentId!,
         session,
         context
     );
@@ -263,20 +481,28 @@ const activateEnrollmentForPayment = async (params: ActivateEnrollmentParams) =>
             }
             : null;
 
-    return { enrollment, notify };
+    return { enrollment: updatedEnrollment, notify };
 };
 
-const failEnrollment = async (
+export const failEnrollment = async (
     payment: IPayment & mongoose.Document,
     session: mongoose.ClientSession,
     failureReason: string,
 ): Promise<PaymentNotifyIntent | null> => {
-    if (payment.enrollmentId) {
-        await EnrollmentModel.findOneAndUpdate(
-            { enrollmentId: payment.enrollmentId },
-            { status: EnrollmentStatus.PaymentFailed },
-            { session }
-        );
+    // Locate the enrollment via the stable ObjectId link (enrollmentRef),
+    // never the MA- string which may not exist yet.
+    if (payment.enrollmentRef) {
+        const enrollment = await EnrollmentModel.findById(payment.enrollmentRef).session(session).lean();
+        if (enrollment && enrollment.status !== EnrollmentStatus.PaymentFailed) {
+            await EnrollmentService.transitionEnrollment(
+                enrollment._id.toString(),
+                enrollment.status as EnrollmentStatus,
+                EnrollmentStatus.PaymentFailed,
+                { id: payment.userId.toString(), role: 'system' },
+                failureReason,
+                session
+            );
+        }
     }
 
     const user = await UserModel.findById(payment.userId).lean().session(session);
@@ -542,8 +768,8 @@ const getPaymentDetail = async (transactionId: string) => {
         throw new ApiError(StatusCodes.NOT_FOUND, "Payment not found");
     }
 
-    const enrollment = payment.enrollmentId
-        ? await EnrollmentModel.findOne({ enrollmentId: payment.enrollmentId })
+    const enrollment = payment.enrollmentRef
+        ? await EnrollmentModel.findById(payment.enrollmentRef)
               .select("enrollmentId status createdAt")
               .lean()
         : null;
@@ -556,8 +782,30 @@ const getPaymentDetail = async (transactionId: string) => {
 const updatePaymentWithEnrollStatus = async (
     transactionId: string,
     paymentStatus: Status,
-    gatewayResponse?: unknown
+    gatewayResponse?: unknown,
+    adminId?: string,
+    reason?: string
 ) => {
+    if (paymentStatus === Status.Success || paymentStatus === Status.Refunded) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'Paid and refunded states can only be set by their verified settlement flows'
+        );
+    }
+
+    if (!adminId || !reason?.trim()) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'An administrator and reason are required for payment status changes'
+        );
+    }
+
+    Sentry.captureMessage('Admin-initiated payment status change', {
+        level: 'warning',
+        tags: { paymentStatus, transactionId },
+        extra: { adminId, reason },
+    });
+
     const session = await mongoose.startSession();
     let notify: PaymentNotifyIntent | null = null;
 
@@ -572,9 +820,28 @@ const updatePaymentWithEnrollStatus = async (
             updateFields.gatewayResponse = gatewayResponse;
         }
 
+        const existingPayment = await PaymentModel.findOne({ transactionId }).session(session);
+        if (!existingPayment) {
+            throw new ApiError(StatusCodes.NOT_FOUND, "Payment not found");
+        }
+
         const updatedPayment = await PaymentModel.findOneAndUpdate(
-            { transactionId },
-            updateFields,
+            {
+                transactionId,
+                status: { $in: [Status.Pending, Status.Review, Status.Risk] },
+            },
+            {
+                ...updateFields,
+                $push: {
+                    'gatewayResponse.adminStatusHistory': {
+                        from: existingPayment.status,
+                        to: paymentStatus,
+                        reason: reason.trim(),
+                        adminId,
+                        changedAt: new Date(),
+                    },
+                },
+            },
             { new: true, session }
         ).populate({
             path: 'batchId',
@@ -582,21 +849,25 @@ const updatePaymentWithEnrollStatus = async (
         }).populate('userId');
 
         if (!updatedPayment) {
-            throw new ApiError(StatusCodes.NOT_FOUND, "Payment not found");
+            throw new ApiError(StatusCodes.CONFLICT, "Payment status changed or is terminal");
         }
 
-        if (paymentStatus === Status.Success && updatedPayment.enrollmentId) {
-            const result = await activateEnrollmentForPayment({
-                payment: updatedPayment,
-                enrollmentId: updatedPayment.enrollmentId,
-                session,
-                context: 'payment status update',
-                initializeModules: false,
-            });
-            notify = result.notify;
-        } else if (
+        await recordAudit({
+            actor: adminId,
+            action: 'payment.admin_status_change',
+            targetType: 'Payment',
+            targetId: updatedPayment._id?.toString(),
+            metadata: {
+                transactionId,
+                from: existingPayment.status,
+                to: paymentStatus,
+                reason: reason.trim(),
+            },
+        });
+
+        if (
             (paymentStatus === Status.Failed || paymentStatus === Status.Cancel) &&
-            updatedPayment.enrollmentId
+            updatedPayment.enrollmentRef
         ) {
             notify = await failEnrollment(
                 updatedPayment,
@@ -612,8 +883,8 @@ const updatePaymentWithEnrollStatus = async (
 
         return {
             payment: updatedPayment,
-            enrollment: updatedPayment.enrollmentId
-                ? await EnrollmentModel.findOne({ enrollmentId: updatedPayment.enrollmentId }).lean()
+            enrollment: updatedPayment.enrollmentRef
+                ? await EnrollmentModel.findById(updatedPayment.enrollmentRef).lean()
                 : null,
         };
     } catch (error) {
@@ -626,7 +897,7 @@ const updatePaymentWithEnrollStatus = async (
 // ─── UPSERT PAYMENT ───
 
 const updatePayment = async (paymentData: {
-    enrollmentId: string;
+    enrollmentRef: mongoose.Types.ObjectId;
     transactionId: string;
     amount: number;
     currency: string;
@@ -634,17 +905,17 @@ const updatePayment = async (paymentData: {
     method: string;
     gatewayResponse?: unknown;
 }) => {
-    const enrollment = await EnrollmentModel.findOne({ enrollmentId: paymentData.enrollmentId }).lean();
+    const enrollment = await EnrollmentModel.findById(paymentData.enrollmentRef).lean();
     if (!enrollment) {
         throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
     }
 
     const payment = await PaymentModel.findOneAndUpdate(
-        { enrollmentId: paymentData.enrollmentId },
+        { enrollmentRef: paymentData.enrollmentRef },
         {
             userId: enrollment.userId,
             batchId: enrollment.batchId,
-            enrollmentId: paymentData.enrollmentId,
+            enrollmentRef: paymentData.enrollmentRef,
             transactionId: paymentData.transactionId,
             amount: paymentData.amount,
             currency: paymentData.currency,
@@ -661,7 +932,12 @@ const updatePayment = async (paymentData: {
 // ─── CHECK PAYMENT STATUS ───
 
 const checkPaymentStatus = async (transactionId: string) => {
-    const payment = await PaymentModel.findOne({ transactionId }).lean().populate({
+    const payment = await PaymentModel.findOne({
+        $or: [
+            { transactionId },
+            { 'gatewayResponse.supersededTranIds': transactionId },
+        ],
+    }).lean().populate({
         path: 'batchId',
         populate: {
             path: 'courseId',
@@ -670,7 +946,12 @@ const checkPaymentStatus = async (transactionId: string) => {
     });
 
     if (!payment) {
-        throw new ApiError(StatusCodes.NOT_FOUND, "Payment data not found!");
+        // Never throw on a browser-facing callback — redirect to not_found so
+        // the frontend renders a sensible message instead of raw JSON.
+        return {
+            redirectUrl: `/payment?status=not_found&t=${encodeURIComponent(transactionId)}`,
+            payment: null,
+        };
     }
 
     const rawCourse = (payment.batchId as any)?.courseId;
@@ -683,18 +964,34 @@ const checkPaymentStatus = async (transactionId: string) => {
     const transactionQuery = `&t=${encodeURIComponent(transactionId)}${courseQuery}${amountQuery}${currencyQuery}`;
 
     let redirectUrl: string;
+    const now = new Date();
     switch (payment.status) {
         case Status.Success:
             redirectUrl = `/payment?status=success${transactionQuery}`;
             break;
         case Status.Pending:
-            redirectUrl = `/payment?status=pending${transactionQuery}`;
+            // Computed expiry on read: if the session window lapsed, treat as
+            // expired without writing (writes are the cron job's job).
+            if (payment.expiresAt && payment.expiresAt < now) {
+                redirectUrl = `/payment?status=expired${transactionQuery}`;
+            } else {
+                redirectUrl = `/payment?status=pending${transactionQuery}`;
+            }
             break;
         case Status.Failed:
             redirectUrl = `/payment?status=failed${transactionQuery}`;
             break;
         case Status.Cancel:
             redirectUrl = `/payment?status=cancelled${transactionQuery}`;
+            break;
+        case Status.Expired:
+            redirectUrl = `/payment?status=expired${transactionQuery}`;
+            break;
+        case Status.Review:
+            redirectUrl = `/payment?status=review${transactionQuery}`;
+            break;
+        case Status.Superseded:
+            redirectUrl = `/payment?status=superseded${transactionQuery}`;
             break;
         default:
             redirectUrl = `/payment?status=failed${transactionQuery}`;
@@ -729,40 +1026,16 @@ const validateSSLCommerzPayment = async (valId: string) => {
 
 // ─── GATEWAY TRANSACTION LOOKUP (RECONCILIATION) ───
 
-const GATEWAY_QUERY_TIMEOUT_MS = 10000;
-
 /**
  * Ask SSLCommerz for the authoritative state of a gateway transaction.
  *
  * Used by the reconciliation job to settle payments whose browser redirect and
- * IPN never reached us (tab closed, network drop, webhook outage). The SDK
- * swallows transport failures and resolves with the thrown value, so callers
- * get `null` for "could not determine — retry later" instead of an exception.
+ * IPN never reached us (tab closed, network drop, webhook outage).
  */
 export const querySSLCommerzTransaction = async (
     transactionId: string
 ): Promise<Record<string, any> | null> => {
-    const store_id = config.SSL_STORE_ID;
-    const store_passwd = config.SSL_STORE_PASSWORD;
-
-    if (!store_id || !store_passwd) {
-        throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Payment gateway not configured');
-    }
-
-    const sslcz = new SSLCommerzPayment(store_id, store_passwd, config.SSL_IS_LIVE === 'true');
-
-    const response = await Promise.race([
-        sslcz.transactionQueryByTransactionId({ tran_id: transactionId }),
-        new Promise<null>((resolve) =>
-            setTimeout(() => resolve(null), GATEWAY_QUERY_TIMEOUT_MS)
-        ),
-    ]);
-
-    if (!response || response instanceof Error || typeof response !== 'object') {
-        return null;
-    }
-
-    return response as Record<string, any>;
+    return paymentGatewayAdapter.queryTransaction(transactionId);
 };
 
 // ─── FINALIZE SSLCOMMERZ PAYMENT ───
@@ -813,6 +1086,17 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
             return locked;
         }
 
+        // Non-terminal statuses that can move to Success on verified payment:
+        // Pending, Cancel, Failed, Expired. Success/Refunded/Superseded are
+        // terminal and are handled above (Success returns early; Refunded/
+        // Superseded fall through to the validation checks below but will not
+        // reach this point because they are terminal — however we guard here too).
+        const terminalStatuses = [Status.Success, Status.Refunded, Status.Superseded];
+        if (terminalStatuses.includes(locked.status)) {
+            await session.commitTransaction();
+            return locked;
+        }
+
         if (validation.status !== 'VALID' && validation.status !== 'VALIDATED') {
             logger.warn(
                 {
@@ -831,8 +1115,18 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
                 processedAt: new Date(),
             };
             await locked.save({ session });
+            await PaymentAttemptModel.updateMany(
+                { transactionId: { $in: [locked.transactionId, validation.tran_id] } },
+                {
+                    $set: {
+                        status: Status.Failed,
+                        gatewayResponse: locked.gatewayResponse,
+                    },
+                },
+                { session }
+            );
 
-            if (locked.enrollmentId) {
+            if (locked.enrollmentRef) {
                 notify = await failEnrollment(locked, session, 'SSLCommerz validation failed');
             }
 
@@ -855,10 +1149,19 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
                 },
                 'Payment anti-tamper mismatch between stored record and gateway validation'
             );
+            Sentry.captureMessage('Payment data mismatch', {
+                level: 'warning',
+                tags: { tran_id: locked.transactionId, event: 'payment.data_mismatch' },
+                extra: {
+                    expected: { amount: locked.amount, currency: locked.currency },
+                    received: { tran_id: validation.tran_id, amount: validation.amount, currency: validation.currency },
+                },
+            });
             throw new ApiError(StatusCodes.BAD_REQUEST, 'Payment data mismatch detected');
         }
 
         locked.status = Status.Success;
+        locked.verifiedAt = new Date();
         locked.gatewayResponse = {
             ...locked.gatewayResponse,
             // Keep the actually-paid tran for audit when it differs (rescue).
@@ -878,29 +1181,15 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
         };
         await locked.save({ session });
 
-        if (locked.enrollmentId) {
-            const result = await activateEnrollmentForPayment({
-                payment: locked,
-                enrollmentId: locked.enrollmentId,
-                session,
-                context: 'SSLCommerz payment finalize',
-                initializeModules: false,
-            });
-            notify = result.notify;
-        }
-
-        logger.info(
-            {
-                event: 'payment.finalized',
-                tran_id: locked.transactionId,
-                enrollmentId: locked.enrollmentId,
-                amount: locked.amount,
-                currency: locked.currency,
-                method: locked.method,
-                status: Status.Success,
-            },
-            'Payment finalized via SSLCommerz'
-        );
+        // Shared settlement: assign enrollmentId + activate enrollment + status
+        // history in ONE transaction via payment.enrollmentRef (ObjectId link).
+        const settlementResult = await settlePaymentSuccess({
+            payment: locked,
+            session,
+            context: 'SSLCommerz payment finalize',
+            actorType: 'gateway',
+        });
+        notify = settlementResult.notify;
 
         await session.commitTransaction();
         await flushPaymentNotify(notify);
@@ -913,10 +1202,86 @@ const finalizeSSLCommerzPayment = async (transactionId: string, valId: string) =
     }
 };
 
+// ─── CANCEL / FAIL HANDLERS ───
+
+/**
+ * Handle a gateway cancel (buyer clicked Cancel on SSLCommerz page).
+ * Conditional update: only Pending → Cancel, never overwrites Success/Refunded.
+ * Enrollment stays PaymentPending (reusable) — no enrollmentId was ever assigned.
+ */
+const handleCancelPayment = async (transactionId: string) => {
+    const updated = await PaymentModel.findOneAndUpdate(
+        { transactionId, status: Status.Pending },
+        {
+            $set: {
+                status: Status.Cancel,
+                cancelledAt: new Date(),
+                updatedAt: new Date(),
+            },
+        },
+        { new: true }
+    );
+
+    if (!updated) {
+        // Already terminal or not found — idempotent no-op.
+        return null;
+    }
+
+    return updated;
+};
+
+/**
+ * Handle a gateway fail (SSLCommerz reported failure).
+ * Conditional update: only Pending → Failed, never overwrites Success/Refunded.
+ */
+const handleFailPayment = async (transactionId: string) => {
+    const updated = await PaymentModel.findOneAndUpdate(
+        { transactionId, status: Status.Pending },
+        {
+            $set: {
+                status: Status.Failed,
+                failedAt: new Date(),
+                updatedAt: new Date(),
+            },
+        },
+        { new: true }
+    );
+
+    if (!updated) {
+        return null;
+    }
+
+    return updated;
+};
+
+/**
+ * Mark a stale Pending payment as Expired (called by the maintenance job only,
+ * after reconciliation has queried the gateway). Read-only path computes
+ * effective status without writing.
+ */
+const markPaymentExpired = async (transactionId: string) => {
+    const updated = await PaymentModel.findOneAndUpdate(
+        { transactionId, status: Status.Pending },
+        {
+            $set: {
+                status: Status.Expired,
+                failedAt: new Date(),
+                updatedAt: new Date(),
+            },
+        },
+        { new: true }
+    );
+
+    return updated ?? null;
+};
+
 // ─── GET MY PAYMENTS ───
 
 const getMyPayments = async (userId: string) => {
-    const payments = await PaymentModel.find({ userId })
+    const payments = await PaymentModel.find({
+        userId,
+        status: { $nin: [Status.Failed, Status.Cancel, Status.Expired] },
+    })
         .populate({
             path: 'batchId',
             select: 'title batchNumber courseId'
@@ -964,46 +1329,97 @@ export const recordGatewayPaymentAttempt = async (params: {
     userId: string;
     batch: { _id: unknown; price?: number; currency?: string };
     enrollmentId: string;
+    enrollmentRef: mongoose.Types.ObjectId;
     transactionId: string;
+    valId?: string;
 }) => {
-    const { userId, batch, enrollmentId, transactionId } = params;
+    const { userId, batch, enrollmentId: _enrollmentId, enrollmentRef, transactionId, valId } = params;
 
-    const previousAttempt = await PaymentModel.findOne({ enrollmentId })
+    // Payment expires after the configured session window (default 30 minutes).
+    const expiryMinutes = Number(env.PAYMENT_SESSION_EXPIRY_MINUTES) || 30;
+    const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+
+    // Look up previous attempt by enrollmentRef (Enrollment ObjectId)
+    const previousAttempt = await PaymentAttemptModel.findOne({ enrollmentRef })
         .select('transactionId gatewayResponse')
         .lean();
 
     // A legacy row can hold `gatewayResponse: null`; a dotted `$set` into null
     // throws PathNotViable. Normalise it to an object first.
     if (previousAttempt && previousAttempt.gatewayResponse === null) {
-        await PaymentModel.updateOne(
+        await PaymentAttemptModel.updateOne(
             { _id: previousAttempt._id },
             { $set: { gatewayResponse: {} } }
         );
     }
 
-    const previousTransactionId = previousAttempt?.transactionId;
+    // Older enrollments may have a Payment row without a corresponding
+    // PaymentAttempt row. Keep those retries recoverable as well — look it up
+    // by enrollmentRef (the ObjectId link), not the MA- string.
+    const previousPayment = previousAttempt
+        ? null
+        : await PaymentModel.findOne({ enrollmentRef })
+              .select('transactionId gatewayResponse status')
+              .lean();
+
+    const previousTransactionId =
+        previousAttempt?.transactionId || previousPayment?.transactionId;
     const shouldSupersede =
         typeof previousTransactionId === 'string' &&
         previousTransactionId.length > 0 &&
         previousTransactionId !== transactionId;
 
+    // Supersede the previous attempt so we always know which attempt is current.
+    if (shouldSupersede) {
+        await PaymentAttemptModel.updateOne(
+            { transactionId: previousTransactionId },
+            {
+                $set: {
+                    status: Status.Superseded,
+                    'gatewayResponse.supersededBy': transactionId,
+                    'gatewayResponse.supersededAt': new Date(),
+                },
+            },
+        );
+    }
+
     const update: Record<string, unknown> = {
         $set: {
             userId,
             batchId: batch._id,
-            enrollmentId,
+            enrollmentRef,
             transactionId,
             amount: batch.price,
             currency: batch.currency || 'BDT',
             status: Status.Pending,
             method: 'SSLCommerz',
+            expiresAt,
             'gatewayResponse.retriedAt': new Date(),
         },
         $unset: {
             verifiedAt: '',
             verifiedBy: '',
+            enrollmentId: '',
         },
     };
+
+    await PaymentAttemptModel.findOneAndUpdate(
+        { transactionId },
+        {
+            $setOnInsert: {
+                userId,
+                batchId: batch._id,
+                enrollmentRef,
+                transactionId,
+                amount: Number(batch.price),
+                currency: batch.currency || 'BDT',
+                status: Status.Pending,
+                method: 'SSLCommerz',
+                ...(valId ? { 'gatewayResponse.valId': valId } : {}),
+            },
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
 
     if (shouldSupersede) {
         update.$addToSet = {
@@ -1011,30 +1427,57 @@ export const recordGatewayPaymentAttempt = async (params: {
         };
     }
 
+    let paymentDoc;
     try {
-        return await PaymentModel.findOneAndUpdate({ enrollmentId }, update, {
+        paymentDoc = await PaymentModel.findOneAndUpdate({ enrollmentRef }, update, {
             upsert: true,
             new: true,
             setDefaultsOnInsert: true,
         });
     } catch (error: any) {
-        // Concurrent initiations for the same enrollment race on the unique
-        // enrollmentId index. The row exists now, so apply the same update
-        // once more instead of surfacing a 500 (and losing the attempt).
-        if (error?.code === 11000) {
-            return PaymentModel.findOneAndUpdate({ enrollmentId }, update, { new: true });
+        // Only retry on a duplicate-key error that is specifically about the
+        // enrollmentRef live-attempt index. Any other E11000 (e.g. enrollmentId
+        // collision) is a real data problem and must not be silently swallowed.
+        if (error?.code === 11000 && error.keyPattern && error.keyPattern.enrollmentRef === 1) {
+            // The row exists from a concurrent initiation — apply the same
+            // update once more (no upsert needed since the row is confirmed).
+            paymentDoc = await PaymentModel.findOneAndUpdate({ enrollmentRef }, update, { new: true });
+        } else {
+            throw error;
         }
-        throw error;
     }
+
+    // Verify the write actually landed and carries the expected tran_id before
+    // the gateway is ever told about it. If we can't confirm the row, abort
+    // with a 500 rather than sending the learner to a gateway session that has
+    // no local record (which makes cancel/fail/success callbacks 404).
+    if (!paymentDoc || paymentDoc.transactionId !== transactionId) {
+        logger.error(
+            {
+                event: 'payment.record_write_unconfirmed',
+                enrollmentRef: enrollmentRef?.toString(),
+                transactionId,
+                expected: transactionId,
+                got: paymentDoc?.transactionId,
+            },
+            'recordGatewayPaymentAttempt: persisted row does not match requested tran_id'
+        );
+        throw new ApiError(
+            StatusCodes.INTERNAL_SERVER_ERROR,
+            'Payment record could not be saved. Please try again.'
+        );
+    }
+
+    return paymentDoc;
 };
 
 // ─── INITIATE SSLCOMMERZ PAYMENT ───
 
 const initiateSSLCommerzPayment = async (
-    enrollmentId: string,
+    enrollmentRef: mongoose.Types.ObjectId,
     userId: string
 ) => {
-    const enrollment = await EnrollmentModel.findOne({ enrollmentId, userId })
+    const enrollment = await EnrollmentModel.findById(enrollmentRef)
         .lean()
         .populate('batchId')
         .populate('userId');
@@ -1044,15 +1487,19 @@ const initiateSSLCommerzPayment = async (
     }
 
     if (
-        enrollment.status !== EnrollmentStatus.Pending &&
         enrollment.status !== EnrollmentStatus.PaymentPending &&
         enrollment.status !== EnrollmentStatus.PaymentFailed
     ) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment is not pending payment');
     }
 
-    const currentPayment = await PaymentModel.findOne({ enrollmentId })
-        .select('status method')
+    const currentPaymentFilters: Record<string, unknown> = { enrollmentRef };
+    if (typeof enrollment.enrollmentId === 'string' && enrollment.enrollmentId.length > 0) {
+        currentPaymentFilters.enrollmentId = enrollment.enrollmentId;
+    }
+
+    const currentPayment = await PaymentModel.findOne(currentPaymentFilters)
+        .select('status method gatewayResponse')
         .lean();
 
     // One open payment per enrollment. Never let a gateway attempt overwrite a
@@ -1072,18 +1519,23 @@ const initiateSSLCommerzPayment = async (
         );
     }
 
-    const batch = enrollment.batchId;
-    const user = enrollment.userId;
-
-    const store_id = config.SSL_STORE_ID;
-    const store_passwd = config.SSL_STORE_PASSWORD;
-    const is_live = config.SSL_IS_LIVE === 'true';
-
-    if (!store_id || !store_passwd) {
-        throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Payment gateway not configured');
+    // Treat legacy "pending" enrollments (pre-payment-pending rollout) as
+    // payment-pending so retry does not 400 — they have no enrollmentId yet.
+    const enrollableStatuses = [
+        EnrollmentStatus.PaymentPending,
+        EnrollmentStatus.PaymentFailed,
+        EnrollmentStatus.Pending,
+    ];
+    if (!enrollableStatuses.includes(enrollment.status)) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment is not pending payment');
     }
 
-    const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
+    const batch = enrollment.batchId;
+    const user = enrollment.userId;
+    const enrollmentIdString = typeof enrollment.enrollmentId === 'string' && enrollment.enrollmentId.length > 0
+        ? enrollment.enrollmentId
+        : undefined;
+
     const transactionId = generateTransactionId();
     const callbackKey = getStatusCallbackKey(transactionId);
 
@@ -1118,7 +1570,7 @@ const initiateSSLCommerzPayment = async (
         ship_state: 'N/A',
         ship_postcode: 1000,
         ship_country: 'Bangladesh',
-        value_a: enrollmentId,
+        value_a: enrollmentIdString,
         value_b: userId,
         value_c: (batch as any)._id.toString(),
     };
@@ -1130,20 +1582,25 @@ const initiateSSLCommerzPayment = async (
     await recordGatewayPaymentAttempt({
         userId,
         batch: batch as { _id: unknown; price?: number; currency?: string },
-        enrollmentId,
+        enrollmentId: enrollmentIdString ?? '',
+        enrollmentRef: enrollment._id,
         transactionId,
     });
 
     try {
-        const response = await sslcz.init(paymentData);
+        const response = await paymentGatewayAdapter.initiate(paymentData);
         if (response?.GatewayPageURL) {
             await PaymentModel.updateOne(
-                { enrollmentId, transactionId },
+                { enrollmentRef: enrollment._id, transactionId },
+                { $set: { 'gatewayResponse.gatewayPageURL': response.GatewayPageURL } }
+            );
+            await PaymentAttemptModel.updateOne(
+                { transactionId },
                 { $set: { 'gatewayResponse.gatewayPageURL': response.GatewayPageURL } }
             );
             return {
                 paymentUrl: response.GatewayPageURL,
-                enrollmentId,
+                enrollmentId: enrollmentIdString,
                 transactionId,
             };
         } else {
@@ -1160,7 +1617,7 @@ const initiateSSLCommerzPayment = async (
         // be completed. Record it as failed so Payment History stops showing a
         // forever-"pending" transaction; a later retry flips the row back.
         await PaymentModel.updateOne(
-            { enrollmentId, transactionId },
+            { enrollmentRef: enrollment._id, transactionId },
             {
                 $set: {
                     status: Status.Failed,
@@ -1170,6 +1627,18 @@ const initiateSSLCommerzPayment = async (
             }
         ).catch((markError) => {
             logger.error(markError, 'Failed to mark uninitialised gateway attempt as failed');
+        });
+        await PaymentAttemptModel.updateOne(
+            { transactionId },
+            {
+                $set: {
+                    status: Status.Failed,
+                    'gatewayResponse.initError': error?.message || 'Gateway init failed',
+                    'gatewayResponse.failedAt': new Date(),
+                },
+            }
+        ).catch((markError) => {
+            logger.error(markError, 'Failed to mark payment attempt as failed');
         });
 
         throw new ApiError(
@@ -1204,19 +1673,7 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
                 throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
             }
 
-            let enrollmentId = payment.enrollmentId;
-            if (!enrollmentId) {
-                // Prefer the stable batch number; fall back to the legacy
-                // "second word of the title" convention, never undefined.
-                const batchNo =(batch as any).title?.split(' ')[1]??"";
-                enrollmentId = await EnrollmentService.generateEnrollmentId(
-                    batchNo,
-                    deriveCourseBrand(batch.courseId as any)
-                );
-            }
-
             payment.status = Status.Success;
-            payment.enrollmentId = enrollmentId;
             payment.verifiedAt = new Date();
             payment.verifiedBy = adminId as any;
             payment.gatewayResponse = {
@@ -1226,11 +1683,12 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
             };
             await payment.save({ session });
 
-            const result = await activateEnrollmentForPayment({
+            const result = await settlePaymentSuccess({
                 payment,
-                enrollmentId,
                 session,
                 context: 'manual payment approval',
+                actorType: 'admin',
+                actorId: adminId,
                 initializeModules: true,
             });
             notify = result.notify;
@@ -1239,7 +1697,7 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
                 {
                     event: 'payment.manual_approved',
                     tran_id: transactionId,
-                    enrollmentId,
+                    enrollmentId: payment.enrollmentId,
                     adminId,
                     amount: payment.amount,
                     method: payment.method,
@@ -1253,7 +1711,7 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
                 action: 'payment.manual_approve',
                 targetType: 'Payment',
                 targetId: payment._id?.toString(),
-                metadata: { tran_id: transactionId, enrollmentId, amount: payment.amount, method: payment.method },
+                metadata: { tran_id: transactionId, enrollmentId: payment.enrollmentId, amount: payment.amount, method: payment.method },
             });
         } else {
             payment.status = Status.Failed;
@@ -1290,6 +1748,206 @@ const verifyManualPayment = async (transactionId: string, approved: boolean, adm
         await session.commitTransaction();
         await flushPaymentNotify(notify);
         return payment;
+    } catch (error) {
+        await session.abortTransaction();
+        throw error;
+    } finally {
+        session.endSession();
+    }
+};
+
+// ─── ADMIN RE-VERIFY WITH GATEWAY ───
+
+/**
+ * Admin-initiated re-verification of a payment against the gateway.
+ *
+ * Never trusts the admin's chosen status: queries SSLCommerz authoritatively
+ * and applies whatever the gateway reports (subject to amount/currency/tran_id
+ * comparison against the stored record). On verified Success, activates the
+ * enrollment through the same guarded path as webhook finalization. On gateway
+ * failure, marks the payment Failed. On transport failure, throws 503 and
+ * leaves state untouched for retry.
+ *
+ * Every outcome is compare-and-set on the current payment status, transactional,
+ * with status history, audit log, and Sentry alert.
+ */
+const reVerifyPaymentWithGateway = async (
+    transactionId: string,
+    adminId: string,
+    reason: string,
+    queryGateway: any = querySSLCommerzTransaction
+) => {
+    if (!reason?.trim()) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Reason is required for gateway re-verification');
+    }
+
+    const payment = await PaymentModel.findOne({ transactionId });
+    if (!payment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Payment not found');
+    }
+
+    // Already terminal — no state change
+    if (payment.status === Status.Success || payment.status === Status.Refunded) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            `Payment is already ${payment.status}; cannot re-verify`
+        );
+    }
+
+    const gatewayResult = await queryGateway(transactionId);
+    if (!gatewayResult) {
+        Sentry.captureMessage('Gateway re-verify transport failure', {
+            level: 'warning',
+            tags: { transactionId, adminId, reason: reason.trim() },
+        });
+        throw new ApiError(
+            StatusCodes.SERVICE_UNAVAILABLE,
+            'Gateway unreachable — payment state unchanged, retry later'
+        );
+    }
+
+    const gatewayTranId = String(gatewayResult.tran_id || transactionId);
+    const gatewayStatus = String(gatewayResult.status || '').toUpperCase();
+    const gatewayAmount = Number(gatewayResult.amount);
+    const gatewayCurrency = String(gatewayResult.currency || '');
+
+    // Anti-tamper: gateway data must match stored record
+    if (
+        gatewayTranId !== transactionId ||
+        gatewayAmount !== Number(payment.amount) ||
+        gatewayCurrency !== payment.currency
+    ) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'Gateway data mismatch with stored payment record'
+        );
+    }
+
+    const session = await mongoose.startSession();
+    let notify: PaymentNotifyIntent | null = null;
+
+    try {
+        await session.startTransaction();
+
+        const locked = await PaymentModel.findOne({ transactionId }).session(session);
+        if (!locked) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Payment not found');
+        }
+
+        // Compare-and-set: only act on non-terminal statuses
+        if (locked.status === Status.Success || locked.status === Status.Refunded) {
+            await session.commitTransaction();
+            return { payment: locked, enrollment: null };
+        }
+
+        const isGatewaySuccess = gatewayStatus === 'VALID' || gatewayStatus === 'VALIDATED';
+        const isGatewayFailure =
+            gatewayStatus === 'FAILED' ||
+            gatewayStatus === 'FAIL' ||
+            gatewayStatus === 'FAILED_CARD' ||
+            gatewayStatus === 'INVALID_TRANSACTION' ||
+            gatewayStatus === 'CANCELLED' ||
+            gatewayStatus === 'CANCELED' ||
+            gatewayStatus === 'CANCEL';
+
+        if (isGatewaySuccess) {
+            locked.status = Status.Success;
+            locked.gatewayResponse = {
+                ...locked.gatewayResponse,
+                val_id: gatewayResult.val_id || gatewayResult.valId || null,
+                status: gatewayStatus,
+                amount: gatewayAmount,
+                currency: gatewayCurrency,
+                bank_tran_id: gatewayResult.bank_tran_id,
+                tran_date: gatewayResult.tran_date,
+                processedAt: new Date(),
+                reVerifiedBy: adminId,
+                reVerifiedAt: new Date(),
+                reVerifyReason: reason.trim(),
+            };
+            await locked.save({ session });
+
+            const result = await settlePaymentSuccess({
+                payment: locked,
+                session,
+                context: 'admin gateway re-verify',
+                actorType: 'admin',
+                actorId: adminId,
+                initializeModules: false,
+            });
+            notify = result.notify;
+
+            logger.info(
+                {
+                    event: 'payment.reverify_success',
+                    tran_id: transactionId,
+                    enrollmentId: locked.enrollmentId,
+                    adminId,
+                    amount: locked.amount,
+                    currency: locked.currency,
+                },
+                'Admin re-verify: gateway confirmed payment success'
+            );
+        } else if (isGatewayFailure) {
+            locked.status = Status.Failed;
+            locked.gatewayResponse = {
+                ...locked.gatewayResponse,
+                status: gatewayStatus,
+                amount: gatewayAmount,
+                currency: gatewayCurrency,
+                processedAt: new Date(),
+                reVerifiedBy: adminId,
+                reVerifiedAt: new Date(),
+                reVerifyReason: reason.trim(),
+            };
+            await locked.save({ session });
+
+            if (locked.enrollmentId) {
+                notify = await failEnrollment(locked, session, 'Gateway re-verify reported failure');
+            }
+
+            logger.warn(
+                {
+                    event: 'payment.reverify_failure',
+                    tran_id: transactionId,
+                    enrollmentId: locked.enrollmentId,
+                    adminId,
+                    gatewayStatus,
+                },
+                'Admin re-verify: gateway reported payment failure'
+            );
+        }
+        // Gateway pending/review/other: leave payment state unchanged
+
+        await session.commitTransaction();
+        await flushPaymentNotify(notify);
+
+        Sentry.captureMessage('Admin-initiated payment re-verify', {
+            level: 'info',
+            tags: { paymentStatus: locked.status, transactionId },
+            extra: { adminId, reason: reason.trim(), gatewayStatus },
+        });
+
+        await recordAudit({
+            actor: adminId,
+            action: 'payment.admin_reverify',
+            targetType: 'Payment',
+            targetId: locked._id?.toString(),
+            metadata: {
+                transactionId,
+                from: payment.status,
+                to: locked.status,
+                gatewayStatus,
+                reason: reason.trim(),
+            },
+        });
+
+        return {
+            payment: locked,
+            enrollment: locked.enrollmentRef
+                ? await EnrollmentModel.findById(locked.enrollmentRef).lean()
+                : null,
+        };
     } catch (error) {
         await session.abortTransaction();
         throw error;
@@ -1349,8 +2007,11 @@ const mapSslGatewayStatus = (rawStatus?: string): Status | null => {
 
 const verifyPaymentForCurrentUser = async (transactionId: string, userId: string) => {
     const payment = await PaymentModel.findOne({
-        transactionId,
         userId,
+        $or: [
+            { transactionId },
+            { 'gatewayResponse.supersededTranIds': transactionId },
+        ],
     }).lean().populate({
         path: 'batchId',
         populate: {
@@ -1391,12 +2052,19 @@ export const PaymentService = {
     updatePaymentWithEnrollStatus,
     checkPaymentStatus,
     finalizeSSLCommerzPayment,
+    handleCancelPayment,
+    handleFailPayment,
+    markPaymentExpired,
     updatePayment,
     getMyPayments,
     initiateSSLCommerzPayment,
     verifyManualPayment,
+    reVerifyPaymentWithGateway,
+    failEnrollment,
     verifyWebhookSignature,
     getStatusCallbackKey,
     mapSslGatewayStatus,
     verifyPaymentForCurrentUser,
+    activateEnrollmentForPayment,
+    settlePaymentSuccess,
 };

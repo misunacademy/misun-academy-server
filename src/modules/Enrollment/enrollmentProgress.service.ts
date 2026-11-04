@@ -2,6 +2,7 @@ import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { BatchModel } from '../Batch/batch.model.js';
 import { EnrollmentModel } from './enrollment.model.js';
+import { PaymentModel } from '../Payment/payment.model.js';
 import { ProgressStatus, EnrollmentStatus } from '../../types/common.js';
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../../errors/ApiError.js';
@@ -57,8 +58,18 @@ export const initializeModuleProgress = async (enrollmentId: string) => {
 };
 
 export const getUserEnrollments = async (userId: string, status?: EnrollmentStatus) => {
+    if (status === EnrollmentStatus.PaymentFailed || status === EnrollmentStatus.Expired) {
+        return [];
+    }
+
     const query: any = { userId };
-    if (status) query.status = status;
+    if (status) {
+        query.status = status;
+    } else {
+        query.status = {
+            $nin: [EnrollmentStatus.PaymentFailed, EnrollmentStatus.Expired],
+        };
+    }
 
     const enrollments = await EnrollmentModel.find(query)
         .populate({
@@ -69,6 +80,25 @@ export const getUserEnrollments = async (userId: string, status?: EnrollmentStat
         .lean();
 
     const enrollmentIds = enrollments.map((e: any) => e._id);
+    // Attach latest payment status + expiry so the frontend can decide whether
+    // an unpaid enrollment is resumable (Pending + not expired) or should be
+    // treated as a fresh checkout (Cancel/Failed/Expired payment).
+    const latestPayments = await PaymentModel.aggregate([
+        { $match: { enrollmentRef: { $in: enrollmentIds } } },
+        { $sort: { createdAt: -1 } },
+        {
+            $group: {
+                _id: '$enrollmentRef',
+                status: { $first: '$status' },
+                expiresAt: { $first: '$expiresAt' },
+                transactionId: { $first: '$transactionId' },
+            },
+        },
+    ]);
+    const paymentByEnrollment = new Map(
+        (latestPayments as any[]).map((p) => [p._id?.toString(), p])
+    );
+
     const allModuleProgress = await ModuleProgressModel.find({ enrollmentId: { $in: enrollmentIds } }).lean();
     const progressByEnrollment: Record<string, any[]> = {};
     for (const mp of allModuleProgress as any[]) {
@@ -112,10 +142,15 @@ export const getUserEnrollments = async (userId: string, status?: EnrollmentStat
 
         const totalModules = modules.length;
         const completedModules = moduleProgress.filter((p: any) => p.status === ProgressStatus.Completed).length;
-        const overallProgress = totalModules > 0 ? Math.round((moduleProgress.reduce((sum: number, m: any) => sum + m.completionPercentage, 0) / totalModules)) : 0;
+        const overallProgress = totalModules > 0 ? Math.round((moduleProgress.reduce((sum: number, m: any) => sum + (m.completionPercentage || 0), 0) / totalModules)) : 0;
+
+        const latestPayment = paymentByEnrollment.get(key);
 
         return {
             ...enrollment,
+            latestPaymentStatus: latestPayment?.status ?? null,
+            latestPaymentExpiresAt: latestPayment?.expiresAt ?? null,
+            latestPaymentTransactionId: latestPayment?.transactionId ?? null,
             isCertificateAvailable: enrollment.batchId?.courseId?.isCertificateAvailable !== undefined
                 ? enrollment.batchId.courseId.isCertificateAvailable
                 : true,
@@ -124,11 +159,14 @@ export const getUserEnrollments = async (userId: string, status?: EnrollmentStat
     });
 };
 
-export const getEnrollmentDetails = async (enrollmentId: string, userId: string, isStaff = false) => {
-    // Staff (admin/support debugging) may view any enrollment; learners are
-    // scoped to their own rows.
-    const filter: Record<string, unknown> = isStaff ? { _id: enrollmentId } : { _id: enrollmentId, userId };
-    const enrollment = await EnrollmentModel.findOne(filter)
+
+export const getEnrollmentDetails = async (
+    enrollmentId: string,
+    userId: string,
+    isStaff = false,
+    role?: string
+) => {
+    const enrollment = await EnrollmentModel.findOne({ _id: enrollmentId })
         .populate({
             path: 'batchId',
             populate: [
@@ -140,6 +178,26 @@ export const getEnrollmentDetails = async (enrollmentId: string, userId: string,
         .lean();
 
     if (!enrollment) throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+
+    // Instructors are scoped to batches they teach; admins/superadmins see all
+    if (isStaff) {
+        if (role === 'instructor') {
+            const instructors = (enrollment as any).batchId?.instructors || [];
+            const teachesBatch = instructors.some(
+                (i: any) => (i.userId || i).toString() === userId
+            );
+            if (!teachesBatch) {
+                throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+            }
+        }
+    } else {
+        // Learners are scoped to their own rows. After .populate('userId'),
+        // enrollment.userId is an object, so compare _id.
+        const enrollmentUserId = (enrollment as any).userId?._id ?? (enrollment as any).userId;
+        if (String(enrollmentUserId) !== userId) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+        }
+    }
 
     const resolvedBatchId = (enrollment as any).batchId?._id ?? (enrollment as any).batchId;
     const resolvedCourseId = (enrollment as any).batchId?.courseId?._id ?? (enrollment as any).batchId?.courseId;

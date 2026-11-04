@@ -211,3 +211,4 @@ describe('CourseEnrollmentService.completeLesson — sequential locking (FLOW-01
         expect(user1Progress).toHaveLength(1);
     });
 });
+

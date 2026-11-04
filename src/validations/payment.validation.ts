@@ -13,11 +13,25 @@ export const verifyPaymentSchema = z.object({
 });
 
 const paymentStatusValues = Object.values(Status) as [Status, ...Status[]];
+const adminPaymentStatusValues = [
+    Status.Pending,
+    Status.Failed,
+    Status.Review,
+    Status.Risk,
+    Status.Cancel,
+] as [Status, ...Status[]];
 
 export const updatePaymentStatusSchema = z.object({
     body: z.object({
-        status: z.enum(paymentStatusValues),
+        status: z.enum(adminPaymentStatusValues),
+        reason: z.string().trim().min(1).max(500),
         transactionId: z.string().optional(),
+    }),
+});
+
+export const reVerifyPaymentSchema = z.object({
+    body: z.object({
+        reason: z.string().trim().min(1).max(500),
     }),
 });
 

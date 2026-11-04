@@ -97,6 +97,10 @@
       "description": "Payments endpoints"
     },
     {
+      "name": "privacy",
+      "description": "Privacy endpoints"
+    },
+    {
       "name": "profile",
       "description": "Profile endpoints"
     },
@@ -683,10 +687,6 @@
           {
             "bearerAuth": []
           }
-        ],
-        "x-required-roles": [
-          "admin",
-          "superadmin"
         ]
       },
       "put": {
@@ -833,6 +833,147 @@
         ]
       }
     },
+    "/api/v1/admin/lessons/lessons/{lessonId}/signed-url": {
+      "get": {
+        "tags": [
+          "admin-lessons"
+        ],
+        "operationId": "getAdminLessonsLessonsLessonIdSignedurl",
+        "summary": "GET admin/lessons/lessons/:lessonId/signed-url",
+        "description": "Auto-generated from src/modules/Lesson/lesson.routes.ts. Handler: LessonController.generateSignedVideoUrl.",
+        "parameters": [
+          {
+            "name": "lessonId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/StandardSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "oneOf": [
+                            {
+                              "$ref": "#/components/schemas/Lesson"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/Lesson"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/lessons/modules/{moduleId}/lessons": {
       "get": {
         "tags": [
@@ -971,10 +1112,6 @@
           {
             "bearerAuth": []
           }
-        ],
-        "x-required-roles": [
-          "admin",
-          "superadmin"
         ]
       },
       "post": {
@@ -11611,7 +11748,17 @@
         "operationId": "getBootcampMypurchases",
         "summary": "GET bootcamp/my-purchases",
         "description": "Auto-generated from src/modules/Bootcamp/bootcamp.routes.ts. Handler: BootcampCatalogController.getMyBootcampPurchases.",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "history",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "example": "string"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response",
@@ -16230,6 +16377,184 @@
                   "message": "Something went wrong",
                   "errorMessages": []
                 }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/course-enrollment/{courseId}/watch-time": {
+      "post": {
+        "tags": [
+          "course-enrollment"
+        ],
+        "operationId": "postCourseenrollmentCourseIdWatchtime",
+        "summary": "POST course-enrollment/:courseId/watch-time",
+        "description": "Auto-generated from src/modules/Enrollment/courseEnrollment.routes.ts. Handler: CourseEnrollmentController.recordWatchTime.",
+        "parameters": [
+          {
+            "name": "courseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/StandardSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "oneOf": [
+                            {
+                              "$ref": "#/components/schemas/Enrollment"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/Enrollment"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lastWatchedPosition": {
+                    "type": "number"
+                  },
+                  "lessonId": {
+                    "type": "string"
+                  },
+                  "moduleId": {
+                    "type": "string"
+                  },
+                  "watchTime": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "lastWatchedPosition",
+                  "lessonId",
+                  "moduleId",
+                  "watchTime"
+                ],
+                "additionalProperties": true
+              },
+              "example": {
+                "lastWatchedPosition": 1,
+                "lessonId": "66f1ad6b2f4d7e0d4f9d1234",
+                "moduleId": "66f1ad6b2f4d7e0d4f9d1234",
+                "watchTime": 1
               }
             }
           }
@@ -25909,6 +26234,173 @@
         ]
       }
     },
+    "/api/v1/payments/{tran_id}/re-verify": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "postPaymentsTranidReverify",
+        "summary": "POST payments/:tran_id/re-verify",
+        "description": "Auto-generated from src/modules/Payment/payment.routes.ts. Handler: PaymentController.reVerifyPaymentWithGateway.",
+        "parameters": [
+          {
+            "name": "tran_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/StandardSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "oneOf": [
+                            {
+                              "$ref": "#/components/schemas/Payment"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/Payment"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": true
+              },
+              "example": {
+                "reason": "string"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-roles": [
+          "admin",
+          "superadmin"
+        ]
+      }
+    },
     "/api/v1/payments/{tran_id}/status": {
       "put": {
         "tags": [
@@ -26050,16 +26542,21 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
                   "status": {
                     "type": "string"
                   }
                 },
                 "required": [
+                  "reason",
                   "status"
                 ],
                 "additionalProperties": true
               },
               "example": {
+                "reason": "string",
                 "status": "active"
               }
             }
@@ -27458,6 +27955,440 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/privacy/me/account": {
+      "delete": {
+        "tags": [
+          "privacy"
+        ],
+        "operationId": "deletePrivacyMeAccount",
+        "summary": "DELETE privacy/me/account",
+        "description": "Auto-generated from src/modules/Privacy/privacy.routes.ts. Handler: PrivacyController.deleteMyAccount.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/privacy/me/consent": {
+      "get": {
+        "tags": [
+          "privacy"
+        ],
+        "operationId": "getPrivacyMeConsent",
+        "summary": "GET privacy/me/consent",
+        "description": "Auto-generated from src/modules/Privacy/privacy.routes.ts. Handler: PrivacyController.getMyConsents.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "privacy"
+        ],
+        "operationId": "postPrivacyMeConsent",
+        "summary": "POST privacy/me/consent",
+        "description": "Auto-generated from src/modules/Privacy/privacy.routes.ts. Handler: PrivacyController.recordConsent.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/privacy/me/export": {
+      "get": {
+        "tags": [
+          "privacy"
+        ],
+        "operationId": "getPrivacyMeExport",
+        "summary": "GET privacy/me/export",
+        "description": "Auto-generated from src/modules/Privacy/privacy.routes.ts. Handler: PrivacyController.exportMyData.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/profile": {

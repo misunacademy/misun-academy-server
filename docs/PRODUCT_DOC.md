@@ -107,7 +107,7 @@ src/
 ## 5. Key flows
 
 1. **Sign-up → verify → learn:** `POST /auth/sign-up/email` → `sendVerificationEmail` (queued) → verify → auto-sign-in → `requireAuth` (emailVerified + status checks) → enroll.
-2. **Enrollment + payment:** create enrollment (`pending/payment-pending`) → SSLCommerz init (`tran_id = MA…`) → success/fail/cancel IPN + webhook → `checkPaymentStatus`/server validation via `SSL_VALIDATION_API` → activate enrollment in transaction → sync `Profile.enrollments` → confirmation/success/failure emails (brand-routed) + notification + audit log. Manual/grant/special-access paths bypass gateway for staff.
+2. **Enrollment + payment:** create enrollment (`pending/payment-pending`) → SSLCommerz init (`tran_id = MA…`) → success/fail/cancel IPN + webhook → `checkPaymentStatus`/server validation via `SSL_VALIDATION_API` → activate enrollment in transaction → sync `Profile.enrollments` → confirmation/success/failure emails (brand-routed) + notification + audit log. Manual/grant/special-access paths bypass gateway for staff. Failed/cancelled/expired attempts are terminal: learner APIs hide them, a retry starts a fresh enrollment+payment, and the hourly maintenance job hard-deletes them after `PAYMENT_ARTIFACT_RETENTION_DAYS` (default 7).
 3. **Learning:** batch must be `running` + enrollment `active` (`batchAccess`/`ownership`) → content delivery → lesson-complete → progress service updates lesson/module/course progress → certificate eligibility.
 4. **Quiz + gamification:** start attempt → submit (validated by `submitQuizSchema`) → `scoring.service` → Zames awarded (`zames.model`) → leaderboards (`all_time/monthly`).
 5. **Certificate:** request → eligibility check → issue → admin approve → `active`; public verify by ID; revoke path.

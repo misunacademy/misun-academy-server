@@ -16,6 +16,10 @@ export interface IUser {
     status: UserStatus;
     createdAt?: Date;
     updatedAt?: Date;
+    deletedAt?: Date;
+    deletedBy?: string;
+    deletionReason?: string;
+    anonymizedAt?: Date;
 }
 
 export interface IUserDocument extends IUser, Document {

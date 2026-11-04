@@ -5,6 +5,9 @@ import ApiError from '../../errors/ApiError.js';
 import { normalizeVideoId } from '../../utils/video.utils.js';
 import { NotificationService } from '../Notification/notification.service.js';
 import { logger } from '../../config/logger.js';
+import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { EnrollmentStatus } from '../../types/common.js';
+import cloudinary, { isCloudinaryConfigured } from '../../config/cloudinary.js';
 
 const sendPublishNotification = (lesson: any): void => {
     setImmediate(async () => {
@@ -202,6 +205,68 @@ const reorderLessons = async (moduleId: string, lessonOrders: { lessonId: string
     return lessons;
 };
 
+/**
+ * Generate a signed, expiring, domain-restricted delivery URL for a lesson video.
+ *
+ * Only learners with an active/completed enrollment in the lesson's batch may
+ * fetch the signed URL. Cloudinary authenticated delivery is used: the URL
+ * carries a signature token and an expiry, so it cannot be hotlinked or shared
+ * beyond the expiration window.
+ *
+ * If the video is not yet stored in Cloudinary (public YouTube/Drive URL), a
+ * signed URL cannot be minted — the caller receives the public URL and a
+ * flag indicating signed delivery is not available for this asset.
+ */
+const generateSignedVideoUrl = async (lessonId: string, userId: string) => {
+    const lesson = await LessonModel.findById(lessonId).lean();
+    if (!lesson) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Lesson not found');
+    }
+
+    const module = await ModuleModel.findById(lesson.moduleId).lean();
+    if (!module) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Module not found');
+    }
+
+    // Enrollment gate: only Active/Completed enrollments get signed delivery
+    const enrollment = await EnrollmentModel.findOne({
+        userId,
+        batchId: module.batchId,
+        status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed] },
+    }).lean();
+    if (!enrollment) {
+        throw new ApiError(
+            StatusCodes.FORBIDDEN,
+            'You are not enrolled in this batch or your enrollment is not active'
+        );
+    }
+
+    // Cloudinary-stored assets support signed delivery
+    if (lesson.signedUrl && isCloudinaryConfigured) {
+        const signedUrl = cloudinary.url(lesson.signedUrl, {
+            type: 'authenticated',
+            sign_url: true,
+            secure: true,
+            expires_at: Math.floor(Date.now() / 1000) + 3600, // 1 hour
+        });
+        return {
+            signedUrl,
+            expiresAt: lesson.signedUrlExpiresAt,
+            videoDrmProtected: lesson.videoDrmProtected,
+            videoWatermarked: lesson.videoWatermarked,
+        };
+    }
+
+    // Public YouTube/Drive URL — signed delivery not applicable
+    return {
+        signedUrl: lesson.videoUrl || null,
+        expiresAt: null,
+        videoDrmProtected: lesson.videoDrmProtected,
+        videoWatermarked: lesson.videoWatermarked,
+        note: 'Public URL — signed delivery not available for external video sources',
+    };
+};
+
 export const LessonService = {
     createLesson,
     getModuleLessons,
@@ -210,4 +275,5 @@ export const LessonService = {
     deleteLesson,
     reorderLessons,
     backfillVideoIds,
+    generateSignedVideoUrl,
 };

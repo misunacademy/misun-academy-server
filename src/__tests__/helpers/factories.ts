@@ -54,6 +54,8 @@ export const buildCourse = (adminId: mongoose.Types.ObjectId, overrides: Record<
 export const createCourse = async (adminId: mongoose.Types.ObjectId, overrides: Record<string, unknown> = {}) =>
   CourseModel.create(buildCourse(adminId, overrides));
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export const buildBatch = (
   courseId: mongoose.Types.ObjectId,
   overrides: Record<string, unknown> = {}
@@ -61,10 +63,11 @@ export const buildBatch = (
   courseId,
   title: 'Batch 1',
   batchNumber: 1,
-  startDate: new Date('2025-01-01'),
-  endDate: new Date('2025-06-01'),
-  enrollmentStartDate: new Date('2024-12-01'),
-  enrollmentEndDate: new Date('2025-03-01'),
+  // Relative dates keep fixtures valid no matter when the suite runs.
+  startDate: new Date(Date.now() + 7 * DAY_MS),
+  endDate: new Date(Date.now() + 180 * DAY_MS),
+  enrollmentStartDate: new Date(Date.now() - 30 * DAY_MS),
+  enrollmentEndDate: new Date(Date.now() + 90 * DAY_MS),
   price: 5000,
   status: BatchStatus.Upcoming,
   ...overrides,

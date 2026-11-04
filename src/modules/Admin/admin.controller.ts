@@ -81,7 +81,8 @@ const updateUserStatus = catchAsync(async (req: Request, res: Response) => {
 
 const deleteUser = catchAsync(async (req: Request, res: Response) => {
     const { id: actorId } = req.user as any;
-    await AdminService.deleteUser(firstParam(req.params.id), actorId);
+    const { deletionReason } = req.body as { deletionReason?: string };
+    await AdminService.deleteUser(firstParam(req.params.id), actorId, deletionReason);
 
     sendResponse(res, {
         statusCode: StatusCodes.OK,

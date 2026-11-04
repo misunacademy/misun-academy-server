@@ -2,7 +2,7 @@ import { Schema, model, Types } from 'mongoose';
 import { logger } from '../config/logger.js';
 
 export interface IAuditLog {
-    actor?: Types.ObjectId;
+    actor?: Types.ObjectId | string;
     actorRole?: string;
     action: string;
     targetType: string;
@@ -14,7 +14,7 @@ export interface IAuditLog {
 
 const auditLogSchema = new Schema<IAuditLog>(
     {
-        actor: { type: Schema.Types.ObjectId, ref: 'User' },
+        actor: { type: Schema.Types.Mixed },
         actorRole: { type: String },
         action: { type: String, required: true, index: true },
         targetType: { type: String, required: true },

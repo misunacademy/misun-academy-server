@@ -26,6 +26,10 @@ const userSchema = new Schema<IUserDocument>(
             enum: Object.values(UserStatus),
             default: UserStatus.Active,
         },
+        deletedAt: { type: Date },
+        deletedBy: { type: String },
+        deletionReason: { type: String },
+        anonymizedAt: { type: Date },
     },
     {
         timestamps: true,
@@ -56,5 +60,6 @@ userSchema.methods.comparePassword = async function (password: string): Promise<
 // Indexes
 userSchema.index({ role: 1, status: 1 });
 userSchema.index({ name: 1 });
+userSchema.index({ status: 1, deletedAt: 1 });
 
 export const UserModel = model<IUserDocument>('User', userSchema);

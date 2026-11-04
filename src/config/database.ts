@@ -2,10 +2,22 @@ import mongoose from "mongoose";
 import { initializeAuth } from "./betterAuth.js";
 import env from "./env.js";
 import { logger } from "./logger.js";
+import { EnrollmentCounterModel } from "../modules/Enrollment/enrollmentCounter.model.js";
+import { StudentIdCounterModel } from "../modules/User/studentIdCounter.model.js";
 
 const CONNECT_RETRY_DELAYS_MS = [2000, 4000, 8000, 16000, 30000];
 
 let isConnected = false;
+
+const ensureCollection = async (model: { createCollection: () => Promise<unknown> }) => {
+    try {
+        await model.createCollection();
+    } catch (error) {
+        if ((error as { code?: number })?.code !== 48) {
+            throw error;
+        }
+    }
+};
 
 // Reset the cached flag when the driver drops: otherwise a post-connect
 // network partition makes every later connectDB() a silent no-op.
@@ -35,6 +47,14 @@ export const connectDB = async (poolSize = 10) => {
             });
             isConnected = db.connections[0].readyState === 1;
             logger.info('MongoDB connected');
+
+            // Counter upserts are used by enrollment transactions. Creating
+            // these namespaces before traffic prevents MongoDB from aborting a
+            // transaction when a fresh deployment has no counter documents.
+            await Promise.all([
+                ensureCollection(EnrollmentCounterModel),
+                ensureCollection(StudentIdCounterModel),
+            ]);
 
             await initializeAuth();
             logger.info('Better Auth initialized');

@@ -391,3 +391,55 @@ describe('RecordingService.incrementViewCount', () => {
         expect(updated?.viewCount).toBe(1);
     });
 });
+
+describe('Fix 15: Content protection — signed URLs for recordings', () => {
+    it('recording supports signedUrl field for expiring, domain-restricted delivery', async () => {
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+
+        const recording = await RecordingModel.create({
+            courseId: course._id,
+            batchId: batch._id,
+            title: 'Protected Recording',
+            videoSource: 'youtube',
+            videoId: 'dQw4w9WgXcQ',
+            videoUrl: 'https://youtube.com/watch?v=dQw4w9WgXcQ',
+            duration: 600,
+            recordingDrmProtected: true,
+            recordingWatermarked: true,
+            signedUrl: 'https://res.cloudinary.com/demo/video/upload/signed/xyz789',
+            signedUrlExpiresAt: new Date(Date.now() + 3600000),
+            sessionDate: new Date(),
+            createdBy: admin._id,
+        });
+
+        expect(recording.recordingDrmProtected).toBe(true);
+        expect(recording.recordingWatermarked).toBe(true);
+        expect(recording.signedUrl).toContain('cloudinary');
+        expect(recording.signedUrlExpiresAt).toBeDefined();
+    });
+
+    it('recording defaults signedUrl fields to undefined when not provided', async () => {
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+
+        const recording = await RecordingModel.create({
+            courseId: course._id,
+            batchId: batch._id,
+            title: 'Public Recording',
+            videoSource: 'youtube',
+            videoId: 'dQw4w9WgXcQ',
+            videoUrl: 'https://youtube.com/watch?v=dQw4w9WgXcQ',
+            duration: 600,
+            sessionDate: new Date(),
+            createdBy: admin._id,
+        });
+
+        expect(recording.recordingDrmProtected).toBe(false);
+        expect(recording.recordingWatermarked).toBe(false);
+        expect(recording.signedUrl).toBeUndefined();
+        expect(recording.signedUrlExpiresAt).toBeUndefined();
+    });
+});

@@ -37,9 +37,7 @@ export const initializeAuth = async () => {
     appName: 'Misun Academy',
 
     // Enable experimental features for better performance
-    experimental: {
-      joins: true, // 2-3x performance improvement for MongoDB queries
-    },
+    experimental: {},
 
     emailAndPassword: {
       enabled: true,

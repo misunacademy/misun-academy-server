@@ -12,9 +12,12 @@ import {
     createModuleProgress,
 } from '../helpers/factories.js';
 import { CertificateService } from '../../modules/Certificate/certificate.service.js';
+import { EnrollmentService } from '../../modules/Enrollment/enrollment.service.js';
 import { ProgressService } from '../../modules/Progress/progress.service.js';
 import { UserModel } from '../../modules/User/user.model.js';
 import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
+import { CertificateModel } from '../../modules/Certificate/certificate.model.js';
+import { EnrollmentStatusHistoryModel } from '../../modules/Enrollment/enrollmentStatusHistory.model.js';
 import { CertificateStatus, EnrollmentStatus, ProgressStatus } from '../../types/common.js';
 
 import '../../modules/Instructor/instructor.model.js';
@@ -367,6 +370,11 @@ describe('CertificateService.revokeCertificate', () => {
 
         expect(revoked.status).toBe(CertificateStatus.Revoked);
         expect(revoked.revokedReason).toBe('Misconduct');
+
+        const updatedEnrollment = await EnrollmentModel.findById(enrollment._id).lean();
+        expect(updatedEnrollment?.status).toBe(EnrollmentStatus.Completed);
+        expect(updatedEnrollment?.certificateIssued).toBe(false);
+        expect(updatedEnrollment?.completedAt).toBeDefined();
     });
 
     it('rejects if already revoked', async () => {
@@ -459,5 +467,138 @@ describe('CertificateService.verifyCertificate — orphaned refs', () => {
         const result = await CertificateService.verifyCertificate(pending.certificateId);
         expect(result.isValid).toBe(false);
         expect(result.status).toBe('unverifiable');
+    });
+
+    describe('CertificateService concurrent guard', () => {
+        it('approve twice concurrently — exactly one succeeds', async () => {
+            const user = await createUser();
+            const course = await createCourse(admin._id, { isCertificateAvailable: true });
+            const batch = await createBatch(course._id);
+            const enrollment = await createActiveEnrollment(user._id, batch._id);
+            const mod = await createModule(course._id, batch._id, 0);
+            await createModuleProgress(enrollment._id, mod._id, {
+                status: ProgressStatus.Completed,
+                completionPercentage: 100,
+            });
+
+            const cert = await CertificateService.requestCertificate(
+                enrollment._id.toString(), user._id.toString()
+            );
+
+            const results = await Promise.allSettled([
+                CertificateService.approveCertificate(cert.certificateId, admin._id.toString()),
+                CertificateService.approveCertificate(cert.certificateId, admin._id.toString()),
+            ]);
+
+            const fulfilled = results.filter((r) => r.status === 'fulfilled').length;
+            expect(fulfilled).toBe(1);
+
+            const persisted = await CertificateModel.findById(cert._id).lean();
+            expect(persisted?.status).toBe(CertificateStatus.Active);
+        });
+
+        it('revoke twice concurrently — exactly one succeeds', async () => {
+            const user = await createUser();
+            const course = await createCourse(admin._id, { isCertificateAvailable: true });
+            const batch = await createBatch(course._id);
+            const enrollment = await createActiveEnrollment(user._id, batch._id);
+            const mod = await createModule(course._id, batch._id, 0);
+            await createModuleProgress(enrollment._id, mod._id, {
+                status: ProgressStatus.Completed,
+                completionPercentage: 100,
+            });
+
+            const cert = await CertificateService.issueCertificate(
+                enrollment._id.toString(), admin._id.toString()
+            );
+
+            const results = await Promise.allSettled([
+                CertificateService.revokeCertificate(cert.certificateId, 'Rev1', admin._id.toString()),
+                CertificateService.revokeCertificate(cert.certificateId, 'Rev2', admin._id.toString()),
+            ]);
+
+            const fulfilled = results.filter((r) => r.status === 'fulfilled').length;
+            expect(fulfilled).toBe(1);
+
+            const persisted = await CertificateModel.findById(cert._id).lean();
+            expect(persisted?.status).toBe(CertificateStatus.Revoked);
+        });
+
+        it('revoke then reissue creates a new certificate', async () => {
+            const user = await createUser();
+            const course = await createCourse(admin._id, { isCertificateAvailable: true });
+            const batch = await createBatch(course._id);
+            const enrollment = await createActiveEnrollment(user._id, batch._id);
+            const mod = await createModule(course._id, batch._id, 0);
+            await createModuleProgress(enrollment._id, mod._id, {
+                status: ProgressStatus.Completed,
+                completionPercentage: 100,
+            });
+
+            const cert = await CertificateService.issueCertificate(
+                enrollment._id.toString(), admin._id.toString()
+            );
+            await CertificateService.revokeCertificate(
+                cert.certificateId, 'Revoked', admin._id.toString()
+            );
+
+            const reissued = await CertificateService.requestCertificate(
+                enrollment._id.toString(), user._id.toString()
+            );
+            expect(reissued.status).toBe(CertificateStatus.Pending);
+            expect(reissued.certificateId).not.toBe(cert.certificateId);
+        });
+
+        it('approve on non-completable enrollment is rejected', async () => {
+            const user = await createUser();
+            const course = await createCourse(admin._id, { isCertificateAvailable: true });
+            const batch = await createBatch(course._id);
+            const enrollment = await createActiveEnrollment(user._id, batch._id);
+            const mod = await createModule(course._id, batch._id, 0);
+            await createModuleProgress(enrollment._id, mod._id, {
+                status: ProgressStatus.Completed,
+                completionPercentage: 100,
+            });
+
+            const cert = await CertificateService.requestCertificate(
+                enrollment._id.toString(), user._id.toString()
+            );
+
+            // Suspend the enrollment so it's no longer Active -> CAS fails
+            await EnrollmentService.updateEnrollmentStatus(
+                enrollment._id.toString(),
+                EnrollmentStatus.Suspended,
+                'Disciplinary action',
+                { id: admin._id.toString(), role: 'admin' }
+            );
+
+            await expect(
+                CertificateService.approveCertificate(cert.certificateId, admin._id.toString())
+            ).rejects.toMatchObject({ statusCode: 409 });
+        });
+
+        it('writes status history on certificate approve', async () => {
+            const user = await createUser();
+            const course = await createCourse(admin._id, { isCertificateAvailable: true });
+            const batch = await createBatch(course._id);
+            const enrollment = await createActiveEnrollment(user._id, batch._id);
+            const mod = await createModule(course._id, batch._id, 0);
+            await createModuleProgress(enrollment._id, mod._id, {
+                status: ProgressStatus.Completed,
+                completionPercentage: 100,
+            });
+
+            const cert = await CertificateService.requestCertificate(
+                enrollment._id.toString(), user._id.toString()
+            );
+            await CertificateService.approveCertificate(cert.certificateId, admin._id.toString());
+
+            const history = await EnrollmentStatusHistoryModel.find({
+                enrollmentId: enrollment._id,
+                to: EnrollmentStatus.Completed,
+            }).lean();
+
+            expect(history.length).toBeGreaterThan(0);
+        });
     });
 });
