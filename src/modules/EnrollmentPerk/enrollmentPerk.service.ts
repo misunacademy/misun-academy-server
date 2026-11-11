@@ -14,7 +14,6 @@ import { BatchStatus, EnrollmentStatus, Status } from '../../types/common.js';
 import { deriveCourseBrand } from '../../utils/courseBrand.js';
 import {
     IEnrollmentPerkRule,
-    IPerkBenefit,
     PerkBenefitType,
 } from './enrollmentPerk.interface.js';
 import crypto from 'crypto';
