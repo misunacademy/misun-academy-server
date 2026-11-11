@@ -29,6 +29,7 @@ import { BootcampRoutes } from '../modules/Bootcamp/bootcamp.routes.js';
 import { AnnouncementRoutes } from '../modules/Announcement/announcement.routes.js';
 import { RefundRoutes } from '../modules/Refund/refund.routes.js';
 import { PrivacyRoutes } from '../modules/Privacy/privacy.routes.js';
+import { EnrollmentPerkRoutes } from '../modules/EnrollmentPerk/enrollmentPerk.routes.js';
 
 
 const router = express.Router();
@@ -150,6 +151,10 @@ const moduleRoutes = [
     {
         path: '/privacy',
         route: PrivacyRoutes,
+    },
+    {
+        path: '/enrollment-perks',
+        route: EnrollmentPerkRoutes,
     },
 ];
 
