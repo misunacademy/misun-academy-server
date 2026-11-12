@@ -1,9 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
-import { Ratelimit } from '@upstash/ratelimit';
-import { Redis } from '@upstash/redis';
-import env from '../config/env.js';
-import { logger } from '../config/logger.js';
 
 interface RateLimiterOptions {
     prefix: string;
@@ -13,13 +9,6 @@ interface RateLimiterOptions {
     keyByUser?: boolean;
 }
 
-const upstashUrl = env.UPSTASH_REDIS_REST_URL;
-const upstashToken = env.UPSTASH_REDIS_REST_TOKEN;
-
-const redis = upstashUrl && upstashToken
-    ? new Redis({ url: upstashUrl, token: upstashToken })
-    : null;
-
 // NOTE on keyByUser: app-level limiters (app.ts) run before auth, so they
 // always fall back to IP. Route-level limiters mounted AFTER requireAuth
 // (e.g. chat, manual enrollment) do see req.user and key by user correctly.
@@ -27,63 +16,25 @@ const requestKey = (req: Request, keyByUser?: boolean): string => {
     if (keyByUser && (req as any).user?.id) {
         return `user:${(req as any).user.id}`;
     }
-    return `ip:${req.ip || 'unknown'}`;
+    return req.ip || 'unknown';
 };
 
 export const createRateLimiter = (options: RateLimiterOptions) => {
-    const { prefix, max, windowMs, message, keyByUser } = options;
-
-    if (redis) {
-        const limiter = new Ratelimit({
-            redis,
-            limiter: Ratelimit.slidingWindow(max, `${windowMs} ms`),
-            prefix: `rl:${prefix}`,
-            analytics: false,
-        });
-
-        return async (req: Request, res: Response, next: NextFunction) => {
-            try {
-                const { success } = await limiter.limit(requestKey(req, keyByUser));
-                if (!success) {
-                    res.setHeader('Retry-After', String(Math.ceil(windowMs / 1000)));
-                    return res.status(429).json({
-                        success: false,
-                        message: message || 'Too many requests, please try again later',
-                    });
-                }
-                return next();
-            } catch (error) {
-                // Fail-closed in production: a silent Redis outage must not
-                // silently disable all rate limiting. In development/testing
-                // we fall back to allowing the request so local dev isn't
-                // broken by a missing Redis.
-                logger.error(error, `Rate limiter backend failure (${prefix})`);
-                if (env.NODE_ENV === 'production') {
-                    return res.status(503).json({
-                        success: false,
-                        message: 'Rate limiting temporarily unavailable',
-                    });
-                }
-                return next();
-            }
-        };
-    }
-
-    // In production without Redis, fail closed as well
-    if (env.NODE_ENV === 'production') {
-        return async (_req: Request, res: Response, _next: NextFunction) => {
-            return res.status(503).json({
-                success: false,
-                message: 'Rate limiting temporarily unavailable',
-            });
-        };
-    }
+    const { max, windowMs, message, keyByUser } = options;
 
     return rateLimit({
         windowMs,
         max,
-        message,
+        message: message || 'Too many requests, please try again later',
         standardHeaders: true,
         legacyHeaders: false,
+        keyGenerator: (req: Request) => requestKey(req, keyByUser),
+        handler: (_req: Request, res: Response, _next: NextFunction) => {
+            res.setHeader('Retry-After', String(Math.ceil(windowMs / 1000)));
+            res.status(429).json({
+                success: false,
+                message: message || 'Too many requests, please try again later',
+            });
+        },
     });
 };
