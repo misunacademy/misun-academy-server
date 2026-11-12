@@ -135,7 +135,7 @@ export const sendPaymentReviewEmail = async (student: any, courseName: string, t
     await queueEmail(student.email, 'Payment Under Review', html, { eventType: 'payment_review', eventId: transactionId });
 };
 
-export const sendPaymentFailedEmail = async (student: any, courseName: string, reason: string) => {
+export const sendPaymentFailedEmail = async (student: any, courseName: string, reason: string, transactionId?: string) => {
     const html = getEmailTemplate(`
         <div class="header" style="background: #ef4444;">
             <h1>Payment Failed</h1>
@@ -148,7 +148,7 @@ export const sendPaymentFailedEmail = async (student: any, courseName: string, r
         </div>
     `, "#ef4444");
 
-    await queueEmail(student.email, 'Payment Failed', html, { priority: 'high' });
+    await queueEmail(student.email, 'Payment Failed', html, { priority: 'high', eventType: 'payment_failed', eventId: transactionId });
 };
 
 

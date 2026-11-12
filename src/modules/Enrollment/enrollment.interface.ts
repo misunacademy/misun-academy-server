@@ -9,12 +9,17 @@ export interface IEnrollment {
     paymentId?: Types.ObjectId;
     status: EnrollmentStatus;
     statusChangeReason?: string;
+    archivedAt?: Date;
     accessType?: 'standard' | 'special';
     enrolledAt: Date;
     completedAt?: Date;
     certificateIssued: boolean;
     certificateId?: string;
     // Lifetime access - no expiry unless user is banned/suspended
+    deferUntil?: Date;
+    accessExtendedUntil?: Date;
+    transferredToBatchId?: Types.ObjectId;
+    transferredFromBatchId?: Types.ObjectId;
     createdAt?: Date;
     updatedAt?: Date;
 }

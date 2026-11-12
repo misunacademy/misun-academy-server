@@ -220,6 +220,7 @@ export const sendPaymentFailedEmail = async (
   student: any,
   courseName: string,
   reason: string,
+  transactionId?: string,
 ) => {
   const html = getEmailTemplate(
     `
@@ -236,7 +237,11 @@ export const sendPaymentFailedEmail = async (
     "#ef4444",
   );
 
-  await queueEmail(student.email, "Payment Failed", html, { priority: "high" });
+  await queueEmail(student.email, "Payment Failed", html, {
+    priority: "high",
+    eventType: "payment_failed",
+    eventId: transactionId,
+  });
 };
 
 // --- EMPLOYEE ---
@@ -468,6 +473,33 @@ export const sendCertificateIssuedEmail = async (
 
   await queueEmail(studentEmail, "Your Certificate is Ready!", html, {
     priority: "normal",
+  });
+};
+
+export const sendCertificateRevokedEmail = async (
+  studentEmail: string,
+  studentName: string,
+  courseName: string,
+  certificateId: string,
+  reason: string,
+) => {
+  const html = getEmailTemplate(
+    `
+        <div class="header" style="background: linear-gradient(to right, #dc2626, #b91c1c);">
+            <h1>🚫 Certificate Revoked / Access Removed</h1>
+        </div>
+        <div class="content">
+            <p>Hello <strong>${studentName}</strong>,</p>
+            <p>Your certificate for <strong>${courseName}</strong> (Certificate ID: <strong>${certificateId}</strong>) has been revoked.</p>
+            <p><strong>Reason:</strong> ${reason}</p>
+            <p>Your access to course content has been removed. If you believe this is an error, please contact support.</p>
+        </div>
+    `,
+    "#dc2626",
+  );
+
+  await queueEmail(studentEmail, "Certificate Revoked — Access Removed", html, {
+    priority: "high",
   });
 };
 

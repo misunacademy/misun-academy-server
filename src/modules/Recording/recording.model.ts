@@ -56,6 +56,21 @@ const recordingSchema = new Schema<IRecording>(
             type: Boolean,
             default: false,
         },
+        // Content protection: signed, expiring, domain-restricted delivery
+        signedUrl: {
+            type: String,
+        },
+        signedUrlExpiresAt: {
+            type: Date,
+        },
+        recordingDrmProtected: {
+            type: Boolean,
+            default: false,
+        },
+        recordingWatermarked: {
+            type: Boolean,
+            default: false,
+        },
         viewCount: {
             type: Number,
             default: 0,

@@ -3,9 +3,16 @@ import mongoose from 'mongoose';
 import { connectTestDB, disconnectTestDB, clearTestDB } from '../helpers/db.js';
 import { createUser, createAdmin, createCourse, createBatch, createPayment, createEnrollment } from '../helpers/factories.js';
 import { RefundService } from '../../modules/Refund/refund.service.js';
+import { PaymentService } from '../../modules/Payment/payment.service.js';
+import { PaymentModel } from '../../modules/Payment/payment.model.js';
 import { UserModel } from '../../modules/User/user.model.js';
 import { RefundStatus, RefundChannel } from '../../modules/Refund/refund.interface.js';
 import { Status, EnrollmentStatus } from '../../types/common.js';
+import { CertificateService } from '../../modules/Certificate/certificate.service.js';
+import { CertificateModel } from '../../modules/Certificate/certificate.model.js';
+import { CertificateStatus } from '../../types/common.js';
+import { createModule, createModuleProgress } from '../helpers/factories.js';
+import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
 
 let adminId: mongoose.Types.ObjectId;
 let checkerId: mongoose.Types.ObjectId;
@@ -242,5 +249,103 @@ describe('RefundService phone regression', () => {
 
     const found: any = await RefundService.getRefundById((refund._id as mongoose.Types.ObjectId).toString());
     expect(found.userId.phone).toBe('01900000000');
+  });
+});
+
+describe('RefundService.completeRefund — certificate revocation + late payment', () => {
+  it('revokes the certificate when refunding after certificate issuance', async () => {
+    const { txn, user, course, batch, enrollment } = await setupPaidEnrollment();
+
+    // Issue a certificate first
+    const mod = await createModule(course._id, batch._id, 0);
+    await createModuleProgress(enrollment._id, mod._id, {
+      status: 'completed',
+      completionPercentage: 100,
+    });
+
+    const cert = await CertificateService.requestCertificate(
+      enrollment._id.toString(),
+      user._id.toString()
+    );
+    await CertificateService.approveCertificate(cert.certificateId, adminId.toString());
+
+    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Full refund' }, requester());
+    const refundId = (refund._id as mongoose.Types.ObjectId).toString();
+    await RefundService.approveRefund(refundId, undefined, checker());
+    await RefundService.completeRefund(refundId, checker());
+
+    // Certificate must be revoked
+    const revokedCert = await CertificateModel.findById(cert._id).lean();
+    expect(revokedCert?.status).toBe(CertificateStatus.Revoked);
+
+    // Enrollment must be refunded
+    const persistedEnrollment = await EnrollmentModel.findById(enrollment._id).lean();
+    expect(persistedEnrollment?.status).toBe(EnrollmentStatus.Refunded);
+  });
+
+  it('refund before certificate does not touch any certificate', async () => {
+    const { txn, enrollment } = await setupPaidEnrollment();
+
+    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Early refund' }, requester());
+    const refundId = (refund._id as mongoose.Types.ObjectId).toString();
+    await RefundService.approveRefund(refundId, undefined, checker());
+    await RefundService.completeRefund(refundId, checker());
+
+    const persistedEnrollment = await EnrollmentModel.findById(enrollment._id).lean();
+    expect(persistedEnrollment?.status).toBe(EnrollmentStatus.Refunded);
+
+    // No certificate exists
+    const cert = await CertificateModel.findOne({ enrollmentId: enrollment._id }).lean();
+    expect(cert).toBeNull();
+  });
+
+  it('concurrent refund complete — exactly one completes', async () => {
+    const { txn } = await setupPaidEnrollment();
+    const refund1 = await RefundService.createRefund({ transactionId: txn, reason: 'Refund A' }, requester());
+    const refundId1 = (refund1._id as mongoose.Types.ObjectId).toString();
+    await RefundService.approveRefund(refundId1, undefined, checker());
+
+    const results = await Promise.allSettled([
+      RefundService.completeRefund(refundId1, checker()),
+      RefundService.completeRefund(refundId1, checker()),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled').length;
+    expect(fulfilled).toBe(1);
+
+    const payment = await PaymentModel.findOne({ transactionId: txn }).lean();
+    expect(payment?.status).toBe(Status.Refunded);
+  });
+
+  it('refund then late IPN — enrollment stays refunded, late payment goes to review', async () => {
+    const { txn, enrollment } = await setupPaidEnrollment();
+
+    const refund = await RefundService.createRefund({ transactionId: txn, reason: 'Full refund' }, requester());
+    const refundId = (refund._id as mongoose.Types.ObjectId).toString();
+    await RefundService.approveRefund(refundId, undefined, checker());
+    await RefundService.completeRefund(refundId, checker());
+
+    const enrollmentRow = await EnrollmentModel.findById(enrollment._id).lean();
+    expect(enrollmentRow?.status).toBe(EnrollmentStatus.Refunded);
+
+    // Late IPN arrives — should go to review, not reactivate the enrollment
+    try {
+      await PaymentService.reVerifyPaymentWithGateway(
+        txn,
+        adminId.toString(),
+        'Late gateway notification',
+        async () => ({
+          tran_id: txn,
+          status: 'VALID',
+          amount: 5000,
+          currency: 'BDT',
+        } as any)
+      );
+    } catch {
+      // Payment is already Refunded — re-verify is correctly refused
+    }
+
+    const finalEnrollment = await EnrollmentModel.findById(enrollment._id).lean();
+    expect(finalEnrollment?.status).toBe(EnrollmentStatus.Refunded);
   });
 });

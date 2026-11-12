@@ -109,8 +109,8 @@ describe('CourseService.getCourseById — curriculum assembly', () => {
         const admin = await createAdmin();
         const course = await createCourse(admin._id);
         const batch = await createBatch(course._id);
-        const m1 = await createModule(course._id, batch._id, 1);
-        const m2 = await createModule(course._id, batch._id, 2);
+        const m1 = await createModule(course._id, batch._id, 1, { status: 'published' });
+        const m2 = await createModule(course._id, batch._id, 2, { status: 'published' });
 
         await LessonModel.create([
             { moduleId: m1._id, title: 'B-lesson', type: LessonType.Video, orderIndex: 2, videoSource: 'youtube', videoId: 'vidB', videoDuration: 100 },
@@ -142,7 +142,7 @@ describe('CourseService.getCourseById — curriculum assembly', () => {
         const admin = await createAdmin();
         const course = await createCourse(admin._id);
         const batch = await createBatch(course._id);
-        const m1 = await createModule(course._id, batch._id, 1);
+        const m1 = await createModule(course._id, batch._id, 1, { status: 'published' });
         await LessonModel.create({
             moduleId: m1._id, title: 'YT', type: LessonType.Video, orderIndex: 1,
             videoSource: 'youtube', videoId: 'abc123XYZ', videoDuration: 600,
@@ -159,7 +159,7 @@ describe('CourseService.getCourseById — curriculum assembly', () => {
         const admin = await createAdmin();
         const course = await createCourse(admin._id);
         const batch = await createBatch(course._id);
-        const m1 = await createModule(course._id, batch._id, 1);
+        const m1 = await createModule(course._id, batch._id, 1, { status: 'published' });
         await LessonModel.create({
             moduleId: m1._id, title: 'YT', type: LessonType.Video, orderIndex: 1,
             videoSource: 'youtube', videoId: 'abc123XYZ', videoDuration: 600,
@@ -180,9 +180,9 @@ describe('CourseService.getCourseById — curriculum assembly', () => {
         const course = await createCourse(admin._id);
         const batchA = await createBatch(course._id);
         const batchB = await createBatch(course._id, { batchNumber: 2, title: 'Batch 2' });
-        await createModule(course._id, batchA._id, 1);
-        await createModule(course._id, batchB._id, 1);
-        await createModule(course._id, batchB._id, 2);
+        await createModule(course._id, batchA._id, 1, { status: 'published' });
+        await createModule(course._id, batchB._id, 1, { status: 'published' });
+        await createModule(course._id, batchB._id, 2, { status: 'published' });
 
         const scoped = await CourseService.getCourseById(course._id.toString(), { batchId: batchB._id.toString() });
         const unscoped = await CourseService.getCourseById(course._id.toString());
@@ -328,7 +328,7 @@ describe('CourseService.getClassroomCourse — enrollment gate', () => {
         const admin = await createAdmin();
         const course = await createCourse(admin._id);
         const batch = await createBatch(course._id);
-        const m1 = await createModule(course._id, batch._id, 1);
+        const m1 = await createModule(course._id, batch._id, 1, { status: 'published' });
         await LessonModel.create({
             moduleId: m1._id, title: 'YT', type: LessonType.Video, orderIndex: 1,
             videoSource: 'youtube', videoId: 'abc123XYZ', videoDuration: 600,

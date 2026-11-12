@@ -18,6 +18,7 @@ const notificationSchema = new Schema<INotificationDocument>(
         'payment_pending',
         'payment_success',
         'payment_failed',
+        'payment_review',
         'payment_refunded',
         'access_granted',
         'quiz_published',

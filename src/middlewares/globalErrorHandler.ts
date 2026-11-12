@@ -94,6 +94,8 @@ const globalErrorHandler: ErrorRequestHandler = (
         message,
         errorMessages,
         correlationId,
+        ...(error instanceof ApiError && error.code ? { code: error.code } : {}),
+        ...(error instanceof ApiError && error.details ? { details: error.details } : {}),
         sentryEventId: statusCode >= 500 ? (res as { sentry?: string }).sentry : undefined,
         stack: env.NODE_ENV === 'development' ? error?.stack : undefined,
     });

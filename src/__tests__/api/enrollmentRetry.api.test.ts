@@ -136,14 +136,13 @@ describe('POST /api/v1/enrollments — retry after an abandoned gateway attempt'
     const enrollment = await EnrollmentModel.create({
       userId: learner.id,
       batchId: batch._id,
-      status: EnrollmentStatus.Pending,
-      enrollmentId: 'MA-3202600001',
+      status: EnrollmentStatus.PaymentPending,
     });
 
     await PaymentModel.create({
       userId: learner.id,
       batchId: batch._id,
-      enrollmentId: 'MA-3202600001',
+      enrollmentRef: enrollment._id,
       transactionId: OLD_TRAN_ID,
       amount: 5000,
       currency: 'BDT',
@@ -153,6 +152,7 @@ describe('POST /api/v1/enrollments — retry after an abandoned gateway attempt'
         gatewayPageURL: 'https://sandbox.sslcommerz.com/old-session',
         cardType: 'VISA-Debit',
       },
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
     });
 
     const firstRetry = await request(app)
@@ -164,13 +164,12 @@ describe('POST /api/v1/enrollments — retry after an abandoned gateway attempt'
     expect(firstRetry.status).toBe(200);
     expect(firstRetry.body.success).toBe(true);
     expect(firstRetry.body.data.paymentUrl).toContain('sslcommerz.com');
-    expect(firstRetry.body.data.enrollmentId).toBe('MA-3202600001');
 
     const firstTranId = firstRetry.body.data.transactionId as string;
     expect(firstTranId).toBeTruthy();
     expect(firstTranId).not.toBe(OLD_TRAN_ID);
 
-    const afterFirstRetry = await PaymentModel.findOne({ enrollmentId: 'MA-3202600001' }).lean();
+    const afterFirstRetry = await PaymentModel.findOne({ enrollmentRef: enrollment._id }).lean();
     expect(afterFirstRetry?.status).toBe(Status.Pending);
     expect(afterFirstRetry?.transactionId).toBe(firstTranId);
     expect(afterFirstRetry?.gatewayResponse?.supersededTranIds).toContain(OLD_TRAN_ID);
@@ -190,7 +189,7 @@ describe('POST /api/v1/enrollments — retry after an abandoned gateway attempt'
     const secondTranId = secondRetry.body.data.transactionId as string;
     expect(secondTranId).not.toBe(firstTranId);
 
-    const afterSecondRetry = await PaymentModel.findOne({ enrollmentId: 'MA-3202600001' }).lean();
+    const afterSecondRetry = await PaymentModel.findOne({ enrollmentRef: enrollment._id }).lean();
     expect(afterSecondRetry?.transactionId).toBe(secondTranId);
     expect(afterSecondRetry?.gatewayResponse?.supersededTranIds).toEqual(
       expect.arrayContaining([OLD_TRAN_ID, firstTranId])
@@ -198,9 +197,9 @@ describe('POST /api/v1/enrollments — retry after an abandoned gateway attempt'
 
     // One enrollment, one payment row — no duplicates created by the retries.
     expect(await EnrollmentModel.countDocuments({ userId: learner.id })).toBe(1);
-    expect(await PaymentModel.countDocuments({ enrollmentId: 'MA-3202600001' })).toBe(1);
+    expect(await PaymentModel.countDocuments({ enrollmentRef: enrollment._id })).toBe(1);
     expect((await EnrollmentModel.findById(enrollment._id).lean())?.status).toBe(
-      EnrollmentStatus.Pending
+      EnrollmentStatus.PaymentPending
     );
   });
 
@@ -216,17 +215,16 @@ describe('POST /api/v1/enrollments — retry after an abandoned gateway attempt'
       enrollmentEndDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
 
-    await EnrollmentModel.create({
+    const enrollment = await EnrollmentModel.create({
       userId: learner.id,
       batchId: batch._id,
       status: EnrollmentStatus.PaymentPending,
-      enrollmentId: 'MA-3202600002',
     });
 
     await PaymentModel.create({
       userId: learner.id,
       batchId: batch._id,
-      enrollmentId: 'MA-3202600002',
+      enrollmentRef: enrollment._id,
       transactionId: 'PHONEPAY-UTR-1',
       amount: 5000,
       currency: 'BDT',
@@ -243,7 +241,7 @@ describe('POST /api/v1/enrollments — retry after an abandoned gateway attempt'
     expect(res.status).toBe(409);
     expect(String(res.body.message)).toMatch(/under verification/i);
 
-    const untouched = await PaymentModel.findOne({ enrollmentId: 'MA-3202600002' }).lean();
+    const untouched = await PaymentModel.findOne({ enrollmentRef: enrollment._id }).lean();
     expect(untouched?.status).toBe(Status.Review);
   });
 });

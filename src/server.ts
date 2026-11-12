@@ -8,6 +8,7 @@ import { scheduleEmployeeBirthdayReminders } from './utils/employeeBirthdayRemin
 import { scheduleBatchTransitions } from './utils/batchScheduler.js';
 import { scheduleBatchReminders } from './utils/batchReminderScheduler.js';
 import { schedulePaymentMaintenance } from './utils/paymentMaintenanceScheduler.js';
+import { scheduleChatConversationPurge } from './utils/chatConversationPurgeScheduler.js';
 import { initializeSocketIO, closeSocketIO } from './services/socketService.js';
 
 let server: Server | null = null;
@@ -25,6 +26,7 @@ async function initializeDatabase() {
             scheduleBatchTransitions();
             scheduleBatchReminders();
             schedulePaymentMaintenance();
+            scheduleChatConversationPurge();
         } catch (error) {
             logger.error(error, 'Error connecting to database');
             throw error;

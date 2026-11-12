@@ -15,4 +15,5 @@ router.get('/:courseId/progress', CourseEnrollmentController.getCourseProgress);
 // Complete a lesson
 router.post('/:courseId/complete-lesson', validateRequest(completeLessonSchema), CourseEnrollmentController.completeLesson);
 
+
 export const CourseEnrollmentRoutes = router;

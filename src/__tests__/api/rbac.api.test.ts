@@ -189,7 +189,9 @@ describe('API-level RBAC & IDOR matrix', () => {
 
         it('allows superadmin user deletion (200)', async () => {
             const disposable = await seedApiUser('learner');
-            const res = await agentFor(superadmin.cookieHeader).delete(`/api/v1/admin/users/${disposable.id}`);
+            const res = await agentFor(superadmin.cookieHeader)
+                .delete(`/api/v1/admin/users/${disposable.id}`)
+                .send({ deletionReason: 'Test cleanup' });
             expect([200, 204]).toContain(res.status);
         });
 

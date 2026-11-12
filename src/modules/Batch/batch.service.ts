@@ -48,7 +48,6 @@ export const BatchService = {
                 const batch = await BatchModel.create({
                     ...data,
                     batchNumber,
-                    currentEnrollment: 0,
                     status: data.status || BatchStatus.Draft,
                 });
                 return batch;

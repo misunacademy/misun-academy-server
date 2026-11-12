@@ -64,6 +64,18 @@ describe('ProfileService.createProfile / getProfile / updateProfile / deleteProf
         expect(synced?.image).toBe('https://example.com/a.png');
     });
 
+    it('updateProfile syncs address to the Profile model', async () => {
+        const user = await createUser({ email: `prof-${uniq()}@example.com` });
+        const updated: any = await ProfileService.updateProfile(user._id.toString(), {
+            address: 'House 12, Road 5, Dhaka',
+        });
+
+        expect(updated.address).toBe('House 12, Road 5, Dhaka');
+
+        const profile = await ProfileModel.findOne({ user: user._id }).lean();
+        expect(profile?.address).toBe('House 12, Road 5, Dhaka');
+    });
+
     it('deleteProfile removes the profile', async () => {
         const user = await createUser({ email: `prof-${uniq()}@example.com` });
         await ProfileService.createProfile(user._id.toString(), {} as any);
@@ -86,6 +98,21 @@ describe('ProfileService.createProfile / getProfile / updateProfile / deleteProf
         expect(fetched.enrollments).toHaveLength(1);
         // hydrated: full enrollment doc, not just the reference
         expect(fetched.enrollments[0].status).toBe(EnrollmentStatus.Active);
+    });
+
+    it('getProfile includes a pending enrollment even when no profile reference exists', async () => {
+        const user = await createUser({ email: `prof-${uniq()}@example.com` });
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+        await EnrollmentModel.create({
+            userId: user._id,
+            batchId: batch._id,
+            status: EnrollmentStatus.PaymentPending,
+        });
+
+        const fetched: any = await ProfileService.getProfile(user._id.toString());
+        expect(fetched.enrollments).toHaveLength(1);
+        expect(fetched.enrollments[0].status).toBe(EnrollmentStatus.PaymentPending);
     });
 });
 

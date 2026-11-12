@@ -76,7 +76,7 @@ export const CourseService = {
         if (!course) return null;
 
 
-        const moduleQuery: Record<string, unknown> = { courseId: id };
+        const moduleQuery: Record<string, unknown> = { courseId: id, status: 'published' };
         if (opts.batchId) moduleQuery.batchId = opts.batchId;
 
         const modules = await ModuleModel.find(moduleQuery).sort({ orderIndex: 1 }).lean();
@@ -89,8 +89,7 @@ export const CourseService = {
         const moduleIds = modules.map((m: any) => m._id);
         const [allLessons, allQuizzes] = await Promise.all([
             moduleIds.length
-                ? LessonModel.find({ moduleId: { $in: moduleIds }, ...(opts.includeContent ? {} : { isPublished: true }) })
-                    .sort({ orderIndex: 1 }).lean()
+                ? LessonModel.find({ moduleId: { $in: moduleIds }, isPublished: true }).sort({ orderIndex: 1 }).lean()
                 : [],
             moduleIds.length
                 ? QuizModel.find({ moduleId: { $in: moduleIds }, status: 'published' }).sort({ orderIndex: 1 }).lean()

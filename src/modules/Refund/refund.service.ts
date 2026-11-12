@@ -3,9 +3,10 @@ import { RefundModel } from './refund.model.js';
 import { RefundChannel, RefundStatus } from './refund.interface.js';
 import { PaymentModel } from '../Payment/payment.model.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
-import { BatchModel } from '../Batch/batch.model.js';
+import { EnrollmentService } from '../Enrollment/enrollment.service.js';
+import { CertificateModel } from '../Certificate/certificate.model.js';
 import { UserModel } from '../User/user.model.js';
-import { Status, EnrollmentStatus } from '../../types/common.js';
+import { Status, EnrollmentStatus, CertificateStatus } from '../../types/common.js';
 import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
 import { recordAudit } from '../../models/auditLog.model.js';
@@ -13,6 +14,8 @@ import { NotificationService } from '../Notification/notification.service.js';
 import { escapeRegExp } from '../../utils/escapeRegExp.js';
 import { Role } from '../../types/role.js';
 import env from '../../config/env.js';
+import { CertificateService } from '../Certificate/certificate.service.js';
+import { sendCertificateRevokedEmail } from '../../services/misunAcademyEmails.js';
 
 interface Actor {
   id: string;
@@ -504,21 +507,56 @@ const completeRefund = async (id: string, actor: Actor, ip?: string) => {
       );
 
       if (claimed.enrollmentId) {
-        await EnrollmentModel.findOneAndUpdate(
-          { enrollmentId: claimed.enrollmentId },
-          { status: EnrollmentStatus.Refunded },
-          { session }
-        );
+        // Find the enrollment row by its string enrollmentId to get its _id,
+        // then look up any active certificate.
+        const enrollmentRow = await EnrollmentModel.findOne({ enrollmentId: claimed.enrollmentId }).session(session);
+        const certificate = enrollmentRow
+          ? await CertificateModel.findOne({
+              enrollmentId: enrollmentRow._id,
+              status: CertificateStatus.Active,
+            }).session(session)
+          : null;
+        if (certificate) {
+          await CertificateService.revokeCertificate(
+            certificate.certificateId,
+            'Full refund — access removed',
+            actor.id
+          );
+        }
+
+        // Guarded enrollment transition: Active -> Refunded, with CAS and
+        // status history inside the same transaction.
+        const enrollment = await EnrollmentModel.findOne({ enrollmentId: claimed.enrollmentId }).session(session);
+        if (enrollment && enrollment.status !== EnrollmentStatus.Refunded) {
+          await EnrollmentService.transitionEnrollment(
+            enrollment._id.toString(),
+            enrollment.status as EnrollmentStatus,
+            EnrollmentStatus.Refunded,
+            { id: actor.id, role: actor.role },
+            'Full refund — access removed'
+          );
+        }
+
+        // Send access-removed email (queued via DB-backed worker, best-effort).
+        try {
+          const userRow = await UserModel.findById(claimed.userId).session(session);
+          if (userRow) {
+            await sendCertificateRevokedEmail(
+              userRow.email,
+              userRow.name,
+              'your course',
+              certificate?.certificateId ?? claimed.enrollmentId,
+              'Full refund — access removed'
+            );
+          }
+        } catch {
+          // Email is best-effort; refund state is already committed.
+        }
       }
 
-      // The seat is gone: keep Batch.currentEnrollment honest.
-      if (claimed.batchId) {
-        await BatchModel.findByIdAndUpdate(
-          claimed.batchId,
-          { $inc: { currentEnrollment: -1 } },
-          { session }
-        );
-      }
+      // Seat counter deprecated: use EnrollmentService.countActiveEnrollments() instead.
+      // Removed $inc { currentEnrollment: -1 } to avoid drift — the counter was
+      // replaced by on-demand counting to guarantee consistency.
     }
 
     await session.commitTransaction();

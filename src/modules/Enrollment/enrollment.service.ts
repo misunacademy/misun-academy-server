@@ -1,9 +1,10 @@
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../../errors/ApiError.js';
 import { EnrollmentModel } from './enrollment.model.js';
+import { EnrollmentStatusHistoryModel } from './enrollmentStatusHistory.model.js';
 import { EnrollmentCounterModel } from './enrollmentCounter.model.js';
 import { BatchModel } from '../Batch/batch.model.js';
-import { BatchStatus, EnrollmentStatus, UserStatus } from '../../types/common.js';
+import { BatchStatus, EnrollmentStatus, UserStatus, ACCESS_STATUSES } from '../../types/common.js';
 import { ModuleModel } from '../Module/module.model.js';
 import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
 import { ProgressStatus } from '../../types/common.js';
@@ -15,8 +16,7 @@ import mongoose from 'mongoose';
 import crypto from 'crypto';
 import { StudentIdCounterModel } from '../User/studentIdCounter.model.js';
 import { NotificationService } from '../Notification/notification.service.js';
-import { sendCourseWaitingPaymentVerificationEmail } from '../../services/courseEmailRouter.js';
-import { logger } from '../../config/logger.js';
+import { queueEmail } from '../../services/emailService.js';
 import { CourseBrand, deriveCourseBrand } from '../../utils/courseBrand.js';
 import { recordAudit } from '../../models/auditLog.model.js';
 import {
@@ -144,18 +144,21 @@ const parseBatchNumber = (batch: any): string => {
  */
 const generateEnrollmentId = async (
     batch: string = '',
-    brand: CourseBrand = CourseBrand.MA
+    brand: CourseBrand = CourseBrand.MA,
+    session?: mongoose.ClientSession
 ): Promise<string> => {
     const year = new Date().getFullYear();
 
     const prefix = brand === CourseBrand.EP ? 'EP' : 'MA';
     const counterId = `${prefix}-${batch}`;
 
-    // Use findByIdAndUpdate for atomic increment per batch
+    // Use findByIdAndUpdate for atomic increment per batch. The increment runs
+    // inside the caller's transaction when a session is supplied, so an abort
+    // rolls the counter back too.
     const counter = await EnrollmentCounterModel.findByIdAndUpdate(
-        { _id: counterId }, // Counter per batch and course prefix
+        { _id: counterId },
         { $inc: { count: 1 } },
-        { new: true, upsert: true }
+        { new: true, upsert: true, session }
     );
 
     const paddedCount = String(counter.count).padStart(5, '0');
@@ -172,67 +175,62 @@ const generateTransactionId = (): string => {
 };
 
 /**
- * Initiate enrollment for a batch
- * With idempotency - returns existing pending enrollment if found
+ * Shared enrollment entry point. Every path that creates an Enrollment
+ * document (learner self-enroll, admin grant-access, manual payment) funnels
+ * through here. Enforces the same invariants regardless of channel:
+ *   - user must be Active (not suspended/banned/unverified)
+ *   - batch must exist and be accepting enrollments (Upcoming/Running or evergreen)
+ *   - enrollment window must be open unless evergreen
+ *   - no Active/Completed/Suspended enrollment for the same user+batch
+ * Writes the enrollment row inside a transaction, appends status history,
+ * and increments currentEnrollment only when entering Active.
  */
-const initiateEnrollment = async (userId: string, batchId: string) => {
-    const session = await mongoose.startSession();
+const createEnrollment = async ({
+    userId,
+    batchId,
+    source = 'self',
+    accessType = 'standard',
+    actor,
+    externalSession,
+}: {
+    userId: string;
+    batchId: string;
+    source?: 'self' | 'admin' | 'manual-payment';
+    accessType?: 'standard' | 'special';
+    actor?: { id: string; role?: string };
+    externalSession?: mongoose.ClientSession;
+}) => {
+    const shouldOwnTransaction = !externalSession;
+    const session = externalSession ?? await mongoose.startSession();
 
     try {
-        session.startTransaction();
-
-        // Check pending enrollment (idempotency)
-        const existingPendingEnrollment = await EnrollmentModel.findOne({
-            userId,
-            batchId,
-            status: {
-                $in: [
-                    EnrollmentStatus.Pending,
-                    EnrollmentStatus.PaymentPending,
-                    EnrollmentStatus.PaymentFailed,
-                ]
-            }
-        })
-        .populate({ path: 'batchId', populate: { path: 'courseId', select: 'title slug brand' } })
-        .session(session);
-
-        if (existingPendingEnrollment) {
-            // Ensure existing enrollment has an enrollmentId (required for SSLCommerz flow)
-            if (!existingPendingEnrollment.enrollmentId) {
-                const batchObj = existingPendingEnrollment.batchId as any;
-                const batchNumber = parseBatchNumber(batchObj);
-                const generatedEnrollmentId = await generateEnrollmentId(
-                    batchNumber,
-                    deriveCourseBrand(batchObj?.courseId)
-                );
-                existingPendingEnrollment.enrollmentId = generatedEnrollmentId;
-                await existingPendingEnrollment.save({ session });
-            }
-
-            // Existing pending enrollments from older data may miss studentId.
-            await assignStudentIdIfMissing(userId, session);
-
-            await session.commitTransaction();
-
-            return {
-                enrollment: existingPendingEnrollment,
-                batch: existingPendingEnrollment.batchId,
-                isExisting: true,
-            };
+        if (shouldOwnTransaction) {
+            await session.startTransaction();
         }
 
-        // Check batch
+        // 1. User must be Active
+        const user = await UserModel.findById(userId).session(session).lean();
+        if (!user || user.status !== UserStatus.Active) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'You cannot enroll in this batch'
+            );
+        }
+
+        // 2. Batch validation
         const batch = await BatchModel.findById(batchId)
             .populate('courseId')
-            .lean()
-            .session(session);
+            .session(session)
+            .lean();
 
         if (!batch) {
             throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
         }
 
-        // Validate batch status (evergreen recorded batches always accept enrollments)
-        const isEvergreen = (batch as any).isEvergreen === true || (batch as any).deliveryMode === 'recorded';
+        const isEvergreen =
+            (batch as any).isEvergreen === true ||
+            (batch as any).deliveryMode === 'recorded';
+
         if (
             !isEvergreen &&
             batch.status !== BatchStatus.Upcoming &&
@@ -244,7 +242,7 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
             );
         }
 
-        // Validate enrollment window (skipped for evergreen lifetime access)
+        // 3. Enrollment window (skipped for evergreen lifetime access)
         const now = new Date();
         if (!isEvergreen && now > batch.enrollmentEndDate) {
             throw new ApiError(
@@ -253,88 +251,246 @@ const initiateEnrollment = async (userId: string, batchId: string) => {
             );
         }
 
-        // Create enrollment
-        let enrollment;
+        // 4. Duplicate check: no terminal enrollment for same user+batch
+        const existingTerminal = await EnrollmentModel.findOne({
+            userId,
+            batchId,
+            status: {
+                $in: [
+                    EnrollmentStatus.Active,
+                    EnrollmentStatus.Completed,
+                    EnrollmentStatus.Suspended,
+                ],
+            },
+        })
+            .session(session)
+            .lean();
 
-        try {
-
-            const created = await EnrollmentModel.create(
-                [{
-                    userId,
-                    batchId,
-                    status: EnrollmentStatus.Pending
-                }],
-                { session }
+        if (existingTerminal) {
+            throw new ApiError(
+                StatusCodes.CONFLICT,
+                'You are already enrolled in this batch'
             );
-
-            enrollment = created[0];
-
-        } catch (err: any) {
-
-            if (err.code === 11000) {
-                // Only userId+batchId conflicts mean "already enrolled".
-                // enrollmentId collisions (or legacy nulls) must not mislead the user.
-                const keyPattern = err.keyPattern as Record<string, number> | undefined;
-                if (!keyPattern || keyPattern.userId || keyPattern.batchId) {
-                    throw new ApiError(
-                        StatusCodes.CONFLICT,
-                        'You are already enrolled in this batch'
-                    );
-                }
-
-                logger.error(err, 'Enrollment ID collision during initiateEnrollment');
-                throw new ApiError(
-                    StatusCodes.INTERNAL_SERVER_ERROR,
-                    'Failed to initiate enrollment. Please try again.'
-                );
-            }
-
-            throw err;
         }
 
-        // Assign Student ID if not exists
-        await assignStudentIdIfMissing(userId, session);
+        // 5. Derive initial status from source/accessType.
+        // Self-initiated enrollments require SSLCommerz payment before the
+        // enrollment ID is assigned — they start as PaymentPending with no
+        // enrollmentId. Admin special-access grants are Active immediately
+        // (no payment required) and get an enrollmentId here.
+        let initialStatus: EnrollmentStatus;
+        let enrollmentId: string | undefined;
+        if (source === 'admin' && accessType === 'special') {
+            initialStatus = EnrollmentStatus.Active;
+            const batchNumber = parseBatchNumber(batch);
+            const courseBrand = deriveCourseBrand(batch.courseId as any);
+            enrollmentId = await generateEnrollmentId(batchNumber, courseBrand);
+        } else {
+            // All payment-required channels (SSLCommerz, manual-payment) start
+            // as PaymentPending with no enrollmentId — the ID is consumed only
+            // after verified payment success.
+            initialStatus = EnrollmentStatus.PaymentPending;
+        }
 
-        // Generate the enrollment ID INSIDE the transaction: a crash between
-        // commit and a post-commit save used to leave rows with null
-        // enrollmentId, breaking the SSLCommerz lookup. The counter upsert is
-        // atomic on its own, so in-txn placement is safe.
-        enrollment.enrollmentId = await generateEnrollmentId(
-            parseBatchNumber(batch),
-            deriveCourseBrand(batch.courseId as any)
+        // 7. Create enrollment (no enrollmentId unless admin special-access).
+        const created = await EnrollmentModel.create(
+            [
+                {
+                    userId,
+                    batchId,
+                    status: initialStatus,
+                    accessType,
+                    ...(enrollmentId ? { enrollmentId } : {}),
+                    ...(initialStatus === EnrollmentStatus.Active
+                        ? { enrolledAt: new Date() }
+                        : {}),
+                },
+            ],
+            { session }
         );
-        await enrollment.save({ session });
 
-        await session.commitTransaction();
+        const enrollment = created[0];
 
-        setImmediate(async () => {
-            try {
-                const user = await UserModel.findById(userId).lean();
-                if (user) {
-                    const courseTitle = (batch.courseId as any)?.title || batch.title;
-                    await NotificationService.createNotificationForAdmins({
-                        type: 'enrollment',
-                        title: 'New Enrollment',
-                        message: `${user.name} has enrolled in ${courseTitle} - ${batch.title}`,
-                        link: '/dashboard/admin/student',
-                    });
-                }
-            } catch (error) {
-                logger.error(error, 'Failed to send enrollment notification');
-            }
-        });
+        // 8. Append-only status history inside the same transaction
+        await EnrollmentStatusHistoryModel.create(
+            [
+                {
+                    enrollmentId: enrollment._id,
+                    userId,
+                    batchId: enrollment.batchId as mongoose.Types.ObjectId,
+                    from: EnrollmentStatus.Pending,
+                    to: initialStatus,
+                    actorType: actor?.role ? 'admin' : 'system',
+                    actorId: actor?.id ? new mongoose.Types.ObjectId(actor.id) : undefined,
+                    reason:
+                        source === 'admin'
+                            ? 'Admin granted access'
+                            : source === 'manual-payment'
+                              ? 'Manual payment enrollment'
+                              : 'Learner initiated enrollment',
+                    source:
+                        source === 'admin'
+                            ? 'POST /api/v1/enrollments/grant-access'
+                            : source === 'manual-payment'
+                              ? 'POST /api/v1/enrollments/manual'
+                              : 'POST /api/v1/enrollments',
+                },
+            ],
+            { session }
+        );
+
+        // Seat counter deprecated: use countActiveEnrollments() instead.
+        // Removed $inc { currentEnrollment: 1 } to avoid drift.
+
+        if (shouldOwnTransaction) {
+            await session.commitTransaction();
+        }
 
         return {
             enrollment,
             batch,
-            isExisting: false,
+            isNew: true,
+            initialStatus,
         };
     } catch (error) {
-
-        if (session.inTransaction()) {
+        if (shouldOwnTransaction && session.inTransaction()) {
             await session.abortTransaction();
         }
+        throw error;
+    } finally {
+        if (shouldOwnTransaction) {
+            session.endSession();
+        }
+    }
+};
 
+/**
+ * Initiate enrollment for a batch
+ * With idempotency - returns existing pending enrollment if found
+ */
+const initiateEnrollment = async (
+    userId: string,
+    batchId: string
+) => {
+    const session = await mongoose.startSession();
+
+    try {
+        session.startTransaction();
+
+        // 0. User must be Active
+        const user = await UserModel.findById(userId).session(session).lean();
+        if (!user || user.status !== UserStatus.Active) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'You cannot enroll in this batch'
+            );
+        }
+
+        // 1. Check terminal enrollment
+        const terminal = await EnrollmentModel.findOne({
+            userId,
+            batchId,
+            status: { $in: [EnrollmentStatus.Active, EnrollmentStatus.Completed, EnrollmentStatus.Suspended] },
+        })
+            .select('_id enrollmentId batchId status')
+            .session(session)
+            .lean();
+
+        if (terminal) {
+            throw new ApiError(
+                StatusCodes.CONFLICT,
+                'You are already enrolled in this batch',
+                '',
+                {
+                    code: 'ENROLLMENT_ALREADY_EXISTS',
+                    details: {
+                        status: terminal.status,
+                        enrollmentRecordId: terminal._id.toString(),
+                        batchId: terminal.batchId.toString(),
+                    },
+                }
+            );
+        }
+
+        // 2. Check for existing pending enrollment (idempotent - return existing)
+        const existingPending = await EnrollmentModel.findOne({
+            userId,
+            batchId,
+            status: { $in: [EnrollmentStatus.Pending, EnrollmentStatus.PaymentPending] },
+        })
+            .populate({ path: 'batchId', populate: { path: 'courseId', select: 'title slug brand' } })
+            .session(session)
+            .lean();
+
+        if (existingPending) {
+            // If the pending enrollment has a failed payment, treat as retry:
+            // mark the old row as PaymentFailed and create a fresh enrollment.
+            const failedPayment = await PaymentModel.findOne({
+                userId,
+                batchId,
+                status: Status.Failed,
+            }).session(session).lean();
+
+            if (failedPayment && existingPending.status === EnrollmentStatus.Pending) {
+                await EnrollmentModel.findByIdAndUpdate(
+                    existingPending._id,
+                    { status: EnrollmentStatus.PaymentFailed },
+                    { session }
+                );
+            } else {
+                return {
+                    enrollment: existingPending,
+                    batch: existingPending.batchId as any,
+                    isExisting: true,
+                };
+            }
+        }
+
+        // 3. Check batch status
+        const batch = await BatchModel.findById(batchId)
+            .populate('courseId')
+            .session(session)
+            .lean();
+
+        if (!batch) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
+        }
+
+        const isEvergreen = (batch as any).isEvergreen === true || (batch as any).deliveryMode === 'recorded';
+        if (!isEvergreen && batch.status !== BatchStatus.Upcoming && batch.status !== BatchStatus.Running) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'This batch is not accepting new enrollments');
+        }
+
+        const now = new Date();
+        if (!isEvergreen && batch.enrollmentEndDate && now > batch.enrollmentEndDate) {
+            throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment period has ended for this batch');
+        }
+
+
+        // 4. Create enrollment — PaymentPending, no enrollmentId until payment
+        //    is verified. The controller initiates the SSLCommerz session and
+        //    links the Payment to this enrollment via enrollmentRef.
+        const created = await EnrollmentModel.create([
+            {
+                userId,
+                batchId,
+                status: EnrollmentStatus.PaymentPending,
+            }],
+        { session });
+
+        const enrollmentDoc = created[0];
+
+        // 5. (Payment initiation is handled by the controller to avoid
+        //    double gateway attempts. See enrollment.controller.ts.)
+
+        await session.commitTransaction();
+        return {
+            enrollment: enrollmentDoc.toObject(),
+            batch,
+            isExisting: false,
+        };
+    } catch (error: any) {
+        if (session.inTransaction()) await session.abortTransaction();
         throw error;
     } finally {
         session.endSession();
@@ -423,158 +579,66 @@ const enrollWithManualPayment = async (
     batchId: string,
     paymentData: { senderNumber: string; transactionId: string }
 ) => {
-    // Check if user has any enrollment for this batch
-    const existingEnrollment = await EnrollmentModel.findOne({
-        userId,
-        batchId,
-        status: { $in: [EnrollmentStatus.Pending, EnrollmentStatus.PaymentPending, EnrollmentStatus.PaymentFailed, EnrollmentStatus.Active] }
-    });
-
-    if (existingEnrollment) {
-        if (existingEnrollment.status === EnrollmentStatus.Active) {
-            throw new ApiError(StatusCodes.CONFLICT, 'You are already enrolled in this batch');
-        }
-        // NOTE: the PaymentPending flip happens inside the transaction below.
-        // A premature save here would persist the flip even when batch/UTR
-        // validation fails afterwards, stranding the enrollment.
-    }
-
-    const batch = await BatchModel.findById(batchId).populate('courseId').lean();
-    if (!batch) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
-    }
-
-    const isEvergreenManual = (batch as any).isEvergreen === true || (batch as any).deliveryMode === 'recorded';
-
-    if (!isEvergreenManual && batch.status !== BatchStatus.Upcoming && batch.status !== BatchStatus.Running) {
-        throw new ApiError(StatusCodes.BAD_REQUEST, 'This batch is not accepting enrollments');
-    }
-
-    const now = new Date();
-    if (!isEvergreenManual && now > batch.enrollmentEndDate) {
-        throw new ApiError(StatusCodes.BAD_REQUEST, 'Enrollment period is not active');
-    }
-
     // Normalize identifiers: UTRs are case/whitespace-insensitive on the
     // provider side — without this, "abc 123" vs "ABC123" bypasses dedupe.
     const submittedUtr = paymentData.transactionId.replace(/\s+/g, '').toUpperCase();
     const senderNumber = paymentData.senderNumber.replace(/[\s-]+/g, '');
+
+    // Duplicate UTR check (must happen before creating enrollment, outside txn)
     const duplicateUtrPayment = await PaymentModel.findOne({
         'gatewayResponse.phonePeTransactionId': submittedUtr,
     }).lean();
 
-    if (
-        duplicateUtrPayment &&
-        (!existingEnrollment || duplicateUtrPayment.enrollmentId !== existingEnrollment.enrollmentId)
-    ) {
+    if (duplicateUtrPayment) {
         throw new ApiError(
             StatusCodes.CONFLICT,
             'This transaction ID has already been submitted. Please use your original submission or contact support.'
         );
     }
 
-    const brand = deriveCourseBrand(batch.courseId as any);
-    const isEnglishCourse = brand === CourseBrand.EP;
-    const manualPaymentAmount =
-        typeof (batch as any).manualPaymentPrice === 'number'
-            ? (batch as any).manualPaymentPrice
-            : isEnglishCourse
-                ? 2289
-                : 3661;
-
     const session = await mongoose.startSession();
 
     try {
         await session.startTransaction();
 
-        let enrollment = existingEnrollment;
+        // createEnrollment enforces: user active, batch accepting, window open,
+        // no terminal enrollment, creates PaymentPending row + status history.
+        const { enrollment, batch } = await createEnrollment({
+            userId,
+            batchId,
+            source: 'manual-payment',
+            accessType: 'standard',
+        });
 
-        // Prefer the stable numeric batch number; legacy title parsing as
-        // fallback, never undefined.
-        const batchNumber = parseBatchNumber(batch);
         const courseBrand = deriveCourseBrand(batch.courseId as any);
-
-        // Create or reuse enrollment with a robust enrollmentId assignment.
-        if (!enrollment) {
-            let attempt = 0;
-            while (!enrollment) {
-                const candidateEnrollmentId = await generateEnrollmentId(batchNumber, courseBrand);
-                try {
-                    const created = await EnrollmentModel.create([
-                        {
-                            userId,
-                            batchId,
-                            status: EnrollmentStatus.PaymentPending,
-                            enrollmentId: candidateEnrollmentId,
-                        },
-                    ], { session });
-                    enrollment = created[0];
-                } catch (err: any) {
-                    if (err.code === 11000 && err.keyPattern?.enrollmentId) {
-                        attempt += 1;
-                        if (attempt >= 5) {
-                            throw new ApiError(
-                                StatusCodes.INTERNAL_SERVER_ERROR,
-                                'Failed to generate a unique enrollment ID. Please try again.'
-                            );
-                        }
-                        continue;
-                    }
-                    throw err;
-                }
-            }
-        } else {
-            // Keep using existing enrollment, ensure ID exists.
-            await EnrollmentModel.findByIdAndUpdate(
-                enrollment._id,
-                { status: EnrollmentStatus.PaymentPending },
-                { session }
-            );
-
-            if (!enrollment.enrollmentId) {
-                let attempt = 0;
-                while (!enrollment.enrollmentId) {
-                    const candidateEnrollmentId = await generateEnrollmentId(batchNumber, courseBrand);
-                    try {
-                        enrollment.enrollmentId = candidateEnrollmentId;
-                        await enrollment.save({ session });
-                    } catch (err: any) {
-                        if (err.code === 11000 && err.keyPattern?.enrollmentId) {
-                            attempt += 1;
-                            if (attempt >= 5) {
-                                throw new ApiError(
-                                    StatusCodes.INTERNAL_SERVER_ERROR,
-                                    'Failed to assign a unique enrollment ID. Please try again.'
-                                );
-                            }
-                            continue;
-                        }
-                        throw err;
-                    }
-                }
-            }
-        }
-
-        const paymentTransactionId = generateTransactionId();
+        const brand = courseBrand;
+        const isEnglishCourse = brand === CourseBrand.EP;
+        const manualPaymentAmount =
+            typeof (batch as any).manualPaymentPrice === 'number'
+                ? (batch as any).manualPaymentPrice
+                : isEnglishCourse
+                    ? 2289
+                    : 3661;
 
         // Manual-channel currency follows the brand: EP collects via PhonePe
         // India (INR), MA via bKash/Nagad (BDT). Storing INR amounts as BDT
         // corrupts every revenue report downstream.
         const manualCurrency = isEnglishCourse ? 'INR' : 'BDT';
+        const paymentTransactionId = generateTransactionId();
 
         try {
             await PaymentModel.findOneAndUpdate(
-                { enrollmentId: enrollment.enrollmentId },
+                { enrollmentRef: enrollment._id },
                 {
                     $set: {
                         userId,
                         batchId,
+                        enrollmentRef: enrollment._id,
                         transactionId: paymentTransactionId,
                         amount: manualPaymentAmount,
                         currency: manualCurrency,
                         status: Status.Review,
                         method: 'PhonePay',
-                        enrollmentId: enrollment.enrollmentId,
                         // Dot-notation so the submissions history below survives.
                         'gatewayResponse.senderNumber': senderNumber,
                         'gatewayResponse.phonePeTransactionId': submittedUtr,
@@ -609,36 +673,34 @@ const enrollWithManualPayment = async (
 
         await session.commitTransaction();
 
-        setImmediate(async () => {
-            try {
-                const user = await UserModel.findById(userId).lean();
-                if (user) {
-                    const courseData = (batch.courseId as any);
-                    const courseTitle = typeof courseData === 'object' ? (courseData?.title || '') : '';
-                    await NotificationService.createNotificationForAdmins({
-                        type: 'payment_pending',
-                        title: 'Manual Payment Pending',
-                        message: `${user.name} submitted a manual payment for ${courseTitle || batch.title}`,
-                        link: '/dashboard/admin/payment',
-                    });
+        // Enqueue payment-pending email (durable, idempotent via eventId).
+        // Replaces fire-and-forget setImmediate that could be dropped in serverless.
+        const userRow = await UserModel.findById(userId).lean();
+        if (userRow) {
+            const courseData = (batch.courseId as any);
+            const courseTitle = typeof courseData === 'object' ? (courseData?.title || '') : '';
+            const courseLabel = courseTitle
+                ? `${courseTitle} - ${batch.title}`
+                : batch.title;
 
-                    const rawCourseName = courseTitle;
-                    const courseSlug = typeof courseData === 'object' ? (courseData?.slug || '') : '';
-                    const courseLabel = rawCourseName
-                        ? `${rawCourseName} - ${batch.title}`
-                        : batch.title;
+            await NotificationService.createNotificationForAdmins({
+                type: 'payment_pending',
+                title: 'Manual Payment Pending',
+                message: `${userRow.name} submitted a manual payment for ${courseTitle || batch.title}`,
+                link: '/dashboard/admin/payment',
+            });
 
-                    sendCourseWaitingPaymentVerificationEmail(
-                        { courseName: rawCourseName || batch.title, courseSlug },
-                        user,
-                        courseLabel,
-                        paymentTransactionId
-                    );
+            await queueEmail(
+                userRow.email,
+                `Payment Pending — ${courseLabel}`,
+                `<p>Hello ${userRow.name},</p><p>We received your manual payment for <strong>${courseLabel}</strong> (Transaction: ${paymentTransactionId}).</p><p>Your access will be activated once the payment is verified, usually within 12–24 hours.</p>`,
+                {
+                    eventId: `payment_pending_${paymentTransactionId}`,
+                    eventType: 'payment_pending',
+                    priority: 'high',
                 }
-            } catch (error) {
-                logger.error(error, 'Failed to send manual payment notification');
-            }
-        });
+            );
+        }
 
         return {
             enrollment,
@@ -659,12 +721,17 @@ const grantAccessByEmail = async (
     courseId: string,
     batchId: string,
     actor?: { id: string; role?: string },
+    reason?: string,
     ip?: string
 ) => {
     const normalizedEmail = email.trim().toLowerCase();
 
     if (!normalizedEmail) {
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Student email is required');
+    }
+
+    if (!reason?.trim()) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Reason is required for admin grant');
     }
 
     if (!mongoose.Types.ObjectId.isValid(courseId)) {
@@ -707,19 +774,8 @@ const grantAccessByEmail = async (
             );
         }
 
-        // Grants obey the same gates as paid enrollment: no free access into
-        // Draft/Cancelled/Completed batches (unreleased content + capacity).
-        const isEvergreen = (batch as any).isEvergreen === true || (batch as any).deliveryMode === 'recorded';
-        if (
-            !isEvergreen &&
-            batch.status !== BatchStatus.Upcoming &&
-            batch.status !== BatchStatus.Running
-        ) {
-            throw new ApiError(
-                StatusCodes.BAD_REQUEST,
-                'This batch is not accepting enrollments'
-            );
-        }
+        // User-active, batch-open, window, and duplicate checks live in
+        // createEnrollment (single source of truth for all entry points).
 
         let enrollment = await EnrollmentModel.findOne({
             userId: user._id,
@@ -754,72 +810,65 @@ const grantAccessByEmail = async (
         const wasActive = false;
 
         if (!enrollment) {
-            const batchNumber = parseBatchNumber(batch);
-            const enrollmentId = await generateEnrollmentId(
-                batchNumber,
-                deriveCourseBrand(batch.courseId as any)
-            );
-
-            const created = await EnrollmentModel.create(
-                [
-                    {
-                        userId: user._id,
-                        batchId: batch._id,
-                        status: EnrollmentStatus.Active,
-                        accessType: 'special',
-                        enrollmentId,
-                        enrolledAt: new Date(),
-                    },
-                ],
-                { session }
-            );
-
-            enrollment = created[0];
+            // No existing enrollment: create through the shared entry point.
+            const result = await EnrollmentService.createEnrollment({
+                userId: user._id.toString(),
+                batchId: batch._id.toString(),
+                source: 'admin',
+                accessType: 'special',
+                actor,
+            });
+            enrollment = result.enrollment as any;
         } else {
-            let shouldSave = false;
+            // Existing non-terminal enrollment (Pending, PaymentFailed, Expired,
+            // Refunded): transition to Active via guarded CAS. Seat counter only
+            // increments if moving into Active from a non-active state.
+            enrollment = await EnrollmentService.transitionEnrollment(
+                enrollment._id.toString(),
+                enrollment.status as EnrollmentStatus,
+                EnrollmentStatus.Active,
+                actor,
+                'Admin granted access (existing enrollment)'
+            );
+        }
 
-            if (enrollment.accessType !== 'special') {
-                enrollment.accessType = 'special';
-                shouldSave = true;
-            }
-
-            if (!enrollment.enrollmentId) {
-                const batchNumber = parseBatchNumber(batch);
-                enrollment.enrollmentId = await generateEnrollmentId(
-                    batchNumber,
-                    deriveCourseBrand(batch.courseId as any)
-                );
-                shouldSave = true;
-            }
-
-            if (!wasActive) {
-                enrollment.status = EnrollmentStatus.Active;
-                enrollment.enrolledAt = new Date();
-                shouldSave = true;
-            }
-
-            if (shouldSave) {
-                await enrollment.save({ session });
-            }
+        if (!enrollment) {
+            throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, 'Failed to create or transition enrollment');
         }
 
         await assignStudentIdIfMissing(user._id.toString(), session);
 
-        if (!wasActive) {
-            await BatchModel.findByIdAndUpdate(
-                batch._id,
-                { $inc: { currentEnrollment: 1 } },
-                { session }
-            );
-        }
-
         if (enrollment.enrollmentId) {
             await ProfileService.createOrUpdateProfileAfterEnrollment(
                 user._id.toString(),
-                enrollment.enrollmentId,
-                session
+                enrollment.enrollmentId
             );
         }
+
+        // Complimentary payment record so revenue reports stay correct.
+        // Admin grants are free (amount 0, method complimentary) and audited.
+        await PaymentModel.create(
+            [
+                {
+                    userId: user._id,
+                    batchId: batch._id,
+                    transactionId: `COMPLIMENTARY-${enrollment.enrollmentId}`,
+                    enrollmentId: enrollment.enrollmentId,
+                    amount: 0,
+                    currency: 'BDT',
+                    status: Status.Success,
+                    method: 'complimentary',
+                    gatewayResponse: {
+                        source: 'admin_grant',
+                        reason: reason.trim(),
+                        grantedBy: actor?.id,
+                        grantedAt: new Date(),
+                    },
+                    paidAt: new Date(),
+                },
+            ],
+            { session }
+        );
 
         await session.commitTransaction();
 
@@ -843,19 +892,27 @@ const grantAccessByEmail = async (
             await initializeModuleProgress(enrollment._id.toString());
 
             const course = (batch.courseId as any) || {};
-            setImmediate(async () => {
-                try {
-                    await NotificationService.createNotification({
-                        userId: user._id.toString(),
-                        type: 'access_granted',
-                        title: 'Course Access Granted',
-                        message: `You have been granted access to ${course?.title || 'Course'} - ${batch?.title}`,
-                        link: '/my-classes',
-                    });
-                } catch (error) {
-                    logger.error(error, 'Failed to send access granted notification');
-                }
+
+            // In-app notification (no longer fire-and-forget)
+            await NotificationService.createNotification({
+                userId: user._id.toString(),
+                type: 'access_granted',
+                title: 'Course Access Granted',
+                message: `You have been granted access to ${course?.title || 'Course'} - ${batch?.title}`,
+                link: '/my-classes',
             });
+
+            // Enqueue access-granted email (durable, idempotent via eventId)
+            await queueEmail(
+                user.email,
+                `Access Granted — ${course?.title || 'Course'}`,
+                `<p>Hello ${user.name},</p><p>You now have access to <strong>${course?.title || 'Course'}</strong> (${batch?.title}).</p><p>Start learning at /my-classes.</p>`,
+                {
+                    eventId: `access_granted_${enrollment._id}`,
+                    eventType: 'access_granted',
+                    priority: 'high',
+                }
+            );
         }
 
         return {
@@ -881,6 +938,261 @@ const ensureStudentIdForUser = async (
     await assignStudentIdIfMissing(userId, session);
 };
 
+/**
+ * Transfer an enrollment from one batch to another (same course).
+ * No payment change — the learner keeps their paid status.
+ * Writes status history for both the deactivation and activation.
+ */
+const transferEnrollment = async (
+    enrollmentId: string,
+    newBatchId: string,
+    reason: string,
+    actor?: { id: string; role?: string }
+) => {
+    const session = await mongoose.startSession();
+    try {
+        session.startTransaction();
+
+        const enrollment = await EnrollmentModel.findById(enrollmentId)
+            .session(session)
+            .lean();
+        if (!enrollment) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+        }
+
+        if (enrollment.status !== EnrollmentStatus.Active) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'Only active enrollments can be transferred'
+            );
+        }
+
+        const newBatch = await BatchModel.findById(newBatchId)
+            .populate('courseId')
+            .session(session)
+            .lean();
+        if (!newBatch) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Target batch not found');
+        }
+
+        const oldBatch = await BatchModel.findById(enrollment.batchId)
+            .populate('courseId')
+            .session(session)
+            .lean();
+        if (!oldBatch) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Source batch not found');
+        }
+
+        const newBatchCourseId =
+            (newBatch.courseId as any)?._id?.toString() ??
+            (newBatch.courseId as any)?.toString();
+        const oldBatchCourseId =
+            (oldBatch.courseId as any)?._id?.toString() ??
+            (oldBatch.courseId as any)?.toString();
+        if (newBatchCourseId !== oldBatchCourseId) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'Target batch does not belong to the same course'
+            );
+        }
+
+        // Deactivate old enrollment (suspended, not active)
+        await EnrollmentModel.findByIdAndUpdate(
+            enrollmentId,
+            {
+                $set: {
+                    status: EnrollmentStatus.Suspended,
+                    statusChangeReason: `Transferred to batch ${newBatch._id}: ${reason}`,
+                    transferredAt: new Date(),
+                    transferredToBatchId: newBatchId,
+                },
+            },
+            { session }
+        );
+
+        // Create new active enrollment in target batch
+        const newEnrollment = await EnrollmentModel.create(
+            [
+                {
+                    userId: enrollment.userId,
+                    batchId: newBatchId,
+                    status: EnrollmentStatus.Active,
+                    accessType: enrollment.accessType || 'standard',
+                    enrolledAt: new Date(),
+                    transferredFromBatchId: enrollment.batchId,
+                },
+            ],
+            { session }
+        );
+
+        // Status history for both
+        await EnrollmentStatusHistoryModel.create(
+            [
+                {
+                    enrollmentId: enrollment._id,
+                    userId: enrollment.userId,
+                    batchId: enrollment.batchId as mongoose.Types.ObjectId,
+                    from: EnrollmentStatus.Active,
+                    to: EnrollmentStatus.Suspended,
+                    actorType: actor?.role ? 'admin' : 'system',
+                    actorId: actor?.id ? new mongoose.Types.ObjectId(actor.id) : undefined,
+                    reason: `Transferred out: ${reason}`,
+                    source: 'transferEnrollment',
+                },
+                {
+                    enrollmentId: newEnrollment[0]._id,
+                    userId: enrollment.userId,
+                    batchId: new mongoose.Types.ObjectId(newBatchId as unknown as string),
+                    from: EnrollmentStatus.Pending,
+                    to: EnrollmentStatus.Active,
+                    actorType: actor?.role ? 'admin' : 'system',
+                    actorId: actor?.id ? new mongoose.Types.ObjectId(actor.id) : undefined,
+                    reason: `Transferred in: ${reason}`,
+                    source: 'transferEnrollment',
+                },
+            ],
+            { session, ordered: true }
+        );
+
+        await session.commitTransaction();
+        return newEnrollment[0];
+    } catch (error) {
+        await session.abortTransaction();
+        throw error;
+    } finally {
+        session.endSession();
+    }
+};
+
+/**
+ * Defer an enrollment: suspend it with a deferUntil date.
+ * The learner loses access until reactivated.
+ */
+const deferEnrollment = async (
+    enrollmentId: string,
+    deferUntil: Date,
+    reason: string,
+    actor?: { id: string; role?: string }
+) => {
+    const enrollment = await EnrollmentModel.findById(enrollmentId).lean();
+    if (!enrollment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+    }
+
+    if (enrollment.status !== EnrollmentStatus.Active) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'Only active enrollments can be deferred'
+        );
+    }
+
+    await EnrollmentService.transitionEnrollment(
+        enrollmentId,
+        EnrollmentStatus.Active,
+        EnrollmentStatus.Suspended,
+        actor,
+        `Deferred until ${deferUntil.toISOString()}: ${reason}`
+    );
+
+    // Set deferUntil field
+    const updated = await EnrollmentModel.findByIdAndUpdate(
+        enrollmentId,
+        { $set: { deferUntil } },
+        { new: true }
+    );
+
+    return updated as any;
+};
+
+/**
+ * Extend access for an enrollment: set accessExtendedUntil date.
+ */
+const extendAccess = async (
+    enrollmentId: string,
+    accessExtendedUntil: Date,
+    reason: string,
+    actor?: { id: string; role?: string }
+) => {
+    const enrollment = await EnrollmentModel.findById(enrollmentId).lean();
+    if (!enrollment) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+    }
+
+    if (![EnrollmentStatus.Active, EnrollmentStatus.Completed].includes(enrollment.status)) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'Only active or completed enrollments can be extended'
+        );
+    }
+
+    const updated = await EnrollmentModel.findByIdAndUpdate(
+        enrollmentId,
+        {
+            $set: {
+                accessExtendedUntil,
+                statusChangeReason: `Access extended: ${reason}`,
+            },
+        },
+        { new: true }
+    );
+
+    await recordAudit({
+        actor: actor?.id,
+        actorRole: actor?.role,
+        action: 'enrollment.access_extend',
+        targetType: 'Enrollment',
+        targetId: enrollmentId,
+        metadata: { accessExtendedUntil, reason },
+    });
+
+    return updated;
+};
+
+/**
+ * Find stuck enrollments in a batch:
+ * - paidNotActive: success payment but enrollment not active
+ * - activeNoPayment: active enrollment but no success payment
+ */
+const getStuckEnrollments = async (batchId: string) => {
+    // Paid but not active
+    const paidPayments = await PaymentModel.find({
+        batchId,
+        status: Status.Success,
+    }).lean();
+
+    const paidNotActive: any[] = [];
+    for (const p of paidPayments) {
+        const enrollment = await EnrollmentModel.findOne({
+            _id: p.enrollmentRef,
+        }).lean();
+        if (!enrollment || enrollment.status !== EnrollmentStatus.Active) {
+            paidNotActive.push(enrollment || { _id: p._id, enrollmentRef: p.enrollmentRef, status: 'no_enrollment' });
+        }
+    }
+
+    // Active but no payment
+    const activeEnrollments = await EnrollmentModel.find({
+        batchId,
+        status: EnrollmentStatus.Active,
+    }).lean();
+
+    const activeNoPayment: any[] = [];
+    for (const e of activeEnrollments) {
+        const payment = await PaymentModel.findOne({
+            enrollmentRef: e._id,
+            status: Status.Success,
+        }).lean();
+        if (!payment) {
+            activeNoPayment.push(e);
+        }
+    }
+
+    return { paidNotActive, activeNoPayment };
+};
+
+/**
+ * Get all enrollments with optional filtering and pagination.
+ */
 const getAllEnrollments = async (params: {
     batchId?: string;
     courseId?: string;
@@ -1127,35 +1439,185 @@ const ALLOWED_ENROLLMENT_TRANSITIONS: Record<string, string[]> = {
     [EnrollmentStatus.Pending]: [EnrollmentStatus.Active, EnrollmentStatus.Suspended],
     [EnrollmentStatus.PaymentPending]: [EnrollmentStatus.Active, EnrollmentStatus.Suspended],
     [EnrollmentStatus.PaymentFailed]: [EnrollmentStatus.Pending],
+    [EnrollmentStatus.Expired]: [EnrollmentStatus.Pending],
     [EnrollmentStatus.Active]: [EnrollmentStatus.Suspended, EnrollmentStatus.Completed, EnrollmentStatus.Refunded],
     [EnrollmentStatus.Suspended]: [EnrollmentStatus.Active],
     [EnrollmentStatus.Completed]: [],
     [EnrollmentStatus.Refunded]: [],
 };
 
-const updateEnrollmentStatus = async (enrollmentId: string, status: EnrollmentStatus, reason?: string) => {
-    const current = await EnrollmentModel.findById(enrollmentId).select('status').lean();
-    if (!current) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
-    }
-    const allowed = ALLOWED_ENROLLMENT_TRANSITIONS[current.status] ?? [];
-    if (current.status !== status && !allowed.includes(status)) {
-        throw new ApiError(
-            StatusCodes.BAD_REQUEST,
-            `Cannot transition enrollment from ${current.status} to ${status}`
+/**
+ * Guards an enrollment status transition with compare-and-set on the current
+ * status, inside a transaction, with append-only status history. The caller is
+ * responsible for validating the transition is business-valid (e.g. via
+ * ALLOWED_ENROLLMENT_TRANSITIONS in updateEnrollmentStatus or certificate
+ * eligibility before approve). This is the single primitive that every code
+ * path changing an enrollment's status must use.
+ */
+const transitionEnrollment = async (
+    enrollmentId: string,
+    from: EnrollmentStatus,
+    to: EnrollmentStatus,
+    actor?: { id?: string; role?: string },
+    reason?: string,
+    externalSession?: mongoose.ClientSession
+) => {
+    const shouldOwnTransaction = !externalSession;
+    const session = externalSession ?? await mongoose.startSession();
+
+    try {
+        if (shouldOwnTransaction) {
+            await session.startTransaction();
+        }
+
+        const enrollment = await EnrollmentModel.findOneAndUpdate(
+            { _id: enrollmentId, status: from },
+            {
+                $set: {
+                    status: to,
+                    ...(to === EnrollmentStatus.Active && from !== EnrollmentStatus.Active
+                        ? { enrolledAt: new Date() }
+                        : {}),
+                    ...(reason !== undefined ? { statusChangeReason: reason } : {}),
+                },
+            },
+            { new: true, session }
         );
+        if (!enrollment) {
+            throw new ApiError(
+                StatusCodes.CONFLICT,
+                `Cannot transition enrollment: not in ${from} state (may have changed concurrently)`
+            );
+        }
+
+        // Seat counter: only when moving INTO Active from a non-active state
+        if (to === EnrollmentStatus.Active && from !== EnrollmentStatus.Active) {
+            await BatchModel.findByIdAndUpdate(
+                enrollment.batchId as mongoose.Types.ObjectId,
+                { $inc: { currentEnrollment: 1 } },
+                { session }
+            );
+        }
+
+        // Append-only status history inside the same transaction
+        await EnrollmentStatusHistoryModel.create([
+            {
+                enrollmentId: enrollment._id,
+                userId: enrollment.userId,
+                batchId: enrollment.batchId as mongoose.Types.ObjectId,
+                from,
+                to,
+                actorType: actor?.role ? 'admin' : 'system',
+                actorId: actor?.id ? new mongoose.Types.ObjectId(actor.id) : undefined,
+                reason: reason ?? undefined,
+                source: 'internal',
+            },
+        ], { session });
+
+        if (shouldOwnTransaction) {
+            await session.commitTransaction();
+        }
+        return enrollment;
+    } catch (error) {
+        if (shouldOwnTransaction && session.inTransaction()) {
+            await session.abortTransaction();
+        }
+        throw error;
+    } finally {
+        if (shouldOwnTransaction) {
+            session.endSession();
+        }
     }
-    // NOTE: update docs must use pure atomic operators — mixing a bare
-    // `status` field with `$set` is rejected by MongoDB.
-    const enrollment = await EnrollmentModel.findByIdAndUpdate(
-        enrollmentId,
-        { $set: { status, ...(reason !== undefined ? { statusChangeReason: reason } : {}) } },
-        { new: true, runValidators: true }
-    );
-    if (!enrollment) {
-        throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+};
+
+/**
+ * On-demand count of enrollments that grant access (Active + Completed).
+ * Replaces the deprecated Batch.currentEnrollment counter which can drift.
+ * Single source of truth via ACCESS_STATUSES.
+ */
+const countActiveEnrollments = async (batchId: string): Promise<number> => {
+    return EnrollmentModel.countDocuments({
+        batchId,
+        status: { $in: ACCESS_STATUSES },
+    });
+};
+
+/**
+ * Admin: update an enrollment's status. Values are validated against
+ * EnrollmentStatus (lowercase) — runs validators so capitalized/unknown
+ * values are rejected instead of corrupting the row — and the optional
+ * reason is persisted to statusChangeReason. Transitions are constrained to
+ * a conservative state machine so Active↔Pending ping-pong, Completed
+ * resurrection, or finance-orphaning jumps can't happen from this endpoint
+ * (refunds/revokes move status through their own audited flows).
+ */
+const updateEnrollmentStatus = async (
+    enrollmentId: string,
+    status: EnrollmentStatus,
+    reason?: string,
+    actor?: { id: string; role?: string }
+) => {
+    const session = await mongoose.startSession();
+
+    try {
+        session.startTransaction();
+
+        const enrollment = await EnrollmentModel.findById(enrollmentId).session(session).lean();
+        if (!enrollment) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Enrollment not found');
+        }
+
+        const fromStatus = enrollment.status as EnrollmentStatus;
+        const allowed = ALLOWED_ENROLLMENT_TRANSITIONS[enrollment.status] ?? [];
+        if (enrollment.status !== status && !allowed.includes(status)) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                `Cannot transition enrollment from ${enrollment.status} to ${status}`
+            );
+        }
+
+        // Channel-specific activation prep (enrollment ID + student ID) happens
+        // before the guarded transition so the MA- ID exists on the row.
+        if (status === EnrollmentStatus.Active && fromStatus !== EnrollmentStatus.Active) {
+            const batch = await BatchModel.findById(
+                (enrollment as any).batchId
+            ).populate({ path: 'courseId' }).session(session).lean();
+            if (!batch) {
+                throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
+            }
+            if (!(enrollment as any).enrollmentId) {
+                (enrollment as any).enrollmentId = await generateEnrollmentId(
+                    parseBatchNumber(batch),
+                    deriveCourseBrand((batch as any)?.courseId)
+                );
+                // Persist the generated enrollmentId on the row before transitioning
+                await EnrollmentModel.findByIdAndUpdate(
+                    enrollmentId,
+                    { enrollmentId: (enrollment as any).enrollmentId },
+                    { session }
+                );
+            }
+            await assignStudentIdIfMissing((enrollment as any).userId.toString(), session);
+        }
+
+        const result = await transitionEnrollment(
+            enrollmentId,
+            fromStatus,
+            status,
+            actor,
+            reason,
+            session
+        );
+        await session.commitTransaction();
+        return result;
+    } catch (error) {
+        if (session.inTransaction()) {
+            await session.abortTransaction();
+        }
+        throw error;
+    } finally {
+        session.endSession();
     }
-    return enrollment;
 };
 
 export const EnrollmentService = {
@@ -1167,7 +1629,15 @@ export const EnrollmentService = {
     getEnrollmentDetails,
     getAllEnrollments,
     updateEnrollmentStatus,
+    createEnrollment,
+    transitionEnrollment,
+    countActiveEnrollments,
+    transferEnrollment,
+    deferEnrollment,
+    extendAccess,
+    getStuckEnrollments,
     initializeModuleProgress,
     generateEnrollmentId,
+    parseBatchNumber,
     ensureStudentIdForUser,
 };

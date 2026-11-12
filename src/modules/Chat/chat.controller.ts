@@ -6,9 +6,10 @@ import { ChatService } from './chat.service.js';
 
 const chat = catchAsync(async (req: Request, res: Response) => {
   const { messages } = req.body;
+  const userId = req.user?.id;
   const userName = req.user?.name;
 
-  const result = await ChatService.chat(messages, userName);
+  const result = await ChatService.chat(messages, userId, userName);
 
   // Token usage stays server-side (logged in the service) — returning it
   // aids cost-probing and serves no client purpose.

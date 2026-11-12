@@ -57,6 +57,7 @@ describe('CourseEnrollmentService — batch-scoped unlocking', () => {
         await initializeModuleProgress(enrollmentA._id.toString());
         const lessonA0 = await buildLesson(modA0._id, 'A Lesson 0');
 
+
         await CourseEnrollmentService.completeLesson(
             user._id.toString(),
             course._id.toString(),

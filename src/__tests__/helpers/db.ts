@@ -28,13 +28,20 @@ export async function connectTestDB(): Promise<void> {
   const uri = replSet.getUri();
   await mongoose.connect(uri);
   
-  // Pre-create collections to avoid "catalog changes" error inside transactions
+  // Pre-create collections to avoid "catalog changes" error inside transactions.
+  // Awaiting init() also finishes background index builds, which otherwise race
+  // with the first transaction and surface as transient IX-lock timeouts.
   for (const name of mongoose.modelNames()) {
     const model = mongoose.model(name);
     try {
       await model.createCollection();
     } catch {
       // Collection may already exist
+    }
+    try {
+      await model.init();
+    } catch {
+      // Index build may already be in flight
     }
   }
 }

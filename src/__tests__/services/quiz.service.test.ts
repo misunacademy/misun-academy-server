@@ -186,6 +186,9 @@ describe('QuizService.updateQuiz', () => {
         const quiz: any = await QuizService.createQuiz(mod._id.toString(), quizPayload(), admin._id.toString());
         expect(quiz.status).toBe('draft');
 
+        // A quiz must have questions before it can be published.
+        await addQuestion(quiz._id.toString(), 2, 0);
+
         const updated: any = await QuizService.updateQuiz(quiz._id.toString(), { status: 'published' });
         expect(updated.status).toBe('published');
 

@@ -1,5 +1,6 @@
 import { CertificateModel } from './certificate.model.js';
 import { EnrollmentModel } from '../Enrollment/enrollment.model.js';
+import { EnrollmentService } from '../Enrollment/enrollment.service.js';
 import { BatchModel } from '../Batch/batch.model.js';
 import { ModuleProgressModel } from '../Progress/moduleProgress.model.js';
 import { ProgressService } from '../Progress/progress.service.js';
@@ -148,8 +149,7 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
     }
 
     const courseName = (course as any)?.title || 'Course';
-    setImmediate(async () => {
-        try {
+    try {
             const user = await UserModel.findById(userId).lean();
             if (user) {
                 await NotificationService.createNotificationForAdmins({
@@ -162,8 +162,7 @@ const requestCertificate = async (enrollmentId: string, userId: string) => {
             }
         } catch (error) {
             logger.error(error, 'Failed to send certificate request notification');
-        }
-    });
+    }
 
     return certificate;
 };
@@ -182,25 +181,44 @@ const approveCertificate = async (certificateId: string, approvedBy: string) => 
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Certificate is not pending approval');
     }
 
-    // Approve certificate
-    certificate.status = CertificateStatus.Active;
-    (certificate as any).approvedBy = approvedBy;
-    (certificate as any).approvedAt = new Date();
-    await certificate.save();
+    const approvedCertificate = await CertificateModel.findOneAndUpdate(
+        { _id: certificate._id, status: CertificateStatus.Pending },
+        {
+            $set: {
+                status: CertificateStatus.Active,
+                approvedBy: approvedBy,
+                approvedAt: new Date(),
+            },
+        },
+        { new: true }
+    );
+    if (!approvedCertificate) {
+        throw new ApiError(StatusCodes.CONFLICT, 'Certificate approval was already processed');
+    }
+
+    // Guarded enrollment transition: Active -> Completed, inside its own
+    // transaction with compare-and-set. Enrollment stays Completed (never
+    // resurrected to Active) — revocation only clears certificateIssued.
+    await EnrollmentService.transitionEnrollment(
+        certificate.enrollmentId.toString(),
+        EnrollmentStatus.Active,
+        EnrollmentStatus.Completed,
+        { id: approvedBy, role: 'admin' },
+        'Certificate approved'
+    );
+
+    // Mark certificate issued on the enrollment row
+    await EnrollmentModel.findByIdAndUpdate(certificate.enrollmentId, {
+        certificateIssued: true,
+        completedAt: new Date(),
+    });
 
     await recordAudit({
         actor: approvedBy,
         action: 'certificate.approve',
         targetType: 'Certificate',
-        targetId: certificate._id?.toString(),
-        metadata: { certificateId: certificate.certificateId, enrollmentId: certificate.enrollmentId?.toString() },
-    });
-
-    // Update enrollment
-    await EnrollmentModel.findByIdAndUpdate(certificate.enrollmentId, {
-        certificateIssued: true,
-        completedAt: new Date(),
-        status: EnrollmentStatus.Completed
+        targetId: approvedCertificate._id?.toString(),
+        metadata: { certificateId: approvedCertificate.certificateId, enrollmentId: approvedCertificate.enrollmentId?.toString() },
     });
 
     // Send certificate approved email
@@ -222,8 +240,7 @@ const approveCertificate = async (certificateId: string, approvedBy: string) => 
         logger.error(emailError, 'Failed to send certificate approved email');
     }
 
-    setImmediate(async () => {
-        try {
+    try {
             const enrollment = await EnrollmentModel.findById(certificate.enrollmentId).lean();
             if (enrollment) {
                 const batch = await BatchModel.findById(certificate.batchId).populate('courseId').lean();
@@ -240,10 +257,9 @@ const approveCertificate = async (certificateId: string, approvedBy: string) => 
             }
         } catch (error) {
             logger.error(error, 'Failed to send certificate approved notification');
-        }
-    });
+    }
 
-    return certificate;
+    return approvedCertificate;
 };
 
 /**
@@ -301,12 +317,21 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
         issuedBy: issuedBy as any,
     });
 
-    // Update enrollment
+    // Guarded enrollment transition: Active -> Completed inside its own
+    // transaction with compare-and-set.
+    await EnrollmentService.transitionEnrollment(
+        enrollmentId,
+        EnrollmentStatus.Active,
+        EnrollmentStatus.Completed,
+        { id: issuedBy, role: 'admin' },
+        'Certificate issued'
+    );
+
+    // Mark certificate issued on the enrollment row
     await EnrollmentModel.findByIdAndUpdate(enrollmentId, {
         certificateIssued: true,
         certificateId: certificate._id,
         completedAt: new Date(),
-        status: EnrollmentStatus.Completed
     });
 
     await recordAudit({
@@ -332,8 +357,7 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
         logger.error(emailError, 'Failed to send certificate issued email');
     }
 
-    setImmediate(async () => {
-        try {
+    try {
             const courseName = batch?.courseId?.title || 'Course';
             await NotificationService.createNotification({
                 userId: learnerId,
@@ -345,8 +369,7 @@ const issueCertificate = async (enrollmentId: string, issuedBy: string) => {
             });
         } catch (error) {
             logger.error(error, 'Failed to send certificate issued notification');
-        }
-    });
+    }
 
     return certificate;
 };
@@ -449,30 +472,37 @@ const revokeCertificate = async (
         throw new ApiError(StatusCodes.BAD_REQUEST, 'Certificate is already revoked');
     }
 
-    certificate.status = CertificateStatus.Revoked;
-    certificate.revokedAt = new Date();
-    certificate.revokedReason = reason;
-    (certificate as any).revokedBy = revokedBy;
-    await certificate.save();
+    const revokedCertificate = await CertificateModel.findOneAndUpdate(
+        { _id: certificate._id, status: { $ne: CertificateStatus.Revoked } },
+        {
+            $set: {
+                status: CertificateStatus.Revoked,
+                revokedAt: new Date(),
+                revokedReason: reason,
+                revokedBy: revokedBy,
+            },
+        },
+        { new: true }
+    );
+    if (!revokedCertificate) {
+        throw new ApiError(StatusCodes.CONFLICT, 'Certificate revocation was already processed');
+    }
 
-    // Unstrand the learner: revocation clears the issued/completed flags so
-    // the enrollment returns to Active and a fresh request is possible.
-    // (requestCertificate ignores Revoked rows — see above.)
+    // Revocation removes the certificate marker but preserves historical course completion.
     await EnrollmentModel.findOneAndUpdate(
-        { _id: certificate.enrollmentId, status: EnrollmentStatus.Completed },
-        { $set: { certificateIssued: false, status: EnrollmentStatus.Active }, $unset: { completedAt: 1 } }
+        { _id: revokedCertificate.enrollmentId, status: EnrollmentStatus.Completed, certificateIssued: true },
+        { $set: { certificateIssued: false } }
     );
 
     await recordAudit({
         actor: revokedBy,
         action: 'certificate.revoke',
         targetType: 'Certificate',
-        targetId: certificate._id?.toString(),
-        metadata: { certificateId: certificate.certificateId, reason },
+        targetId: revokedCertificate._id?.toString(),
+        metadata: { certificateId: revokedCertificate.certificateId, reason },
     });
 
-    setImmediate(async () => {
-        try {
+    try {
             const enrollment = await EnrollmentModel.findById(certificate.enrollmentId).lean();
             if (enrollment) {
                 const batch = await BatchModel.findById(certificate.batchId).populate('courseId').lean();
@@ -488,10 +518,9 @@ const revokeCertificate = async (
             }
         } catch (error) {
             logger.error(error, 'Failed to send certificate rejected notification');
-        }
-    });
+    }
 
-    return certificate;
+    return revokedCertificate;
 };
 
 /**

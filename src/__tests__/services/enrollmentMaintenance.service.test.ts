@@ -10,7 +10,9 @@ import {
   createPayment,
 } from '../helpers/factories.js';
 import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
+import { EnrollmentStatusHistoryModel } from '../../modules/Enrollment/enrollmentStatusHistory.model.js';
 import { PaymentModel } from '../../modules/Payment/payment.model.js';
+import { EmailLogModel } from '../../models/email.model.js';
 import { expireAbandonedEnrollments } from '../../modules/Enrollment/enrollmentMaintenance.service.js';
 import { EnrollmentStatus, Status } from '../../types/common.js';
 
@@ -70,7 +72,7 @@ describe('expireAbandonedEnrollments', () => {
     expect(summary).toEqual({ checked: 1, expired: 1, skipped: 0 });
 
     const expiredEnrollment = await EnrollmentModel.findById(enrollment._id).lean();
-    expect(expiredEnrollment?.status).toBe(EnrollmentStatus.PaymentFailed);
+    expect(expiredEnrollment?.status).toBe(EnrollmentStatus.Expired);
     expect(expiredEnrollment?.statusChangeReason).toContain('Auto-expired');
 
     const expiredPayment = await PaymentModel.findById(payment._id).lean();
@@ -164,6 +166,139 @@ describe('expireAbandonedEnrollments', () => {
 
     expect(summary.expired).toBe(1);
     const expired = await EnrollmentModel.findById(enrollment._id).lean();
-    expect(expired?.status).toBe(EnrollmentStatus.PaymentFailed);
+    expect(expired?.status).toBe(EnrollmentStatus.Expired);
   });
+});
+
+describe('expireAbandonedEnrollments — status history + concurrency', () => {
+    it('writes status history row on cron expiry', async () => {
+        const user = await createUser();
+        const course = await createCourse(adminId);
+        const batch = await createBatch(course._id);
+        const enrollmentId = 'MA-1-EXPIRY-HISTORY';
+
+        const enrollment = await createEnrollment(user._id, batch._id, {
+            enrollmentId,
+            status: EnrollmentStatus.Pending,
+        });
+        const payment = await createPayment(user._id, batch._id, {
+            enrollmentId,
+            status: Status.Pending,
+        });
+
+        await backdate(EnrollmentModel, enrollment._id, 72);
+        await backdate(PaymentModel, payment._id, 72);
+
+        await expireAbandonedEnrollments({ olderThanHours: 48 });
+
+        const history = await EnrollmentStatusHistoryModel.find({
+            enrollmentId: enrollment._id,
+            to: EnrollmentStatus.Expired,
+        }).lean();
+
+        expect(history.length).toBeGreaterThan(0);
+        const row = history[0];
+        expect(row.from).toBe(EnrollmentStatus.Pending);
+        expect(row.to).toBe(EnrollmentStatus.Expired);
+        expect(row.actorType).toBe('cron');
+        expect(row.source).toContain('expireAbandonedEnrollments');
+        expect(row.reason).toContain('Auto-expired');
+    });
+
+    it('is safe when run twice concurrently', async () => {
+        const user = await createUser();
+        const course = await createCourse(adminId);
+        const batch = await createBatch(course._id);
+        const enrollmentId = 'MA-1-EXPIRY-CONCUR';
+
+        const enrollment = await createEnrollment(user._id, batch._id, {
+            enrollmentId,
+            status: EnrollmentStatus.Pending,
+        });
+        const payment = await createPayment(user._id, batch._id, {
+            enrollmentId,
+            status: Status.Pending,
+        });
+
+        await backdate(EnrollmentModel, enrollment._id, 72);
+        await backdate(PaymentModel, payment._id, 72);
+
+        const results = await Promise.allSettled([
+            expireAbandonedEnrollments({ olderThanHours: 48 }),
+            expireAbandonedEnrollments({ olderThanHours: 48 }),
+        ]);
+
+        const fulfilled = results.filter((r) => r.status === 'fulfilled').length;
+        expect(fulfilled).toBe(2);
+
+        const final = await EnrollmentModel.findById(enrollment._id).lean();
+        expect(final?.status).toBe(EnrollmentStatus.Expired);
+
+        const history = await EnrollmentStatusHistoryModel.find({
+            enrollmentId: enrollment._id,
+            to: EnrollmentStatus.Expired,
+        }).lean();
+        expect(history.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('emails learner with retry link when enrollment expires', async () => {
+        const user = await createUser({ email: 'expiry@example.com' });
+        const course = await createCourse(adminId);
+        const batch = await createBatch(course._id);
+        const enrollmentId = 'MA-EXPIRY-EMAIL';
+
+        const enrollment = await createEnrollment(user._id, batch._id, {
+            enrollmentId,
+            status: EnrollmentStatus.Pending,
+        });
+        const payment = await createPayment(user._id, batch._id, {
+            enrollmentId,
+            status: Status.Pending,
+        });
+
+        await backdate(EnrollmentModel, enrollment._id, 72);
+        await backdate(PaymentModel, payment._id, 72);
+
+        await expireAbandonedEnrollments({ olderThanHours: 48 });
+
+        const email = await EmailLogModel.findOne({
+            eventId: `enrollment_expired_${enrollmentId}`,
+            eventType: 'enrollment_expired',
+        }).lean();
+
+        expect(email).not.toBeNull();
+        expect(email?.to).toBe(user.email);
+        expect(email?.subject).toContain('expired');
+    });
+
+    it('expiry email is idempotent — same eventId produces one row', async () => {
+        const user = await createUser({ email: 'expiry2@example.com' });
+        const course = await createCourse(adminId);
+        const batch = await createBatch(course._id);
+        const enrollmentId = 'MA-EXPIRY-EMAIL-2';
+
+        const enrollment = await createEnrollment(user._id, batch._id, {
+            enrollmentId,
+            status: EnrollmentStatus.Pending,
+        });
+        const payment = await createPayment(user._id, batch._id, {
+            enrollmentId,
+            status: Status.Pending,
+        });
+
+        await backdate(EnrollmentModel, enrollment._id, 72);
+        await backdate(PaymentModel, payment._id, 72);
+
+        // Run twice concurrently — same enrollmentId, same eventId
+        await Promise.allSettled([
+            expireAbandonedEnrollments({ olderThanHours: 48 }),
+            expireAbandonedEnrollments({ olderThanHours: 48 }),
+        ]);
+
+        const emailCount = await EmailLogModel.countDocuments({
+            eventId: `enrollment_expired_${enrollmentId}`,
+            eventType: 'enrollment_expired',
+        });
+        expect(emailCount).toBe(1);
+    });
 });

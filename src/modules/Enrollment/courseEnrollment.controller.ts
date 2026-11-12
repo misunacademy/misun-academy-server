@@ -40,6 +40,8 @@ const completeLesson = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+
+
 export const CourseEnrollmentController = {
     getCourseProgress,
     completeLesson,
