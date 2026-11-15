@@ -58,19 +58,32 @@ const globalErrorHandler: ErrorRequestHandler = (
             ? error.keyValue?.[duplicateField]
             : undefined;
 
-        message = duplicateField
-            ? `${duplicateField} already exists`
-            : 'Duplicate key error';
+        // One open (non-terminal) enrollment per learner+batch is enforced by a
+        // unique partial index. Callers that reach it raced a concurrent
+        // checkout (or an older build tried to insert a second row); surface an
+        // actionable message instead of leaking Mongo field names.
+        const isOpenEnrollmentConflict =
+            error.keyPattern?.userId === 1 && error.keyPattern?.batchId === 1;
 
-        errorMessages = [
-            {
-                path: duplicateField,
-                message:
-                    duplicateValue !== undefined
-                        ? `${duplicateField} '${String(duplicateValue)}' already exists`
-                        : message,
-            },
-        ];
+        if (isOpenEnrollmentConflict) {
+            message =
+                'You already have an open enrollment for this batch. Finish the existing payment attempt or contact support.';
+            errorMessages = [{ path: 'batchId', message }];
+        } else {
+            message = duplicateField
+                ? `${duplicateField} already exists`
+                : 'Duplicate key error';
+
+            errorMessages = [
+                {
+                    path: duplicateField,
+                    message:
+                        duplicateValue !== undefined
+                            ? `${duplicateField} '${String(duplicateValue)}' already exists`
+                            : message,
+                },
+            ];
+        }
     } else if (error instanceof ApiError) {
         statusCode = error?.statusCode;
         message = error.message;

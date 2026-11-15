@@ -274,21 +274,31 @@ export const reconcilePendingPayments = async (
                 continue;
             }
 
-            await EnrollmentModel.updateOne(
-                {
-                    enrollmentId: payment.enrollmentId,
-                    status: {
-                        $in: [EnrollmentStatus.Pending, EnrollmentStatus.PaymentPending],
+            // Locate the enrollment through the stable ObjectId link. Unpaid
+            // gateway attempts have NO enrollmentId (it is assigned only after
+            // settlement), so filtering on enrollmentId alone silently matched
+            // nothing and left abandoned enrollments PaymentPending.
+            const enrollmentLink: Record<string, unknown>[] = [];
+            if (payment.enrollmentId) enrollmentLink.push({ enrollmentId: payment.enrollmentId });
+            if (payment.enrollmentRef) enrollmentLink.push({ _id: payment.enrollmentRef });
+
+            if (enrollmentLink.length > 0) {
+                await EnrollmentModel.updateOne(
+                    {
+                        $or: enrollmentLink,
+                        status: {
+                            $in: [EnrollmentStatus.Pending, EnrollmentStatus.PaymentPending],
+                        },
                     },
-                },
-                {
-                    $set: {
-                        status: EnrollmentStatus.PaymentFailed,
-                        statusChangeReason:
-                            'Gateway reported no successful payment (reconciliation)',
-                    },
-                }
-            );
+                    {
+                        $set: {
+                            status: EnrollmentStatus.PaymentFailed,
+                            statusChangeReason:
+                                'Gateway reported no successful payment (reconciliation)',
+                        },
+                    }
+                );
+            }
 
             summary.failed += 1;
             logger.info(

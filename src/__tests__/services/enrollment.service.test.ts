@@ -6,6 +6,7 @@ import { EnrollmentService } from '../../modules/Enrollment/enrollment.service.j
 import { EnrollmentModel } from '../../modules/Enrollment/enrollment.model.js';
 import { EnrollmentStatusHistoryModel } from '../../modules/Enrollment/enrollmentStatusHistory.model.js';
 import { PaymentModel } from '../../modules/Payment/payment.model.js';
+import { PaymentAttemptModel } from '../../modules/Payment/paymentAttempt.model.js';
 import { EnrollmentStatus, BatchStatus, Status } from '../../types/common.js';
 import { EmailLogModel } from '../../models/email.model.js';
 
@@ -1064,5 +1065,164 @@ describe('Fix 13: Admin and instructor authorization', () => {
         expect(payment?.status).toBe(Status.Success);
         expect(payment?.method).toBe('complimentary');
         expect(payment?.amount).toBe(0);
+    });
+});
+
+/**
+ * Regression: a learner who opened SSLCommerz and cancelled was left with a
+ * reusable PaymentPending enrollment. Choosing the manual channel afterwards
+ * used to insert a second enrollment row, which the unique (userId, batchId)
+ * partial index rejected with a raw E11000 — the learner saw "userId already
+ * exists" and could not pay until the 48h expiry sweep ran.
+ */
+describe('EnrollmentService.enrollWithManualPayment — after a gateway attempt', () => {
+    const manualSubmission = {
+        senderNumber: '01700000000',
+        transactionId: 'UTR-MANUAL-REUSE',
+    };
+
+    it('reuses the open PaymentPending enrollment instead of inserting a duplicate', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+
+        const enrollment = await createEnrollment(user._id, batch._id, {
+            status: EnrollmentStatus.PaymentPending,
+        });
+
+        // Cancelled SSLCommerz attempt: terminal payment row, enrollment kept
+        // reusable, and no enrollmentId yet.
+        await createPayment(user._id, batch._id, {
+            enrollmentId: undefined,
+            enrollmentRef: enrollment._id,
+            transactionId: 'TXN-GATEWAY-CANCELLED',
+            status: Status.Cancel,
+            method: 'SSLCommerz',
+        });
+
+        const result = await EnrollmentService.enrollWithManualPayment(
+            user._id.toString(),
+            batch._id.toString(),
+            manualSubmission
+        );
+
+        const enrollments = await EnrollmentModel.find({
+            userId: user._id,
+            batchId: batch._id,
+        }).lean();
+        expect(enrollments).toHaveLength(1);
+        expect(enrollments[0].status).toBe(EnrollmentStatus.PaymentPending);
+
+        const payment = await PaymentModel.findOne({ enrollmentRef: enrollment._id }).lean();
+        expect(payment).not.toBeNull();
+        expect(payment?.status).toBe(Status.Review);
+        expect(payment?.method).toBe('PhonePay');
+        expect(payment?.transactionId).toBe(result.transactionId);
+        expect((payment?.gatewayResponse as any)?.phonePeTransactionId).toBe(
+            manualSubmission.transactionId
+        );
+    });
+
+    it('supersedes an in-flight gateway attempt and keeps its tran_id for audit', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+
+        const enrollment = await createEnrollment(user._id, batch._id, {
+            status: EnrollmentStatus.PaymentPending,
+        });
+
+        await PaymentAttemptModel.create({
+            userId: user._id,
+            batchId: batch._id,
+            enrollmentRef: enrollment._id,
+            transactionId: 'TXN-GATEWAY-PENDING',
+            amount: batch.price,
+            currency: 'BDT',
+            status: Status.Pending,
+            method: 'SSLCommerz',
+        });
+        await createPayment(user._id, batch._id, {
+            enrollmentId: undefined,
+            enrollmentRef: enrollment._id,
+            transactionId: 'TXN-GATEWAY-PENDING',
+            status: Status.Pending,
+            method: 'SSLCommerz',
+        });
+
+        await EnrollmentService.enrollWithManualPayment(
+            user._id.toString(),
+            batch._id.toString(),
+            { senderNumber: '01700000000', transactionId: 'UTR-MANUAL-SUPERSEDE' }
+        );
+
+        const attempt = await PaymentAttemptModel.findOne({
+            transactionId: 'TXN-GATEWAY-PENDING',
+        }).lean();
+        expect(attempt?.status).toBe(Status.Superseded);
+        expect((attempt?.gatewayResponse as any)?.supersededBy).toBeDefined();
+
+        const payment = await PaymentModel.findOne({ enrollmentRef: enrollment._id }).lean();
+        expect(payment?.status).toBe(Status.Review);
+        expect((payment?.gatewayResponse as any)?.supersededTranIds).toContain(
+            'TXN-GATEWAY-PENDING'
+        );
+    });
+
+    it('refuses to overwrite a manual payment that is already under review', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+
+        const enrollment = await createEnrollment(user._id, batch._id, {
+            status: EnrollmentStatus.PaymentPending,
+        });
+        await createPayment(user._id, batch._id, {
+            enrollmentId: undefined,
+            enrollmentRef: enrollment._id,
+            transactionId: 'TXN-MANUAL-REVIEW',
+            status: Status.Review,
+            method: 'PhonePay',
+        });
+
+        await expect(
+            EnrollmentService.enrollWithManualPayment(
+                user._id.toString(),
+                batch._id.toString(),
+                { senderNumber: '01700000000', transactionId: 'UTR-SECOND-SUBMISSION' }
+            )
+        ).rejects.toThrow(/already under verification/i);
+
+        const payment = await PaymentModel.findOne({ enrollmentRef: enrollment._id }).lean();
+        expect(payment?.transactionId).toBe('TXN-MANUAL-REVIEW');
+    });
+
+    it('creates exactly one enrollment and one review payment on a first submission', async () => {
+        const user = await createUser();
+        const admin = await createAdmin();
+        const course = await createCourse(admin._id);
+        const batch = await createBatch(course._id);
+
+        await EnrollmentService.enrollWithManualPayment(
+            user._id.toString(),
+            batch._id.toString(),
+            { senderNumber: '01700000000', transactionId: 'UTR-FIRST-SUBMISSION' }
+        );
+
+        const enrollments = await EnrollmentModel.find({
+            userId: user._id,
+            batchId: batch._id,
+        }).lean();
+        expect(enrollments).toHaveLength(1);
+        expect(enrollments[0].status).toBe(EnrollmentStatus.PaymentPending);
+
+        const payments = await PaymentModel.find({
+            enrollmentRef: enrollments[0]._id,
+        }).lean();
+        expect(payments).toHaveLength(1);
+        expect(payments[0].status).toBe(Status.Review);
     });
 });

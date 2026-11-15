@@ -79,11 +79,18 @@ export const expireAbandonedEnrollments = async (
     for (const candidate of candidates) {
         summary.checked += 1;
 
-        const payment = candidate.enrollmentId
-            ? await PaymentModel.findOne({ enrollmentId: candidate.enrollmentId })
-                  .select('status')
-                  .lean()
-            : null;
+        // Resolve the enrollment's payment through BOTH links: settled rows
+        // carry the MA- enrollmentId, while unpaid rows (manual review,
+        // abandoned gateway attempts) only have enrollmentRef. Filtering on
+        // enrollmentId alone let a review payment be auto-expired.
+        const paymentLinks: Record<string, unknown>[] = [{ enrollmentRef: candidate._id }];
+        if (candidate.enrollmentId) {
+            paymentLinks.push({ enrollmentId: candidate.enrollmentId });
+        }
+
+        const payment = await PaymentModel.findOne({ $or: paymentLinks })
+            .select('status')
+            .lean();
 
         // Money may already be with us (manual review) or fully settled.
         if (
