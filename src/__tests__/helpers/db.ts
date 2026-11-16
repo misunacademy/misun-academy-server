@@ -13,6 +13,10 @@ import '../../modules/Module/module.model.js';
 import '../../modules/Progress/moduleProgress.model.js';
 import '../../modules/Enrollment/enrollmentCounter.model.js';
 import '../../modules/User/studentIdCounter.model.js';
+import '../../modules/EnrollmentPerk/enrollmentPerkRule.model.js';
+import '../../modules/EnrollmentPerk/perkGrant.model.js';
+import '../../modules/Bootcamp/bootcampCatalog.model.js';
+import '../../modules/Bootcamp/bootcampPurchase.model.js';
 
 let replSet: MongoMemoryReplSet;
 

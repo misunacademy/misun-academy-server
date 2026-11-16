@@ -19,6 +19,7 @@ import { NotificationService } from '../Notification/notification.service.js';
 import { queueEmail } from '../../services/emailService.js';
 import { CourseBrand, deriveCourseBrand } from '../../utils/courseBrand.js';
 import { recordAudit } from '../../models/auditLog.model.js';
+import { EnrollmentPerkService } from '../EnrollmentPerk/enrollmentPerk.service.js';
 import {
     initializeModuleProgress,
     getUserEnrollments,
@@ -870,6 +871,12 @@ const grantAccessByEmail = async (
             { session }
         );
 
+        await EnrollmentPerkService.grantPerksForEnrollment({
+            enrollmentId: enrollment._id.toString(),
+            session,
+            actor,
+        });
+
         await session.commitTransaction();
 
         await recordAudit({
@@ -1053,6 +1060,21 @@ const transferEnrollment = async (
             ],
             { session, ordered: true }
         );
+
+        // Revoke perks granted from the old batch enrollment (if rule configured to revoke)
+        await EnrollmentPerkService.revokePerksForEnrollment({
+            sourceEnrollmentId: enrollment._id.toString(),
+            session,
+            actor,
+            reason: `Transferred to batch ${newBatchId}`,
+        });
+
+        // Grant perks configured for the new batch enrollment
+        await EnrollmentPerkService.grantPerksForEnrollment({
+            enrollmentId: newEnrollment[0]._id.toString(),
+            session,
+            actor,
+        });
 
         await session.commitTransaction();
         return newEnrollment[0];

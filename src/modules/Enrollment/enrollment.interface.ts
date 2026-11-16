@@ -20,6 +20,9 @@ export interface IEnrollment {
     accessExtendedUntil?: Date;
     transferredToBatchId?: Types.ObjectId;
     transferredFromBatchId?: Types.ObjectId;
+    grantedViaPerk?: boolean;
+    perkRuleId?: Types.ObjectId;
+    perkSourceEnrollmentId?: Types.ObjectId;
     createdAt?: Date;
     updatedAt?: Date;
 }

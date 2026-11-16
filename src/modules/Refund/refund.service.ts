@@ -16,6 +16,7 @@ import { Role } from '../../types/role.js';
 import env from '../../config/env.js';
 import { CertificateService } from '../Certificate/certificate.service.js';
 import { sendCertificateRevokedEmail } from '../../services/misunAcademyEmails.js';
+import { EnrollmentPerkService } from '../EnrollmentPerk/enrollmentPerk.service.js';
 
 interface Actor {
   id: string;
@@ -535,6 +536,13 @@ const completeRefund = async (id: string, actor: Actor, ip?: string) => {
             { id: actor.id, role: actor.role },
             'Full refund — access removed'
           );
+
+          await EnrollmentPerkService.revokePerksForEnrollment({
+            sourceEnrollmentId: enrollment._id.toString(),
+            session,
+            actor: { id: actor.id, role: actor.role },
+            reason: 'Full refund — perk access revoked',
+          });
         }
 
         // Send access-removed email (queued via DB-backed worker, best-effort).

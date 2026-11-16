@@ -78,9 +78,6 @@ const EnvSchema = z.object({
     // Cron authentication (Vercel Cron sends this as Bearer token)
     CRON_SECRET: z.string().optional(),
 
-    // Upstash Redis (persistent rate limiting; falls back to in-memory when unset)
-    UPSTASH_REDIS_REST_URL: z.string().optional(),
-    UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
 });
 
 // Validate and parse environment variables

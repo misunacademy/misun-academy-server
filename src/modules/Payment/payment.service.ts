@@ -25,6 +25,7 @@ import { deriveCourseBrand } from "../../utils/courseBrand.js";
 import { recordAudit } from "../../models/auditLog.model.js";
 import { IPayment } from "./payment.model.js";
 import { NotificationService } from '../Notification/notification.service.js';
+import { EnrollmentPerkService } from '../EnrollmentPerk/enrollmentPerk.service.js';
 import * as Sentry from '@sentry/node';
 
 interface PaymentHistoryQuery {
@@ -308,6 +309,16 @@ const settlePaymentSuccess = async (params: {
         await EnrollmentService.initializeModuleProgress(updatedEnrollment._id.toString());
     }
 
+    try {
+        await EnrollmentPerkService.grantPerksForEnrollment({
+            enrollmentId: updatedEnrollment._id.toString(),
+            session,
+            actor: actorId ? { id: actorId, role: actorType } : undefined,
+        });
+    } catch (perkErr) {
+        logger.error(perkErr, 'Failed to evaluate perks during payment settlement');
+    }
+
     const user = await UserModel.findById(payment.userId).lean().session(session);
     const batch = await BatchModel.findById(payment.batchId)
         .populate('courseId', 'title slug')
@@ -447,6 +458,16 @@ const settlePaymentSuccess = async (params: {
 
     if (initializeModules) {
         await EnrollmentService.initializeModuleProgress(updatedEnrollment._id.toString());
+    }
+
+    try {
+        await EnrollmentPerkService.grantPerksForEnrollment({
+            enrollmentId: updatedEnrollment._id.toString(),
+            session,
+            actor: actorId ? { id: actorId, role: actorType } : undefined,
+        });
+    } catch (perkErr) {
+        logger.error(perkErr, 'Failed to evaluate perks during payment settlement');
     }
 
     await syncProfileEnrollmentReference(

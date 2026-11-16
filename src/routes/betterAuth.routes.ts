@@ -3,6 +3,7 @@ import { getAuth } from '../config/betterAuth.js';
 import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
 import { EnrollmentModel } from '../modules/Enrollment/enrollment.model.js';
 import { EnrollmentStatus } from '../types/common.js';
+import { UserModel } from '../modules/User/user.model.js';
 import { logger } from '../config/logger.js';
 import env from '../config/env.js';
 import ApiError from '../errors/ApiError.js';
@@ -193,6 +194,19 @@ router.post('/server/sign-up/email', async (req: Request, res: Response) => {
   if (req.body?.agreedToTerms !== true) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'You must accept the Terms & Conditions to create an account');
   }
+
+  // Better Auth only surfaces USER_ALREADY_EXISTS for verified accounts when
+  // email verification is required; an existing UNVERIFIED email silently
+  // resends the verification email (generic 200 success) to avoid email
+  // enumeration. Enforce a consistent error here so the client tells the user
+  // the account already exists instead of pretending registration succeeded.
+  const normalizedEmail = String(req.body?.email ?? '').toLowerCase().trim();
+  if (normalizedEmail && (await UserModel.exists({ email: normalizedEmail }))) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'This email is already registered. Please sign in instead.', undefined, {
+      code: 'USER_ALREADY_EXISTS',
+    });
+  }
+
   return runAuthAction(res, 'signUpEmail', async () =>
     auth.api.signUpEmail({
       ...(await buildAuthContext(req)),

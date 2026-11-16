@@ -69,6 +69,18 @@ const enrollmentSchema = new Schema<IEnrollment>(
             type: Schema.Types.ObjectId,
             ref: 'Batch',
         },
+        grantedViaPerk: {
+            type: Boolean,
+            default: false,
+        },
+        perkRuleId: {
+            type: Schema.Types.ObjectId,
+            ref: 'EnrollmentPerkRule',
+        },
+        perkSourceEnrollmentId: {
+            type: Schema.Types.ObjectId,
+            ref: 'Enrollment',
+        },
     },
     {
         timestamps: true,
