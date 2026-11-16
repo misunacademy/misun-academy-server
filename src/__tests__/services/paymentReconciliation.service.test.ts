@@ -137,6 +137,38 @@ describe('reconcilePendingPayments', () => {
     expect(failedEnrollment?.status).toBe(EnrollmentStatus.PaymentFailed);
   });
 
+  it('marks the enrollment payment-failed through enrollmentRef when no enrollmentId exists yet', async () => {
+    const user = await createUser();
+    const course = await createCourse(adminId);
+    const batch = await createBatch(course._id);
+
+    // Unpaid enrollments never carry an enrollmentId — it is assigned on
+    // settlement. The reconciliation job must still close them out.
+    const enrollment = await createEnrollment(user._id, batch._id, {
+      status: EnrollmentStatus.PaymentPending,
+    });
+    const payment = await createPayment(user._id, batch._id, {
+      enrollmentId: undefined,
+      enrollmentRef: enrollment._id,
+      status: Status.Pending,
+      method: 'SSLCommerz',
+      amount: batch.price,
+      currency: 'BDT',
+      transactionId: 'MA_NO_ENROLLMENT_ID',
+    });
+    await backdatePayment(payment._id, 60);
+
+    const summary = await reconcilePendingPayments({
+      olderThanMinutes: 20,
+      queryTransaction: async (tranId) => ({ status: 'FAILED', tran_id: tranId }),
+    });
+
+    expect(summary.failed).toBe(1);
+
+    const updated = await EnrollmentModel.findById(enrollment._id).lean();
+    expect(updated?.status).toBe(EnrollmentStatus.PaymentFailed);
+  });
+
   it('leaves the payment pending when the gateway is unreachable', async () => {
     const { payment, enrollment } = await setupPendingPayment();
 
