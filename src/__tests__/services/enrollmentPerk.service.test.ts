@@ -10,6 +10,8 @@ import { EnrollmentStatus } from '../../types/common.js';
 import { BootcampCatalogModel } from '../../modules/Bootcamp/bootcampCatalog.model.js';
 import { BootcampPurchaseModel } from '../../modules/Bootcamp/bootcampPurchase.model.js';
 import { BootcampPurchaseStatus, BootcampStatus, RecordedStatus } from '../../modules/Bootcamp/bootcampCatalog.interface.js';
+import { DigitalProductModel } from '../../modules/DigitalProduct/digitalProduct.model.js';
+import { DigitalProductOrderModel } from '../../modules/DigitalProduct/digitalProductOrder.model.js';
 
 describe('EnrollmentPerkService', () => {
     let adminUser: any;
@@ -565,6 +567,92 @@ describe('EnrollmentPerkService', () => {
 
             const revokedPurchase = await BootcampPurchaseModel.findById(purchase?._id);
             expect(revokedPurchase?.status).toBe(BootcampPurchaseStatus.Rejected);
+        });
+    });
+
+    describe('grantPerksForEnrollment - FreeDigitalProduct benefit', () => {
+        it('should grant a complimentary paid digital product order and revoke on refund', async () => {
+            const product = await DigitalProductModel.create({
+                title: 'Photoshop Script Pack',
+                slug: `photoshop-script-${Date.now()}`,
+                software: 'photoshop',
+                priceBDT: 500,
+                priceINR: 400,
+                scriptFile: {
+                    fileName: 'script.jsx',
+                    url: 'https://example.com/script.jsx',
+                },
+                guidePdf: {
+                    fileName: 'guide.pdf',
+                    url: 'https://example.com/guide.pdf',
+                },
+                isPublished: true,
+            });
+
+            await EnrollmentPerkService.createRule(
+                {
+                    courseId: courseA._id,
+                    batchId: batchA1._id,
+                    title: 'Free Digital Product for Batch A1',
+                    isActive: true,
+                    revokeOnCancel: true,
+                    benefits: [
+                        {
+                            type: PerkBenefitType.FreeDigitalProduct,
+                            targetDigitalProductId: product._id,
+                        },
+                    ],
+                },
+                adminUser._id.toString()
+            );
+
+            const sourceEnrollment = await createEnrollment(learner._id, batchA1._id, {
+                status: EnrollmentStatus.Active,
+                enrolledAt: new Date(),
+            });
+
+            const grantResult = await EnrollmentPerkService.grantPerksForEnrollment({
+                enrollmentId: sourceEnrollment._id.toString(),
+            });
+
+            expect(grantResult.grantedCount).toBe(1);
+            expect(grantResult.grants[0].benefitType).toBe(PerkBenefitType.FreeDigitalProduct);
+
+            const order = await DigitalProductOrderModel.findOne({
+                user: learner._id,
+                product: product._id,
+            });
+            expect(order).not.toBeNull();
+            expect(order?.status).toBe('paid');
+            expect(order?.amount).toBe(0);
+            expect(order?.paymentMethod).toBe('Perk');
+            expect(order?.downloadToken).toBeTruthy();
+            expect(order?.customer.email).toBe(learner.email);
+
+            // Complimentary perk orders must not inflate the product's sales counter
+            const afterGrantProduct = await DigitalProductModel.findById(product._id);
+            expect(afterGrantProduct?.salesCount).toBe(0);
+
+            // Idempotency: a second run must not create another order
+            const secondGrant = await EnrollmentPerkService.grantPerksForEnrollment({
+                enrollmentId: sourceEnrollment._id.toString(),
+            });
+            expect(secondGrant.grantedCount).toBe(0);
+            const totalOrders = await DigitalProductOrderModel.countDocuments({
+                user: learner._id,
+                product: product._id,
+            });
+            expect(totalOrders).toBe(1);
+
+            // Revocation marks the order as rejected so downloads are locked again
+            const revokeRes = await EnrollmentPerkService.revokePerksForEnrollment({
+                sourceEnrollmentId: sourceEnrollment._id.toString(),
+                reason: 'Enrollment cancelled',
+            });
+            expect(revokeRes.revokedCount).toBe(1);
+
+            const revokedOrder = await DigitalProductOrderModel.findById(order?._id);
+            expect(revokedOrder?.status).toBe('rejected');
         });
     });
 });

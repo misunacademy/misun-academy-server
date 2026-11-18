@@ -25,6 +25,10 @@ const perkBenefitSchema = new Schema<IPerkBenefit>(
             type: Schema.Types.ObjectId,
             ref: 'Bootcamp',
         },
+        targetDigitalProductId: {
+            type: Schema.Types.ObjectId,
+            ref: 'DigitalProduct',
+        },
         accessDuration: {
             type: {
                 type: String,

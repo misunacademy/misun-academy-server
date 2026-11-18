@@ -39,6 +39,14 @@ const perkGrantSchema = new Schema<IPerkGrantDocument>(
             type: Schema.Types.ObjectId,
             ref: 'BootcampPurchase',
         },
+        targetDigitalProductId: {
+            type: Schema.Types.ObjectId,
+            ref: 'DigitalProduct',
+        },
+        targetDigitalProductOrderId: {
+            type: Schema.Types.ObjectId,
+            ref: 'DigitalProductOrder',
+        },
         sourceEnrollmentId: {
             type: Schema.Types.ObjectId,
             ref: 'Enrollment',
@@ -73,6 +81,7 @@ const perkGrantSchema = new Schema<IPerkGrantDocument>(
 
 // Indexes
 perkGrantSchema.index({ studentId: 1, targetCourseId: 1 });
+perkGrantSchema.index({ studentId: 1, targetDigitalProductId: 1 });
 perkGrantSchema.index({ ruleId: 1, studentId: 1 });
 perkGrantSchema.index({ sourceEnrollmentId: 1 });
 perkGrantSchema.index({ status: 1, grantedAt: -1 });
