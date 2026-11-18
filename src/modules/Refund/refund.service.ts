@@ -14,6 +14,7 @@ import { NotificationService } from '../Notification/notification.service.js';
 import { escapeRegExp } from '../../utils/escapeRegExp.js';
 import { Role } from '../../types/role.js';
 import env from '../../config/env.js';
+import { sslcommerzConfig } from '../../config/sslcommerz.js';
 import { CertificateService } from '../Certificate/certificate.service.js';
 import { sendCertificateRevokedEmail } from '../../services/misunAcademyEmails.js';
 import { EnrollmentPerkService } from '../EnrollmentPerk/enrollmentPerk.service.js';
@@ -62,8 +63,7 @@ const assertChecker = (
   }
 };
 
-const resolveSslBaseUrl = (): string =>
-  env.SSL_IS_LIVE === 'true' ? 'https://securepay.sslcommerz.com' : 'https://sandbox.sslcommerz.com';
+const resolveSslBaseUrl = (): string => sslcommerzConfig.baseUrl;
 
 interface SslRefundResult {
   APIConnect?: string;
