@@ -8,7 +8,7 @@ const createRecording = z.object({
         description: z.string().optional(),
         sessionDate: z.string().min(1, 'Session date is required'),
         videoSource: z.enum(['youtube', 'googledrive'], {
-            required_error: 'Video source must be youtube or googledrive',
+            error: 'Video source must be youtube or googledrive',
         }),
         videoId: z.string().min(1, 'Video ID is required'),
         duration: z.coerce.number().optional(),

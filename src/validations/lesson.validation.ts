@@ -35,7 +35,7 @@ export const createLessonSchema = z.object({
         title: z.string().min(1, 'Title is required').max(300),
         description: z.string().max(5000).optional(),
         type: z.enum(['video', 'reading', 'quiz', 'project'], {
-            required_error: 'Lesson type is required',
+            error: 'Lesson type is required',
         }),
         ...videoFields,
         content: z.string().max(100000).optional(),
