@@ -37,7 +37,7 @@ Account lifecycle: `UserStatus = active | suspended | deleted`. Suspended users 
 | Auth | Better-Auth 1.6 (MongoDB adapter, `usePlural`, joins), email+password + Google OAuth, 7-day sessions, JWE cookie-cache (5 min) |
 | Validation | Zod (request + env) |
 | Uploads | Multer (memory) + Cloudinary (incl. restricted/signed delivery) |
-| Payments | `sslcommerz-lts` (sandbox/live toggle), manual-payment + webhook + IPN validation |
+| Payments | SSLCommerz v4 REST API (direct server-side calls, sandbox/live toggle), manual-payment + webhook + IPN validation |
 | Email | Nodemailer (Gmail service or custom SMTP) + DB-backed queue (`EmailLogModel`, `EmailWorker` polling every 5s, batch 5, retry) |
 | Realtime | Socket.IO (Better-Auth session handshake, per-user rate limit 20 events / 10s) |
 | AI chat | Groq SDK (`groq/compound-mini`, 1024 tokens, 20-msg history cap, 5-min batch-context cache, 3 retries) |
@@ -107,7 +107,7 @@ src/
 ## 5. Key flows
 
 1. **Sign-up → verify → learn:** `POST /auth/sign-up/email` → `sendVerificationEmail` (queued) → verify → auto-sign-in → `requireAuth` (emailVerified + status checks) → enroll.
-2. **Enrollment + payment:** create enrollment (`pending/payment-pending`) → SSLCommerz init (`tran_id = MA…`) → success/fail/cancel IPN + webhook → `checkPaymentStatus`/server validation via `SSL_VALIDATION_API` → activate enrollment in transaction → sync `Profile.enrollments` → confirmation/success/failure emails (brand-routed) + notification + audit log. Manual/grant/special-access paths bypass gateway for staff. Failed/cancelled/expired attempts are terminal: learner APIs hide them, a retry starts a fresh enrollment+payment, and the hourly maintenance job hard-deletes them after `PAYMENT_ARTIFACT_RETENTION_DAYS` (default 7).
+2. **Enrollment + payment:** create enrollment (`pending/payment-pending`) → SSLCommerz init (`tran_id = MA…`) → success/fail/cancel IPN + webhook → `checkPaymentStatus`/server validation via `SSL_VALIDATION_API` → activate enrollment in transaction → sync `Profile.enrollments` → confirmation/success/failure emails (brand-routed) + notification + audit log. Manual/grant/special-access paths bypass gateway for staff. Failed/cancelled/expired attempts are terminal: learner APIs hide them, a retry starts a fresh enrollment+payment, and the hourly maintenance job hard-deletes them after `PAYMENT_ARTIFACT_RETENTION_DAYS` (default 90).
 3. **Learning:** batch must be `running` + enrollment `active` (`batchAccess`/`ownership`) → content delivery → lesson-complete → progress service updates lesson/module/course progress → certificate eligibility.
 4. **Quiz + gamification:** start attempt → submit (validated by `submitQuizSchema`) → `scoring.service` → Zames awarded (`zames.model`) → leaderboards (`all_time/monthly`).
 5. **Certificate:** request → eligibility check → issue → admin approve → `active`; public verify by ID; revoke path.
