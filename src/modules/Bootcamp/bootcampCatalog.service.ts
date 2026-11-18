@@ -1,7 +1,6 @@
 import mongoose, { FilterQuery, Types } from 'mongoose';
 import ApiError from '../../errors/ApiError.js';
 import { StatusCodes } from 'http-status-codes';
-import axios from 'axios';
 import crypto from 'crypto';
 import config from '../../config/env.js';
 import { paymentGatewayAdapter } from '../../services/paymentGatewayAdapter.js';
@@ -547,16 +546,7 @@ const getBootcampCallbackKey = (transactionId: string): string => {
 };
 
 const validateBootcampSSLCommerzPayment = async (valId: string): Promise<any> => {
-    const { data } = await axios.get<any>(config.SSL_VALIDATION_API, {
-        timeout: 10000,
-        params: {
-            val_id: valId,
-            store_id: config.SSL_STORE_ID,
-            store_passwd: config.SSL_STORE_PASSWORD,
-            format: 'json',
-        },
-    });
-    return data;
+    return paymentGatewayAdapter.validate(valId);
 };
 
 const initiateBootcampSSLCommerz = async (slug: string, userId: string) => {
@@ -869,6 +859,110 @@ const checkBootcampPaymentStatus = async (transactionId: string, userId?: string
     };
 };
 
+const submitPhonePeManualPurchase = async (
+    slug: string,
+    userId: string,
+    data: { senderPhonePe: string; transactionId: string }
+) => {
+    const bootcamp = await BootcampCatalogModel.findOne({ slug: slug.toLowerCase() });
+    if (!bootcamp || bootcamp.recordedStatus !== 'published') {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Bootcamp recording is not available for purchase');
+    }
+
+    const existingPaid = await BootcampPurchaseModel.findOne({
+        user: new Types.ObjectId(userId),
+        bootcamp: bootcamp._id,
+        status: BootcampPurchaseStatus.Paid,
+    });
+    if (existingPaid) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'You have already purchased this bootcamp recording');
+    }
+
+    const trimmedTxn = data.transactionId.trim();
+    const txExists = await BootcampPurchaseModel.findOne({
+        transactionId: trimmedTxn,
+    });
+    if (txExists) {
+        throw new ApiError(StatusCodes.CONFLICT, 'This Transaction ID has already been submitted');
+    }
+
+    const amount = bootcamp.recordedPriceINR || Math.round(bootcamp.recordedPrice * 0.75) || bootcamp.recordedPrice;
+
+    const existingPending = await BootcampPurchaseModel.findOne({
+        user: new Types.ObjectId(userId),
+        bootcamp: bootcamp._id,
+        status: BootcampPurchaseStatus.Pending,
+    });
+
+    let purchase;
+    if (existingPending) {
+        existingPending.amount = amount;
+        existingPending.currency = 'INR';
+        existingPending.method = 'PhonePe_Manual';
+        existingPending.transactionId = trimmedTxn;
+        existingPending.senderNumber = data.senderPhonePe.trim();
+        existingPending.gatewayResponse = {
+            submittedAt: new Date(),
+            source: 'PhonePe_Manual',
+        };
+        purchase = await existingPending.save();
+    } else {
+        purchase = await BootcampPurchaseModel.create({
+            user: new Types.ObjectId(userId),
+            bootcamp: bootcamp._id,
+            amount,
+            currency: 'INR',
+            method: 'PhonePe_Manual',
+            transactionId: trimmedTxn,
+            senderNumber: data.senderPhonePe.trim(),
+            status: BootcampPurchaseStatus.Pending,
+            gatewayResponse: {
+                submittedAt: new Date(),
+                source: 'PhonePe_Manual',
+            },
+        });
+    }
+
+    return purchase;
+};
+
+const reviewBootcampPurchaseAdmin = async (
+    purchaseId: string,
+    adminUserId: string,
+    payload: { status: 'paid' | 'rejected'; adminNote?: string }
+) => {
+    const purchase = await BootcampPurchaseModel.findById(purchaseId)
+        .populate('user', 'name email phone')
+        .populate('bootcamp', 'title season slug');
+    if (!purchase) {
+        throw new ApiError(StatusCodes.NOT_FOUND, 'Bootcamp purchase not found');
+    }
+
+    purchase.status = payload.status === 'paid' ? BootcampPurchaseStatus.Paid : BootcampPurchaseStatus.Rejected;
+    purchase.reviewedBy = new Types.ObjectId(adminUserId);
+    purchase.reviewedAt = new Date();
+    if (payload.adminNote) {
+        purchase.adminNote = payload.adminNote;
+    }
+    await purchase.save();
+
+    await recordAudit({
+        actor: adminUserId,
+        action: `bootcamp.purchase.${payload.status}`,
+        targetType: 'BootcampPurchase',
+        targetId: purchaseId,
+        metadata: {
+            bootcampId: (purchase.bootcamp as any)?._id?.toString(),
+            userId: (purchase.user as any)?._id?.toString(),
+            transactionId: purchase.transactionId,
+            status: purchase.status,
+            adminNote: payload.adminNote,
+        },
+    });
+
+    return purchase;
+};
+
 export const BootcampCatalogService = {
     getCurrentBootcamp,
     getPastBootcamps,
@@ -890,4 +984,6 @@ export const BootcampCatalogService = {
     finalizeBootcampSSLCommerz,
     checkBootcampPaymentStatus,
     getBootcampCallbackKey,
+    submitPhonePeManualPurchase,
+    reviewBootcampPurchaseAdmin,
 };
