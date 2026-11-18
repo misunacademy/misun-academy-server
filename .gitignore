@@ -8,3 +8,4 @@ dist/
 .turbo/
 *.tsbuildinfo
 graphify-out/
+.env.prod
