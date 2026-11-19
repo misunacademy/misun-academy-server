@@ -35,7 +35,7 @@ export class DigitalProductController {
     });
 
     static initiateSSLCommerz = catchAsync(async (req: Request, res: Response) => {
-        const { productId, address } = req.body;
+        const { productId, address, redirectPath } = req.body;
         const user = req.user as { id: string; name?: string; email?: string; phone?: string };
         const name = req.body.name || user?.name || 'Student';
         const email = req.body.email || user?.email || '';
@@ -43,7 +43,7 @@ export class DigitalProductController {
 
         const result = await DigitalProductService.initiateSSLCommerzPayment(
             productId,
-            { name, email, phone, address },
+            { name, email, phone, address, redirectPath },
             user.id
         );
 
@@ -93,13 +93,13 @@ export class DigitalProductController {
         const callbackKey = (query.k as string | undefined) ?? (body.k as string | undefined);
 
         if (!transactionId) {
-            redirectFrontend(res, '/bootcamp?digitalPayment=failed');
+            redirectFrontend(res, '/digital-products?digitalPayment=failed');
             return;
         }
 
         const expectedKey = DigitalProductService.getCallbackKey(transactionId);
         if (!callbackKey || callbackKey !== expectedKey) {
-            redirectFrontend(res, '/bootcamp?digitalPayment=failed');
+            redirectFrontend(res, '/digital-products?digitalPayment=failed');
             return;
         }
 
@@ -110,16 +110,25 @@ export class DigitalProductController {
                 valId
             );
 
+            const targetPath =
+                (order?.gatewayResponse as any)?.redirectPath &&
+                typeof (order?.gatewayResponse as any)?.redirectPath === 'string' &&
+                (order?.gatewayResponse as any).redirectPath.startsWith('/')
+                    ? (order?.gatewayResponse as any).redirectPath
+                    : '/digital-products';
+
+            const separator = targetPath.includes('?') ? '&' : '?';
+
             if (order && order.status === 'paid') {
                 redirectFrontend(
                     res,
-                    `/bootcamp?digitalPayment=success&orderId=${order.orderNumber}&token=${order.downloadToken}`
+                    `${targetPath}${separator}digitalPayment=success&orderId=${order.orderNumber}&token=${order.downloadToken}`
                 );
             } else {
-                redirectFrontend(res, '/bootcamp?digitalPayment=failed');
+                redirectFrontend(res, `${targetPath}${separator}digitalPayment=failed`);
             }
         } catch {
-            redirectFrontend(res, '/bootcamp?digitalPayment=failed');
+            redirectFrontend(res, '/digital-products?digitalPayment=failed');
         }
     });
 
