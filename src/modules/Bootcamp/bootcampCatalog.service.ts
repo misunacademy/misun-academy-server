@@ -22,6 +22,7 @@ import { recordAudit } from '../../models/auditLog.model.js';
 import { normalizeVideoId } from '../../utils/video.utils.js';
 import { UserModel } from '../User/user.model.js';
 import { logger } from '../../config/logger.js';
+import { sendBootcampManualPaymentRejectedEmail } from '../../services/misunAcademyEmails.js';
 
 const slugify = (value: string): string =>
     value
@@ -959,6 +960,21 @@ const reviewBootcampPurchaseAdmin = async (
             adminNote: payload.adminNote,
         },
     });
+
+    // Send rejection email to buyer
+    if (payload.status === 'rejected') {
+        const buyer = purchase.user as any;
+        const bootcamp = purchase.bootcamp as any;
+        if (buyer?.email) {
+            sendBootcampManualPaymentRejectedEmail({
+                email: buyer.email,
+                name: buyer.name || 'Valued Customer',
+                bootcampTitle: bootcamp?.title || 'Bootcamp Recording',
+                transactionId: purchase.transactionId || 'N/A',
+                reason: payload.adminNote,
+            }).catch((err) => logger.error('Failed to send bootcamp rejection email', err));
+        }
+    }
 
     return purchase;
 };
