@@ -891,6 +891,49 @@ export const sendCompletedBatchIncompleteReminderEmail = async (
 };
 // --- BOOTCAMP ---
 
+export const sendBootcampManualPaymentRejectedEmail = async (params: {
+  email: string;
+  name: string;
+  bootcampTitle: string;
+  transactionId: string;
+  reason?: string;
+}) => {
+  const { email, name, bootcampTitle, transactionId, reason } = params;
+  const html = getEmailTemplate(
+    `
+        <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+            <h1>Payment Verification Update ⚠️</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${escapeHtml(name)}</strong>,</p>
+            <p>Your manual PhonePe payment for the bootcamp <strong>${escapeHtml(bootcampTitle)}</strong> could not be verified and has been rejected by our team.</p>
+            
+            <div class="highlight-box" style="border-color: #ef4444; background-color: #fef2f2; margin: 20px 0;">
+                <p style="margin: 0 0 8px 0;"><strong>Transaction ID:</strong> ${escapeHtml(transactionId)}</p>
+                <p style="margin: 0 0 8px 0; color: #991b1b;"><strong>বাতিলের কারণ (Rejection Reason):</strong></p>
+                <p style="margin: 0; color: #b91c1c; font-size: 14px; font-weight: 500;">
+                    ${escapeHtml(reason || 'Transaction ID বা পেমেন্ট তথ্যের অসঙ্গতি থাকায় বাতিল করা হয়েছে।')}
+                </p>
+            </div>
+
+            <p style="font-size: 13px; color: #4b5563; line-height: 1.6;">
+                যদি আপনি মনে করেন এটি একটি ভুল অথবা আপনার কাছে সঠিক পেমেন্ট প্রুফ / স্ক্রিনশট থেকে থাকে, তাহলে অনুগ্রহ করে Transaction ID (${escapeHtml(transactionId)}) সহ আমাদের সাপোর্ট টিমে যোগাযোগ করুন। অথবা আপনি পুনরায় সঠিক তথ্য দিয়ে আবেদন করতে পারেন।
+            </p>
+        </div>
+    `,
+    "#ef4444"
+  );
+
+  await queueEmail(
+    email,
+    `Payment Verification Failed: ${bootcampTitle} — Transaction #${transactionId}`,
+    html,
+    {
+      eventType: "bootcamp_manual_payment_rejected",
+    }
+  );
+};
+
 export const sendBootcampRegistrationConfirmationEmail = async (
   email: string,
   name: string,
@@ -1013,5 +1056,48 @@ export const sendDigitalProductPurchasedEmail = async (params: {
   await queueEmail(email, `Download Your Files: ${productTitle} 🎉`, html, {
     eventType: "digital_product_download_ready",
   });
+};
+
+export const sendDigitalProductRejectedEmail = async (params: {
+  email: string;
+  name: string;
+  productTitle: string;
+  orderNumber: string;
+  reason?: string;
+}) => {
+  const { email, name, productTitle, orderNumber, reason } = params;
+  const html = getEmailTemplate(
+    `
+        <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+            <h1>Payment Verification Update ⚠️</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${escapeHtml(name)}</strong>,</p>
+            <p>Your manual payment for <strong>${escapeHtml(productTitle)}</strong> could not be verified and has been rejected by our team.</p>
+            
+            <div class="highlight-box" style="border-color: #ef4444; background-color: #fef2f2; margin: 20px 0;">
+                <p style="margin: 0 0 8px 0;"><strong>Order Number:</strong> ${escapeHtml(orderNumber)}</p>
+                <p style="margin: 0 0 8px 0; color: #991b1b;"><strong>বাতিলের কারণ (Rejection Reason):</strong></p>
+                <p style="margin: 0; color: #b91c1c; font-size: 14px; font-weight: 500;">
+                    ${escapeHtml(reason || 'Transaction ID বা পেমেন্ট তথ্যের অসঙ্গতি থাকায় বাতিল করা হয়েছে।')}
+                </p>
+            </div>
+
+            <p style="font-size: 13px; color: #4b5563; line-height: 1.6;">
+                যদি আপনি মনে করেন এটি একটি ভুল অথবা আপনার কাছে সঠিক পেমেন্ট প্রুফ / স্ক্রিনশট থেকে থাকে, তাহলে অনুগ্রহ করে অর্ডার নম্বর (${escapeHtml(orderNumber)}) সহ আমাদের সাপোর্ট টিমে যোগাযোগ করুন। অথবা আপনি পুনরায় সঠিক তথ্য দিয়ে আবেদন করতে পারেন।
+            </p>
+        </div>
+    `,
+    "#ef4444"
+  );
+
+  await queueEmail(
+    email,
+    `Payment Verification Failed: ${productTitle} (Order #${orderNumber})`,
+    html,
+    {
+      eventType: "digital_product_payment_rejected",
+    }
+  );
 };
 

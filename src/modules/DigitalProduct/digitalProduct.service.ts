@@ -17,6 +17,7 @@ import {
 import {
     sendDigitalProductPurchasedEmail,
     sendDigitalProductManualSubmittedEmail,
+    sendDigitalProductRejectedEmail,
 } from '../../services/misunAcademyEmails.js';
 
 const generateOrderNumber = (): string => {
@@ -169,7 +170,7 @@ export class DigitalProductService {
      */
     static async initiateSSLCommerzPayment(
         productId: string,
-        customerData: { name: string; email: string; phone: string; address?: string },
+        customerData: { name: string; email: string; phone: string; address?: string; redirectPath?: string },
         userId?: string
     ) {
         const product = await DigitalProductModel.findById(productId).lean();
@@ -182,6 +183,11 @@ export class DigitalProductService {
         const transactionId = generateTransactionId();
         const callbackKey = getCallbackKey(transactionId);
         const downloadToken = crypto.randomBytes(24).toString('hex');
+
+        const safeRedirectPath =
+            customerData.redirectPath && customerData.redirectPath.startsWith('/')
+                ? customerData.redirectPath
+                : '/digital-products';
 
         const order = await DigitalProductOrderModel.create({
             orderNumber,
@@ -204,7 +210,7 @@ export class DigitalProductService {
             transactionId,
             status: 'pending',
             downloadToken,
-            gatewayResponse: { initiatedAt: new Date() },
+            gatewayResponse: { initiatedAt: new Date(), redirectPath: safeRedirectPath },
         });
 
         const paymentData = {
@@ -234,6 +240,7 @@ export class DigitalProductService {
                 ...order.gatewayResponse,
                 paymentUrl: response.GatewayPageURL,
                 sessionKey: response.sessionkey,
+                redirectPath: safeRedirectPath,
             };
             await order.save();
             return {
@@ -475,6 +482,21 @@ export class DigitalProductService {
                     logger.warn({ err }, 'Failed to send order approval email');
                 }
             }
+        } else if (status === 'rejected') {
+            const product = await DigitalProductModel.findById(order.product).lean();
+            if (product) {
+                try {
+                    await sendDigitalProductRejectedEmail({
+                        email: order.customer.email,
+                        name: order.customer.name,
+                        productTitle: product.title,
+                        orderNumber: order.orderNumber,
+                        reason: adminNote,
+                    });
+                } catch (err) {
+                    logger.warn({ err }, 'Failed to send order rejection email');
+                }
+            }
         }
 
         return order;
@@ -536,7 +558,6 @@ export class DigitalProductService {
 
     static async getMyPurchasedProducts(userEmail: string, userId?: string) {
         const filter: FilterQuery<IDigitalProductOrder> = {
-            status: 'paid',
             $or: [{ 'customer.email': userEmail.toLowerCase() }],
         };
         if (userId) {
@@ -550,12 +571,15 @@ export class DigitalProductService {
 
         return orders.map((o) => {
             const prod = o.product as any;
+            const isPaid = o.status === 'paid';
             return {
                 orderNumber: o.orderNumber,
                 transactionId: o.transactionId,
                 paymentMethod: o.paymentMethod,
                 status: o.status,
-                paidAt: o.reviewedAt || o.updatedAt,
+                adminNote: o.adminNote,
+                createdAt: (o as any).createdAt,
+                paidAt: o.reviewedAt || (o as any).updatedAt,
                 amount: o.amount,
                 currency: o.currency,
                 product: prod
@@ -570,8 +594,12 @@ export class DigitalProductService {
                       }
                     : o.productSnapshot,
                 downloadToken: o.downloadToken,
-                scriptDownloadUrl: `${config.SERVER_URL}/api/v1/digital-products/download/${o.downloadToken}/script`,
-                guideDownloadUrl: `${config.SERVER_URL}/api/v1/digital-products/download/${o.downloadToken}/guide`,
+                scriptDownloadUrl: isPaid
+                    ? `${config.SERVER_URL}/api/v1/digital-products/download/${o.downloadToken}/script`
+                    : undefined,
+                guideDownloadUrl: isPaid
+                    ? `${config.SERVER_URL}/api/v1/digital-products/download/${o.downloadToken}/guide`
+                    : undefined,
             };
         });
     }
