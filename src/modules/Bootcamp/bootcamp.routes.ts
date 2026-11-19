@@ -13,6 +13,8 @@ import {
     updateBootcampVideoSchema,
     deleteBootcampVideoSchema,
     bootcampIdParamSchema,
+    submitBootcampManualPaymentSchema,
+    reviewBootcampPurchaseSchema,
 } from './bootcampCatalog.validation.js';
 import { requireAuth, requireAdmin, optionalAuth } from '../../middlewares/betterAuth.js';
 import validateRequest from '../../middlewares/validateRequest.js';
@@ -174,6 +176,14 @@ router.get(
     BootcampCatalogController.listBootcampPurchases
 );
 
+router.patch(
+    '/purchases/:id/review',
+    requireAuth,
+    requireAdmin,
+    validateRequest(reviewBootcampPurchaseSchema),
+    BootcampCatalogController.reviewBootcampPurchaseAdmin
+);
+
 router.get(
     '/my-purchases',
     requireAuth,
@@ -187,7 +197,14 @@ router.get(
     BootcampCatalogController.getMyBootcampVideos
 );
 
-// --- SSLCommerz payment for bootcamp recordings ---
+// --- Payment for bootcamp recordings (SSLCommerz & PhonePe Manual) ---
+router.post(
+    '/slug/:slug/payment/manual-phonepe',
+    requireAuth,
+    validateRequest(submitBootcampManualPaymentSchema),
+    BootcampCatalogController.submitPhonePeManualPurchase
+);
+
 // Status callback is hit by the SSLCommerz gateway (form POST into the popup
 // window) and by browser top-level navigation — both carry no session/CSRF, so
 // it stays public and is verified via the HMAC callback key (same as PaymentRoutes).

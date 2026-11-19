@@ -16,7 +16,6 @@ import {
 import crypto from 'crypto';
 import { BatchModel } from "../Batch/batch.model.js";
 import { ProfileService } from "../Profile/profile.service.js";
-import axios from 'axios';
 import env from '../../config/env.js';
 import { paymentGatewayAdapter } from '../../services/paymentGatewayAdapter.js';
 import { EnrollmentService } from "../Enrollment/enrollment.service.js";
@@ -1032,17 +1031,7 @@ const checkPaymentStatus = async (transactionId: string) => {
 // ─── SSLCOMMERZ VALIDATION ───
 
 const validateSSLCommerzPayment = async (valId: string) => {
-    const { data } = await axios.get(env.SSL_VALIDATION_API, {
-        timeout: 10000,
-        params: {
-            val_id: valId,
-            store_id: env.SSL_STORE_ID,
-            store_passwd: env.SSL_STORE_PASSWORD,
-            format: 'json',
-        },
-    });
-
-    return data;
+    return paymentGatewayAdapter.validate(valId);
 };
 
 // ─── GATEWAY TRANSACTION LOOKUP (RECONCILIATION) ───

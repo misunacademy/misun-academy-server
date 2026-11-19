@@ -3,6 +3,7 @@ import { Types, Document } from 'mongoose';
 export enum PerkBenefitType {
     FreeCourse = 'free_course',
     FreeBootcamp = 'free_bootcamp',
+    FreeDigitalProduct = 'free_digital_product',
     DiscountCoupon = 'discount_coupon',
     Resource = 'resource',
     Certificate = 'certificate',
@@ -21,6 +22,7 @@ export interface IPerkBenefit {
     targetCourseId?: Types.ObjectId;
     targetBatchId?: Types.ObjectId;
     targetBootcampId?: Types.ObjectId;
+    targetDigitalProductId?: Types.ObjectId;
     accessDuration?: IPerkAccessDuration;
     extraConfig?: Record<string, unknown>;
 }
@@ -56,6 +58,8 @@ export interface IPerkGrant {
     targetEnrollmentId?: Types.ObjectId;
     targetBootcampId?: Types.ObjectId;
     targetBootcampPurchaseId?: Types.ObjectId;
+    targetDigitalProductId?: Types.ObjectId;
+    targetDigitalProductOrderId?: Types.ObjectId;
     sourceEnrollmentId: Types.ObjectId;
     status: PerkGrantStatus;
     grantedAt: Date;

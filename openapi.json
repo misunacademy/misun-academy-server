@@ -77,6 +77,10 @@
       "description": "Employee endpoints"
     },
     {
+      "name": "enrollment-perks",
+      "description": "Enrollment Perks endpoints"
+    },
+    {
       "name": "enrollments",
       "description": "Enrollments endpoints"
     },
@@ -16388,184 +16392,6 @@
         ]
       }
     },
-    "/api/v1/course-enrollment/{courseId}/watch-time": {
-      "post": {
-        "tags": [
-          "course-enrollment"
-        ],
-        "operationId": "postCourseenrollmentCourseIdWatchtime",
-        "summary": "POST course-enrollment/:courseId/watch-time",
-        "description": "Auto-generated from src/modules/Enrollment/courseEnrollment.routes.ts. Handler: CourseEnrollmentController.recordWatchTime.",
-        "parameters": [
-          {
-            "name": "courseId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "example": "66f1ad6b2f4d7e0d4f9d1234"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/StandardSuccess"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "data": {
-                          "oneOf": [
-                            {
-                              "$ref": "#/components/schemas/Enrollment"
-                            },
-                            {
-                              "type": "array",
-                              "items": {
-                                "$ref": "#/components/schemas/Enrollment"
-                              }
-                            }
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                },
-                "example": {
-                  "success": true,
-                  "statusCode": 200,
-                  "message": "Request successful",
-                  "data": {}
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad Request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "success": false,
-                  "message": "Validation failed",
-                  "errorMessages": [
-                    {
-                      "path": "field",
-                      "message": "Invalid value"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "success": false,
-                  "message": "Authentication required",
-                  "errorMessages": [
-                    {
-                      "path": "auth",
-                      "message": "Invalid or expired session"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "success": false,
-                  "message": "You do not have permission to access this resource",
-                  "errorMessages": [
-                    {
-                      "path": "role",
-                      "message": "Insufficient permissions"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal Server Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "example": {
-                  "success": false,
-                  "message": "Something went wrong",
-                  "errorMessages": []
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "lastWatchedPosition": {
-                    "type": "number"
-                  },
-                  "lessonId": {
-                    "type": "string"
-                  },
-                  "moduleId": {
-                    "type": "string"
-                  },
-                  "watchTime": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "lastWatchedPosition",
-                  "lessonId",
-                  "moduleId",
-                  "watchTime"
-                ],
-                "additionalProperties": true
-              },
-              "example": {
-                "lastWatchedPosition": 1,
-                "lessonId": "66f1ad6b2f4d7e0d4f9d1234",
-                "moduleId": "66f1ad6b2f4d7e0d4f9d1234",
-                "watchTime": 1
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ]
-      }
-    },
     "/api/v1/courses": {
       "get": {
         "tags": [
@@ -19995,6 +19821,1018 @@
           "admin",
           "superadmin"
         ]
+      }
+    },
+    "/api/v1/enrollment-perks": {
+      "get": {
+        "tags": [
+          "enrollment-perks"
+        ],
+        "operationId": "getEnrollmentperks",
+        "summary": "GET enrollment-perks",
+        "description": "Auto-generated from src/modules/EnrollmentPerk/enrollmentPerk.routes.ts. Handler: EnrollmentPerkController.listRules.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "enrollment-perks"
+        ],
+        "operationId": "postEnrollmentperks",
+        "summary": "POST enrollment-perks",
+        "description": "Auto-generated from src/modules/EnrollmentPerk/enrollmentPerk.routes.ts. Handler: EnrollmentPerkController.createRule.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 201,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/enrollment-perks/{id}": {
+      "delete": {
+        "tags": [
+          "enrollment-perks"
+        ],
+        "operationId": "deleteEnrollmentperksId",
+        "summary": "DELETE enrollment-perks/:id",
+        "description": "Auto-generated from src/modules/EnrollmentPerk/enrollmentPerk.routes.ts. Handler: EnrollmentPerkController.deleteRule.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "enrollment-perks"
+        ],
+        "operationId": "getEnrollmentperksId",
+        "summary": "GET enrollment-perks/:id",
+        "description": "Auto-generated from src/modules/EnrollmentPerk/enrollmentPerk.routes.ts. Handler: EnrollmentPerkController.getRuleById.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "enrollment-perks"
+        ],
+        "operationId": "patchEnrollmentperksId",
+        "summary": "PATCH enrollment-perks/:id",
+        "description": "Auto-generated from src/modules/EnrollmentPerk/enrollmentPerk.routes.ts. Handler: EnrollmentPerkController.updateRule.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/enrollment-perks/{id}/backfill": {
+      "post": {
+        "tags": [
+          "enrollment-perks"
+        ],
+        "operationId": "postEnrollmentperksIdBackfill",
+        "summary": "POST enrollment-perks/:id/backfill",
+        "description": "Auto-generated from src/modules/EnrollmentPerk/enrollmentPerk.routes.ts. Handler: EnrollmentPerkController.executeBackfill.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/enrollment-perks/{id}/backfill-preview": {
+      "get": {
+        "tags": [
+          "enrollment-perks"
+        ],
+        "operationId": "getEnrollmentperksIdBackfillpreview",
+        "summary": "GET enrollment-perks/:id/backfill-preview",
+        "description": "Auto-generated from src/modules/EnrollmentPerk/enrollmentPerk.routes.ts. Handler: EnrollmentPerkController.previewBackfill.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/enrollment-perks/{id}/status": {
+      "patch": {
+        "tags": [
+          "enrollment-perks"
+        ],
+        "operationId": "patchEnrollmentperksIdStatus",
+        "summary": "PATCH enrollment-perks/:id/status",
+        "description": "Auto-generated from src/modules/EnrollmentPerk/enrollmentPerk.routes.ts. Handler: EnrollmentPerkController.toggleRuleStatus.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "isActive": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "isActive"
+                ],
+                "additionalProperties": true
+              },
+              "example": {
+                "isActive": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/enrollment-perks/grants/logs": {
+      "get": {
+        "tags": [
+          "enrollment-perks"
+        ],
+        "operationId": "getEnrollmentperksGrantsLogs",
+        "summary": "GET enrollment-perks/grants/logs",
+        "description": "Auto-generated from src/modules/EnrollmentPerk/enrollmentPerk.routes.ts. Handler: EnrollmentPerkController.listGrantLogs.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/enrollments": {

@@ -17,6 +17,8 @@ import '../../modules/EnrollmentPerk/enrollmentPerkRule.model.js';
 import '../../modules/EnrollmentPerk/perkGrant.model.js';
 import '../../modules/Bootcamp/bootcampCatalog.model.js';
 import '../../modules/Bootcamp/bootcampPurchase.model.js';
+import '../../modules/DigitalProduct/digitalProduct.model.js';
+import '../../modules/DigitalProduct/digitalProductOrder.model.js';
 
 let replSet: MongoMemoryReplSet;
 

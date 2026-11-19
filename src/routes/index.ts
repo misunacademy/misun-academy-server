@@ -30,6 +30,7 @@ import { AnnouncementRoutes } from '../modules/Announcement/announcement.routes.
 import { RefundRoutes } from '../modules/Refund/refund.routes.js';
 import { PrivacyRoutes } from '../modules/Privacy/privacy.routes.js';
 import { EnrollmentPerkRoutes } from '../modules/EnrollmentPerk/enrollmentPerk.routes.js';
+import { DigitalProductRoutes } from '../modules/DigitalProduct/digitalProduct.routes.js';
 
 
 const router = express.Router();
@@ -155,6 +156,10 @@ const moduleRoutes = [
     {
         path: '/enrollment-perks',
         route: EnrollmentPerkRoutes,
+    },
+    {
+        path: '/digital-products',
+        route: DigitalProductRoutes,
     },
 ];
 

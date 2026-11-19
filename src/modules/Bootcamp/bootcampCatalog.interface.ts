@@ -92,6 +92,7 @@ export interface IBootcampCatalog {
     platform?: string;
     liveFee: number;
     recordedPrice: number;
+    recordedPriceINR?: number;
     recordedStatus: RecordedStatus;
     thumbnail?: string;
     posterImage?: string;
@@ -129,8 +130,10 @@ export interface IBootcampPurchase {
     user: Types.ObjectId;
     bootcamp: Types.ObjectId;
     amount: number;
-    method: 'manual' | 'SSLCommerz';
+    currency?: 'BDT' | 'INR';
+    method: 'manual' | 'SSLCommerz' | 'PhonePe_Manual';
     transactionId: string;
+    senderNumber?: string;
     status: BootcampPurchaseStatus;
     gatewayResponse?: Record<string, unknown>;
     adminNote?: string;

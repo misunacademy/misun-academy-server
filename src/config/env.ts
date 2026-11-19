@@ -25,7 +25,8 @@ const EnvSchema = z.object({
     SSL_STORE_ID: z.string(),
     SSL_STORE_PASSWORD: z.string(),
     SSL_IS_LIVE: z.string(),
-    SSL_VALIDATION_API: z.string(),
+    // Optional override — defaults to the validator host matching SSL_IS_LIVE.
+    SSL_VALIDATION_API: z.string().optional(),
     SERVER_URL: z.string(),
     MA_FRONTEND_URL: z.string(),
     EP_FRONTEND_URL: z.string(),
@@ -38,7 +39,6 @@ const EnvSchema = z.object({
     // Email provider settings (optional - sensible defaults used)
     EMAIL_USER: z.string(),
     EMAIL_PASS: z.string(),
-    EMAIL_PROVIDER: z.string().optional(),
     EMAIL_HOST: z.string().optional(),
     EMAIL_PORT: z.string().optional(),
     EMAIL_SECURE: z.string().optional(),
@@ -53,9 +53,7 @@ const EnvSchema = z.object({
 
     MA_EMAIL_SOCIAL_YOUTUBE: z.string().optional(),
     MA_EMAIL_SOCIAL_FACEBOOK: z.string().optional(),
-    MA_EMAIL_SOCIAL_TWITTER: z.string().optional(),
     MA_EMAIL_SOCIAL_LINKEDIN: z.string().optional(),
-    MA_EMAIL_SOCIAL_WEBSITE: z.string().optional(),
 
     EP_EMAIL_SOCIAL_YOUTUBE: z.string().optional(),
     EP_EMAIL_SOCIAL_FACEBOOK: z.string().optional(),
@@ -77,6 +75,9 @@ const EnvSchema = z.object({
 
     // Cron authentication (Vercel Cron sends this as Bearer token)
     CRON_SECRET: z.string().optional(),
+
+    // Serve /docs + /openapi.json in production (off unless set to "true")
+    ENABLE_API_DOCS: z.string().optional(),
 
 });
 
