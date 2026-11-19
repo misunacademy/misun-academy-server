@@ -11,6 +11,7 @@ import { ProgressStatus } from '../../types/common.js';
 import { UserModel } from '../User/user.model.js';
 import { Status } from '../../types/common.js';
 import { PaymentModel } from '../Payment/payment.model.js';
+import { PaymentAttemptModel } from '../Payment/paymentAttempt.model.js';
 import { ProfileService } from '../Profile/profile.service.js';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
@@ -176,6 +177,37 @@ const generateTransactionId = (): string => {
 };
 
 /**
+ * Batch-level prerequisites shared by every enrollment channel: the batch must
+ * exist, be accepting enrollments (Upcoming/Running or evergreen) and still be
+ * inside its enrollment window. Kept separate because a channel that *reuses*
+ * an open PaymentPending row (manual payment after an abandoned gateway
+ * attempt) must not bypass the same gate.
+ */
+const assertBatchAcceptsEnrollment = (batch: any): void => {
+    const isEvergreen = batch.isEvergreen === true || batch.deliveryMode === 'recorded';
+
+    if (
+        !isEvergreen &&
+        batch.status !== BatchStatus.Upcoming &&
+        batch.status !== BatchStatus.Running
+    ) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'This batch is not accepting new enrollments'
+        );
+    }
+
+    // Enrollment window (skipped for evergreen lifetime access). A missing end
+    // date means "no constraint" — same fallback the client uses.
+    if (!isEvergreen && batch.enrollmentEndDate && new Date() > batch.enrollmentEndDate) {
+        throw new ApiError(
+            StatusCodes.BAD_REQUEST,
+            'Enrollment period has ended for this batch'
+        );
+    }
+};
+
+/**
  * Shared enrollment entry point. Every path that creates an Enrollment
  * document (learner self-enroll, admin grant-access, manual payment) funnels
  * through here. Enforces the same invariants regardless of channel:
@@ -228,29 +260,8 @@ const createEnrollment = async ({
             throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
         }
 
-        const isEvergreen =
-            (batch as any).isEvergreen === true ||
-            (batch as any).deliveryMode === 'recorded';
-
-        if (
-            !isEvergreen &&
-            batch.status !== BatchStatus.Upcoming &&
-            batch.status !== BatchStatus.Running
-        ) {
-            throw new ApiError(
-                StatusCodes.BAD_REQUEST,
-                'This batch is not accepting new enrollments'
-            );
-        }
-
-        // 3. Enrollment window (skipped for evergreen lifetime access)
-        const now = new Date();
-        if (!isEvergreen && now > batch.enrollmentEndDate) {
-            throw new ApiError(
-                StatusCodes.BAD_REQUEST,
-                'Enrollment period has ended for this batch'
-            );
-        }
+        // 3. Accepting enrollments + enrollment window (shared policy)
+        assertBatchAcceptsEnrollment(batch);
 
         // 4. Duplicate check: no terminal enrollment for same user+batch
         const existingTerminal = await EnrollmentModel.findOne({
@@ -604,12 +615,73 @@ const enrollWithManualPayment = async (
 
         // createEnrollment enforces: user active, batch accepting, window open,
         // no terminal enrollment, creates PaymentPending row + status history.
-        const { enrollment, batch } = await createEnrollment({
+        //
+        // A learner can arrive here after an abandoned/cancelled SSLCommerz
+        // attempt. That attempt leaves a reusable PaymentPending enrollment
+        // behind (intentionally — see PaymentService.handleCancelPayment), and
+        // the unique (userId, batchId) index forbids inserting a second
+        // non-terminal row. Inserting a fresh enrollment therefore used to fail
+        // with a raw E11000 ("userId already exists") and the learner could not
+        // pay by manual channel for up to 48h. Reuse the open row instead.
+        let enrollment = await EnrollmentModel.findOne({
             userId,
             batchId,
-            source: 'manual-payment',
-            accessType: 'standard',
-        });
+            status: {
+                $in: [
+                    EnrollmentStatus.PaymentPending,
+                    EnrollmentStatus.Pending,
+                    EnrollmentStatus.PaymentFailed,
+                ],
+            },
+        }).session(session);
+
+        let batch: any;
+        if (enrollment) {
+            batch = await BatchModel.findById(batchId)
+                .populate('courseId')
+                .session(session)
+                .lean();
+            if (!batch) {
+                throw new ApiError(StatusCodes.NOT_FOUND, 'Batch not found');
+            }
+            // Reusing a row must not skip the batch/window gate.
+            assertBatchAcceptsEnrollment(batch);
+        } else {
+            const created = await createEnrollment({
+                userId,
+                batchId,
+                source: 'manual-payment',
+                accessType: 'standard',
+                // Same transaction as the payment write below: a failure after
+                // the enrollment insert must not leave an orphan partial row.
+                externalSession: session,
+            });
+            enrollment = created.enrollment;
+            batch = created.batch;
+        }
+
+        // One open payment per enrollment (enrollmentRef is the stable link;
+        // the MA- enrollmentId is only assigned after settlement).
+        const existingPayment = await PaymentModel.findOne({ enrollmentRef: enrollment._id })
+            .select('status transactionId')
+            .session(session)
+            .lean();
+
+        // Never overwrite money-bearing rows: a review payment is already being
+        // verified, a success payment must not be replaced.
+        if (existingPayment?.status === Status.Review) {
+            throw new ApiError(
+                StatusCodes.CONFLICT,
+                'Your manual payment is already under verification. Please wait for approval before paying again.'
+            );
+        }
+
+        if (existingPayment?.status === Status.Success) {
+            throw new ApiError(
+                StatusCodes.CONFLICT,
+                'This enrollment has already been paid. Please check your enrollments.'
+            );
+        }
 
         const courseBrand = deriveCourseBrand(batch.courseId as any);
         const brand = courseBrand;
@@ -626,6 +698,31 @@ const enrollWithManualPayment = async (
         // corrupts every revenue report downstream.
         const manualCurrency = isEnglishCourse ? 'INR' : 'BDT';
         const paymentTransactionId = generateTransactionId();
+
+        // Any in-flight gateway attempt on this enrollment is now superseded.
+        // Keep it (and its tran_id) for audit instead of deleting the history.
+        const previousTransactionId =
+            typeof existingPayment?.transactionId === 'string'
+                ? existingPayment.transactionId
+                : undefined;
+        const supersedePrevious =
+            !!previousTransactionId &&
+            previousTransactionId !== paymentTransactionId &&
+            existingPayment?.status === Status.Pending;
+
+        if (supersedePrevious) {
+            await PaymentAttemptModel.updateOne(
+                { transactionId: previousTransactionId },
+                {
+                    $set: {
+                        status: Status.Superseded,
+                        'gatewayResponse.supersededBy': paymentTransactionId,
+                        'gatewayResponse.supersededAt': new Date(),
+                    },
+                },
+                { session }
+            );
+        }
 
         try {
             await PaymentModel.findOneAndUpdate(
@@ -654,6 +751,13 @@ const enrollWithManualPayment = async (
                             submittedAt: new Date(),
                         },
                     },
+                    ...(supersedePrevious
+                        ? {
+                              $addToSet: {
+                                  'gatewayResponse.supersededTranIds': previousTransactionId,
+                              },
+                          }
+                        : {}),
                 },
                 {
                     session,

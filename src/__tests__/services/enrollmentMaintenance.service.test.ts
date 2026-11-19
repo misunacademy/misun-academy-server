@@ -168,6 +168,33 @@ describe('expireAbandonedEnrollments', () => {
     const expired = await EnrollmentModel.findById(enrollment._id).lean();
     expect(expired?.status).toBe(EnrollmentStatus.Expired);
   });
+
+  it('never expires an enrollment whose manual payment is under review (enrollmentRef link)', async () => {
+    const user = await createUser();
+    const course = await createCourse(adminId);
+    const batch = await createBatch(course._id);
+
+    // Manual submissions link to the enrollment by ObjectId; the MA- string is
+    // only assigned after approval, so the review guard must not rely on it.
+    const enrollment = await createEnrollment(user._id, batch._id, {
+      status: EnrollmentStatus.PaymentPending,
+    });
+    const payment = await createPayment(user._id, batch._id, {
+      enrollmentId: undefined,
+      enrollmentRef: enrollment._id,
+      status: Status.Review,
+      method: 'PhonePay',
+    });
+
+    await backdate(EnrollmentModel, enrollment._id, 72);
+    await backdate(PaymentModel, payment._id, 72);
+
+    const summary = await expireAbandonedEnrollments({ olderThanHours: 48 });
+
+    expect(summary).toEqual({ checked: 1, expired: 0, skipped: 1 });
+    const untouched = await EnrollmentModel.findById(enrollment._id).lean();
+    expect(untouched?.status).toBe(EnrollmentStatus.PaymentPending);
+  });
 });
 
 describe('expireAbandonedEnrollments — status history + concurrency', () => {
