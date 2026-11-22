@@ -4,7 +4,7 @@
 SSLCommerz gateway is unreachable or returning errors. Learners cannot complete payments, and webhooks/IPNs are not being received.
 
 ## Detection
-- High rate of 5xx errors from `sslcommerz-lts` SDK calls
+- High rate of 5xx errors from SSLCommerz API calls (`gwprocess/v4/api.php`, validator APIs)
 - Alert: `payment_gateway_errors_rate` > threshold
 - Customer support tickets: "payment failed", "cannot enroll"
 - No new `success` payments in dashboard for >30 min during business hours

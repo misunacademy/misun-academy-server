@@ -198,7 +198,7 @@ const openApiSpecPath = path.resolve(process.cwd(), 'openapi.json');
 
 // Public API docs expose all admin paths — disable in production unless
 // explicitly enabled.
-const docsEnabled = env.NODE_ENV !== 'production' || process.env.ENABLE_API_DOCS === 'true';
+const docsEnabled = env.NODE_ENV !== 'production' || env.ENABLE_API_DOCS === 'true';
 
 app.get('/openapi.json', (_req, res) => {
     if (!docsEnabled) {

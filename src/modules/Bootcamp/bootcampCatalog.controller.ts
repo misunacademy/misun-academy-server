@@ -366,6 +366,45 @@ const bootcampPaymentWebhook = catchAsync(async (req: Request, res: Response) =>
         data: null,
     });
 });
+
+const submitPhonePeManualPurchase = catchAsync(async (req: Request, res: Response) => {
+    const { slug } = req.params as { slug: string };
+    const userId = (req.user as { id: string }).id;
+    const { senderPhonePe, transactionId } = req.body as {
+        senderPhonePe: string;
+        transactionId: string;
+    };
+    const result = await BootcampCatalogService.submitPhonePeManualPurchase(slug, userId, {
+        senderPhonePe,
+        transactionId,
+    });
+    sendResponse(res, {
+        statusCode: StatusCodes.CREATED,
+        success: true,
+        message: 'PhonePe manual payment submitted successfully. Your access will be unlocked upon verification.',
+        data: result,
+    });
+});
+
+const reviewBootcampPurchaseAdmin = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.params as { id: string };
+    const adminUserId = (req.user as { id: string }).id;
+    const { status, adminNote } = req.body as {
+        status: 'paid' | 'rejected';
+        adminNote?: string;
+    };
+    const result = await BootcampCatalogService.reviewBootcampPurchaseAdmin(id, adminUserId, {
+        status,
+        adminNote,
+    });
+    sendResponse(res, {
+        statusCode: StatusCodes.OK,
+        success: true,
+        message: status === 'paid' ? 'Purchase approved successfully' : 'Purchase rejected',
+        data: result,
+    });
+});
+
 export const BootcampCatalogController = {
     getCurrentBootcamp,
     getPastBootcamps,
@@ -386,4 +425,6 @@ export const BootcampCatalogController = {
     bootcampPaymentStatus,
     bootcampPaymentWebhook,
     publishRecording,
+    submitPhonePeManualPurchase,
+    reviewBootcampPurchaseAdmin,
 };

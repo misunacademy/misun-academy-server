@@ -891,6 +891,49 @@ export const sendCompletedBatchIncompleteReminderEmail = async (
 };
 // --- BOOTCAMP ---
 
+export const sendBootcampManualPaymentRejectedEmail = async (params: {
+  email: string;
+  name: string;
+  bootcampTitle: string;
+  transactionId: string;
+  reason?: string;
+}) => {
+  const { email, name, bootcampTitle, transactionId, reason } = params;
+  const html = getEmailTemplate(
+    `
+        <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+            <h1>Payment Verification Update ⚠️</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${escapeHtml(name)}</strong>,</p>
+            <p>Your manual PhonePe payment for the bootcamp <strong>${escapeHtml(bootcampTitle)}</strong> could not be verified and has been rejected by our team.</p>
+            
+            <div class="highlight-box" style="border-color: #ef4444; background-color: #fef2f2; margin: 20px 0;">
+                <p style="margin: 0 0 8px 0;"><strong>Transaction ID:</strong> ${escapeHtml(transactionId)}</p>
+                <p style="margin: 0 0 8px 0; color: #991b1b;"><strong>বাতিলের কারণ (Rejection Reason):</strong></p>
+                <p style="margin: 0; color: #b91c1c; font-size: 14px; font-weight: 500;">
+                    ${escapeHtml(reason || 'Transaction ID বা পেমেন্ট তথ্যের অসঙ্গতি থাকায় বাতিল করা হয়েছে।')}
+                </p>
+            </div>
+
+            <p style="font-size: 13px; color: #4b5563; line-height: 1.6;">
+                যদি আপনি মনে করেন এটি একটি ভুল অথবা আপনার কাছে সঠিক পেমেন্ট প্রুফ / স্ক্রিনশট থেকে থাকে, তাহলে অনুগ্রহ করে Transaction ID (${escapeHtml(transactionId)}) সহ আমাদের সাপোর্ট টিমে যোগাযোগ করুন। অথবা আপনি পুনরায় সঠিক তথ্য দিয়ে আবেদন করতে পারেন।
+            </p>
+        </div>
+    `,
+    "#ef4444"
+  );
+
+  await queueEmail(
+    email,
+    `Payment Verification Failed: ${bootcampTitle} — Transaction #${transactionId}`,
+    html,
+    {
+      eventType: "bootcamp_manual_payment_rejected",
+    }
+  );
+};
+
 export const sendBootcampRegistrationConfirmationEmail = async (
   email: string,
   name: string,
@@ -945,3 +988,116 @@ export const sendBootcampRegistrationVerifiedEmail = async (
     eventType: "bootcamp_registration_verified",
   });
 };
+
+// --- DIGITAL PRODUCTS ---
+
+export const sendDigitalProductManualSubmittedEmail = async (
+  email: string,
+  name: string,
+  productTitle: string,
+  orderNumber: string
+) => {
+  const html = getEmailTemplate(
+    `
+        <div class="header" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+            <h1>Digital Product Order Received 📥</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${escapeHtml(name)}</strong>,</p>
+            <p>We have received your manual PhonePe payment details for <strong>${escapeHtml(productTitle)}</strong>.</p>
+            <div class="highlight-box" style="border-color: #f59e0b;">
+                <p><strong>Order Number:</strong> ${escapeHtml(orderNumber)}</p>
+                <p>Our team is verifying your payment with PhonePe. Once verified, you will immediately receive another email with your download links, and the files will be unlocked in your account.</p>
+            </div>
+            <p style="color: #6b7280;">Verification usually takes only a short while.</p>
+        </div>
+    `,
+    "#f59e0b"
+  );
+
+  await queueEmail(email, `Order Received: ${productTitle} (Order #${orderNumber})`, html, {
+    eventType: "digital_product_manual_received",
+  });
+};
+
+export const sendDigitalProductPurchasedEmail = async (params: {
+  email: string;
+  name: string;
+  productTitle: string;
+  orderNumber: string;
+  scriptDownloadUrl: string;
+  guideDownloadUrl: string;
+}) => {
+  const { email, name, productTitle, orderNumber, scriptDownloadUrl, guideDownloadUrl } = params;
+  const html = getEmailTemplate(
+    `
+        <div class="header" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+            <h1>Your Digital Product is Ready! 🚀</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${escapeHtml(name)}</strong>,</p>
+            <p>Thank you for purchasing <strong>${escapeHtml(productTitle)}</strong>! Your payment has been confirmed.</p>
+            <p><strong>Order Number:</strong> ${escapeHtml(orderNumber)}</p>
+            <div class="highlight-box" style="border-color: #10b981; margin: 20px 0;">
+                <p style="margin-bottom: 15px; font-weight: bold;">Download Your Files Below:</p>
+                <div style="margin-bottom: 12px;">
+                    <a href="${scriptDownloadUrl}" class="button" style="background: #10b981; display: inline-block; padding: 10px 20px; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: bold;">⚡ Download Script Code File</a>
+                </div>
+                <div>
+                    <a href="${guideDownloadUrl}" class="button" style="background: #3b82f6; display: inline-block; padding: 10px 20px; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: bold;">📖 Download Instruction Guide (PDF)</a>
+                </div>
+            </div>
+            <p style="font-size: 13px; color: #6b7280;">You can also access your downloads at any time by logging into Misun Academy under your account.</p>
+        </div>
+    `,
+    "#10b981"
+  );
+
+  await queueEmail(email, `Download Your Files: ${productTitle} 🎉`, html, {
+    eventType: "digital_product_download_ready",
+  });
+};
+
+export const sendDigitalProductRejectedEmail = async (params: {
+  email: string;
+  name: string;
+  productTitle: string;
+  orderNumber: string;
+  reason?: string;
+}) => {
+  const { email, name, productTitle, orderNumber, reason } = params;
+  const html = getEmailTemplate(
+    `
+        <div class="header" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+            <h1>Payment Verification Update ⚠️</h1>
+        </div>
+        <div class="content">
+            <p>Hi <strong>${escapeHtml(name)}</strong>,</p>
+            <p>Your manual payment for <strong>${escapeHtml(productTitle)}</strong> could not be verified and has been rejected by our team.</p>
+            
+            <div class="highlight-box" style="border-color: #ef4444; background-color: #fef2f2; margin: 20px 0;">
+                <p style="margin: 0 0 8px 0;"><strong>Order Number:</strong> ${escapeHtml(orderNumber)}</p>
+                <p style="margin: 0 0 8px 0; color: #991b1b;"><strong>বাতিলের কারণ (Rejection Reason):</strong></p>
+                <p style="margin: 0; color: #b91c1c; font-size: 14px; font-weight: 500;">
+                    ${escapeHtml(reason || 'Transaction ID বা পেমেন্ট তথ্যের অসঙ্গতি থাকায় বাতিল করা হয়েছে।')}
+                </p>
+            </div>
+
+            <p style="font-size: 13px; color: #4b5563; line-height: 1.6;">
+                যদি আপনি মনে করেন এটি একটি ভুল অথবা আপনার কাছে সঠিক পেমেন্ট প্রুফ / স্ক্রিনশট থেকে থাকে, তাহলে অনুগ্রহ করে অর্ডার নম্বর (${escapeHtml(orderNumber)}) সহ আমাদের সাপোর্ট টিমে যোগাযোগ করুন। অথবা আপনি পুনরায় সঠিক তথ্য দিয়ে আবেদন করতে পারেন।
+            </p>
+        </div>
+    `,
+    "#ef4444"
+  );
+
+  await queueEmail(
+    email,
+    `Payment Verification Failed: ${productTitle} (Order #${orderNumber})`,
+    html,
+    {
+      eventType: "digital_product_payment_rejected",
+    }
+  );
+};
+

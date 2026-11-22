@@ -20,6 +20,8 @@ import crypto from 'crypto';
 import { BootcampCatalogModel } from '../Bootcamp/bootcampCatalog.model.js';
 import { BootcampPurchaseModel } from '../Bootcamp/bootcampPurchase.model.js';
 import { BootcampPurchaseStatus } from '../Bootcamp/bootcampCatalog.interface.js';
+import { DigitalProductModel } from '../DigitalProduct/digitalProduct.model.js';
+import { DigitalProductOrderModel } from '../DigitalProduct/digitalProductOrder.model.js';
 import { logger } from '../../config/logger.js';
 
 // Helper to parse numeric batch number from a batch
@@ -109,6 +111,14 @@ const createRule = async (
             const targetBootcamp = await BootcampCatalogModel.findById(b.targetBootcampId).lean();
             if (!targetBootcamp) {
                 throw new ApiError(StatusCodes.NOT_FOUND, `Target benefit bootcamp (${b.targetBootcampId}) not found`);
+            }
+        } else if (b.type === PerkBenefitType.FreeDigitalProduct) {
+            if (!b.targetDigitalProductId) {
+                throw new ApiError(StatusCodes.BAD_REQUEST, 'Target digital product is required for free digital product benefit');
+            }
+            const targetProduct = await DigitalProductModel.findById(b.targetDigitalProductId).lean();
+            if (!targetProduct) {
+                throw new ApiError(StatusCodes.NOT_FOUND, `Target benefit digital product (${b.targetDigitalProductId}) not found`);
             }
         }
     }
@@ -212,6 +222,14 @@ const updateRule = async (
                 if (!targetBootcamp) {
                     throw new ApiError(StatusCodes.NOT_FOUND, `Target benefit bootcamp (${b.targetBootcampId}) not found`);
                 }
+            } else if (b.type === PerkBenefitType.FreeDigitalProduct) {
+                if (!b.targetDigitalProductId) {
+                    throw new ApiError(StatusCodes.BAD_REQUEST, 'Target digital product is required for free digital product benefit');
+                }
+                const targetProduct = await DigitalProductModel.findById(b.targetDigitalProductId).lean();
+                if (!targetProduct) {
+                    throw new ApiError(StatusCodes.NOT_FOUND, `Target benefit digital product (${b.targetDigitalProductId}) not found`);
+                }
             }
         }
     }
@@ -302,6 +320,7 @@ const getRuleById = async (id: string) => {
         .populate('benefits.targetCourseId', 'title slug thumbnailImage')
         .populate('benefits.targetBatchId', 'title batchNumber status')
         .populate('benefits.targetBootcampId', 'title season slug thumbnail posterImage')
+        .populate('benefits.targetDigitalProductId', 'title slug thumbnail software')
         .populate('createdBy', 'name email')
         .lean();
 
@@ -350,6 +369,7 @@ const listRules = async (query: {
             .populate('benefits.targetCourseId', 'title slug thumbnailImage')
             .populate('benefits.targetBatchId', 'title batchNumber status')
             .populate('benefits.targetBootcampId', 'title season slug thumbnail posterImage')
+            .populate('benefits.targetDigitalProductId', 'title slug thumbnail software')
             .populate('createdBy', 'name email')
             .sort({ createdAt: -1 })
             .skip((page - 1) * limit)
@@ -413,6 +433,7 @@ const listGrantLogs = async (query: {
             .populate('targetCourseId', 'title slug thumbnailImage')
             .populate('targetBatchId', 'title batchNumber')
             .populate('targetBootcampId', 'title season slug thumbnail posterImage')
+            .populate('targetDigitalProductId', 'title slug thumbnail software')
             .populate('sourceEnrollmentId', 'enrollmentId batchId status')
             .populate('targetEnrollmentId', 'enrollmentId status')
             .populate('grantedBy', 'name email')
@@ -895,6 +916,159 @@ const grantPerksForEnrollment = async ({
                     } catch (notifErr) {
                         logger.warn(notifErr, 'Failed to send bootcamp perk notification');
                     }
+                } else if (
+                    benefit.type === PerkBenefitType.FreeDigitalProduct &&
+                    benefit.targetDigitalProductId
+                ) {
+                    const targetDigitalProductId = benefit.targetDigitalProductId.toString();
+
+                    // Idempotency check 1: Has this student already received a perk grant for this digital product?
+                    const existingGrant = await PerkGrantModel.findOne({
+                        studentId: enrollment.userId,
+                        targetDigitalProductId,
+                        status: 'granted',
+                    })
+                        .session(session)
+                        .lean();
+
+                    if (existingGrant) {
+                        logger.info(
+                            { userId: enrollment.userId, targetDigitalProductId, ruleId: rule._id },
+                            'Student already has an active perk grant for this digital product — skipping duplicate'
+                        );
+                        continue;
+                    }
+
+                    // Fetch target digital product
+                    const targetProduct = await DigitalProductModel.findById(targetDigitalProductId)
+                        .session(session)
+                        .lean();
+
+                    if (!targetProduct) {
+                        logger.error({ targetDigitalProductId }, 'Target digital product not found for perk grant');
+                        continue;
+                    }
+
+                    // Idempotency check 2: Does the student already own a paid order for this product?
+                    const existingOrder = await DigitalProductOrderModel.findOne({
+                        product: targetProduct._id,
+                        user: enrollment.userId,
+                        status: 'paid',
+                    })
+                        .session(session)
+                        .lean();
+
+                    if (existingOrder) {
+                        const recordedGrant = await PerkGrantModel.create(
+                            [
+                                {
+                                    studentId: enrollment.userId,
+                                    ruleId: rule._id,
+                                    benefitType: PerkBenefitType.FreeDigitalProduct,
+                                    targetDigitalProductId,
+                                    sourceEnrollmentId: enrollment._id,
+                                    status: 'granted',
+                                    grantedAt: new Date(),
+                                    grantedBy: actor?.id ? new mongoose.Types.ObjectId(actor.id) : undefined,
+                                },
+                            ],
+                            { session }
+                        );
+                        grantedResults.push(recordedGrant[0]);
+                        continue;
+                    }
+
+                    const student = await UserModel.findById(enrollment.userId)
+                        .select('name email phone')
+                        .session(session)
+                        .lean();
+
+                    if (!student?.email) {
+                        logger.error(
+                            { userId: enrollment.userId, targetDigitalProductId },
+                            'Cannot grant digital product perk: student email is missing'
+                        );
+                        continue;
+                    }
+
+                    const randomSuffix = crypto.randomBytes(6).toString('hex').toUpperCase();
+                    const orderSuffix = crypto.randomBytes(8).toString('hex');
+
+                    // Create a complimentary, already-paid order so the student can download the files
+                    const createdOrder = await DigitalProductOrderModel.create(
+                        [
+                            {
+                                orderNumber: `DP-PERK-${randomSuffix}`,
+                                product: targetProduct._id,
+                                productSnapshot: {
+                                    title: targetProduct.title,
+                                    slug: targetProduct.slug,
+                                    software: targetProduct.software,
+                                },
+                                user: enrollment.userId,
+                                customer: {
+                                    name: student.name || 'Student',
+                                    email: student.email.toLowerCase(),
+                                    phone: student.phone || 'N/A',
+                                    country: 'BD',
+                                },
+                                paymentMethod: 'Perk',
+                                currency: 'BDT',
+                                amount: 0,
+                                transactionId: `PERK-DP-${orderSuffix}`,
+                                status: 'paid',
+                                downloadToken: crypto.randomBytes(24).toString('hex'),
+                                reviewedAt: new Date(),
+                                adminNote: `Granted via perk rule "${rule.title}" (source enrollment ${enrollment.enrollmentId || enrollment._id})`,
+                                gatewayResponse: {
+                                    source: 'perk_grant',
+                                    ruleId: rule._id,
+                                    sourceEnrollmentId: enrollment._id,
+                                    grantedAt: new Date(),
+                                },
+                            },
+                        ],
+                        { session }
+                    );
+
+                    const targetOrder = createdOrder[0];
+
+                    // Record grant log
+                    const grantRecord = await PerkGrantModel.create(
+                        [
+                            {
+                                studentId: enrollment.userId,
+                                ruleId: rule._id,
+                                benefitType: PerkBenefitType.FreeDigitalProduct,
+                                targetDigitalProductId,
+                                targetDigitalProductOrderId: targetOrder._id,
+                                sourceEnrollmentId: enrollment._id,
+                                status: 'granted',
+                                grantedAt: new Date(),
+                                grantedBy: actor?.id ? new mongoose.Types.ObjectId(actor.id) : undefined,
+                            },
+                        ],
+                        { session }
+                    );
+
+                    grantedResults.push(grantRecord[0]);
+
+                    // Notify student
+                    try {
+                        await NotificationService.createNotification({
+                            userId: enrollment.userId.toString(),
+                            type: 'access_granted',
+                            title: 'Bonus Digital Product Unlocked! 🎁',
+                            message: `Congratulations! As a perk for enrolling in ${sourceCourseTitle}, you have received free access to ${targetProduct.title || 'a bonus digital product'}!`,
+                            link: '/my-classes',
+                            relatedTo: {
+                                model: 'DigitalProduct',
+                                id: targetProduct._id.toString(),
+                            },
+                        });
+                    } catch (notifErr) {
+                        logger.warn(notifErr, 'Failed to send digital product perk notification');
+                    }
                 }
             }
         }
@@ -1001,6 +1175,34 @@ const revokePerksForEnrollment = async ({
                     {
                         $set: {
                             status: BootcampPurchaseStatus.Rejected,
+                            adminNote: `Perk revoked: ${reason}`,
+                        },
+                    },
+                    { session }
+                );
+            }
+
+            if (grant.targetDigitalProductOrderId) {
+                await DigitalProductOrderModel.findByIdAndUpdate(
+                    grant.targetDigitalProductOrderId,
+                    {
+                        $set: {
+                            status: 'rejected',
+                            adminNote: `Perk revoked: ${reason}`,
+                        },
+                    },
+                    { session }
+                );
+            } else if (grant.targetDigitalProductId) {
+                await DigitalProductOrderModel.updateMany(
+                    {
+                        user: grant.studentId,
+                        product: grant.targetDigitalProductId,
+                        'gatewayResponse.source': 'perk_grant',
+                    },
+                    {
+                        $set: {
+                            status: 'rejected',
                             adminNote: `Perk revoked: ${reason}`,
                         },
                     },

@@ -63,6 +63,7 @@ export const createBootcampSchema = z.object({
         platform: z.string().max(200).optional(),
         liveFee: z.number().min(0).optional(),
         recordedPrice: z.number().min(0).optional(),
+        recordedPriceINR: z.number().min(0).optional(),
         thumbnail: z.string().url().optional().or(z.literal('')),
         posterImage: z.string().url().optional().or(z.literal('')),
         perks: z.array(perkSchema).optional(),
@@ -96,6 +97,7 @@ export const updateBootcampSchema = z.object({
         platform: z.string().max(200).optional(),
         liveFee: z.number().min(0).optional(),
         recordedPrice: z.number().min(0).optional(),
+        recordedPriceINR: z.number().min(0).optional(),
         recordedStatus: z.enum(['draft', 'published']).optional(),
         thumbnail: z.string().url().optional().or(z.literal('')),
         posterImage: z.string().url().optional().or(z.literal('')),
@@ -131,6 +133,7 @@ export const setRecordedPriceSchema = z.object({
     }),
     body: z.object({
         recordedPrice: z.number().min(0),
+        recordedPriceINR: z.number().min(0).optional(),
     }),
 });
 
@@ -140,6 +143,27 @@ export const publishRecordingSchema = z.object({
     }),
     body: z.object({
         recordedPrice: z.number().min(0).optional(),
+        recordedPriceINR: z.number().min(0).optional(),
+    }),
+});
+
+export const submitBootcampManualPaymentSchema = z.object({
+    params: z.object({
+        slug: z.string().min(1).max(200),
+    }),
+    body: z.object({
+        senderPhonePe: z.string().min(4, 'PhonePe sender number / UPI ID is required'),
+        transactionId: z.string().min(4, 'Transaction ID / UTR is required'),
+    }),
+});
+
+export const reviewBootcampPurchaseSchema = z.object({
+    params: z.object({
+        id: objectId,
+    }),
+    body: z.object({
+        status: z.enum(['paid', 'rejected']),
+        adminNote: z.string().max(500).optional(),
     }),
 });
 

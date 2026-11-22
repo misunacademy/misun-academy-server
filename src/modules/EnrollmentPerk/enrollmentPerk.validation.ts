@@ -16,11 +16,12 @@ const perkBenefitSchema = z.object({
     targetCourseId: optionalObjectId,
     targetBatchId: optionalObjectId,
     targetBootcampId: optionalObjectId,
+    targetDigitalProductId: optionalObjectId,
     accessDuration: z.object({
         type: z.enum(['lifetime', 'days']).default('lifetime'),
         days: z.number().int().positive().optional(),
     }).optional().default({ type: 'lifetime' }),
-    extraConfig: z.record(z.any()).optional().default({}),
+    extraConfig: z.record(z.string(), z.any()).optional().default({}),
 }).refine(data => {
     if (data.type === PerkBenefitType.FreeCourse && !data.targetCourseId) {
         return false;
@@ -28,9 +29,12 @@ const perkBenefitSchema = z.object({
     if (data.type === PerkBenefitType.FreeBootcamp && !data.targetBootcampId) {
         return false;
     }
+    if (data.type === PerkBenefitType.FreeDigitalProduct && !data.targetDigitalProductId) {
+        return false;
+    }
     return true;
 }, {
-    message: 'Target course or bootcamp is required for the selected benefit type',
+    message: 'Target course, bootcamp, or digital product is required for the selected benefit type',
     path: ['type'],
 });
 

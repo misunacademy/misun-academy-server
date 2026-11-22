@@ -58,6 +58,11 @@ const bootcampCatalogSchema = new Schema<IBootcampCatalog>(
             min: 0,
             default: 0,
         },
+        recordedPriceINR: {
+            type: Number,
+            min: 0,
+            default: 0,
+        },
         recordedStatus: {
             type: String,
             enum: Object.values(RecordedStatus),

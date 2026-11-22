@@ -14,6 +14,7 @@
 
 import { jest, describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import request from 'supertest';
+import axios from 'axios';
 import type { Express } from 'express';
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
@@ -36,21 +37,14 @@ process.env.EMAIL_USER = process.env.EMAIL_USER || 'test@example.com';
 process.env.EMAIL_PASS = process.env.EMAIL_PASS || 'test-email-pass';
 
 // Must be registered before `app.js` (and therefore payment.service) is loaded.
-jest.unstable_mockModule('sslcommerz-lts', () => {
-  class MockSSLCommerzPayment {
-    constructor(..._args: unknown[]) {
-      void _args;
-    }
-
-    init() {
-      return Promise.resolve({
-        GatewayPageURL: 'https://sandbox.sslcommerz.com/Ecommerce/checkout.php?sessionkey=test',
-      });
-    }
-  }
-
-  return { default: MockSSLCommerzPayment };
-});
+// The adapter talks to SSLCommerz over axios, so only that outbound call is stubbed.
+const mockAxiosPost = jest.spyOn(axios, 'post');
+mockAxiosPost.mockResolvedValue({
+  data: {
+    status: 'SUCCESS',
+    GatewayPageURL: 'https://sandbox.sslcommerz.com/Ecommerce/checkout.php?sessionkey=test',
+  },
+} as unknown as Awaited<ReturnType<typeof axios.post>>);
 
 import { connectTestDB, disconnectTestDB, clearTestDB } from '../helpers/db.js';
 import { createAdmin, createCourse, createBatch } from '../helpers/factories.js';

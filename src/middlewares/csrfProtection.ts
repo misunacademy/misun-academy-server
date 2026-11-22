@@ -60,6 +60,9 @@ const CSRF_EXEMPT_PATHS = [
   '/payments/webhook',
   '/bootcamp/payments/status',
   '/bootcamp/payments/webhook',
+  '/digital-products/payments/status',
+  '/digital-products/payments/webhook',
+  '/digital-products/checkout/sslcommerz',
 ];
 
 export const csrfProtection = (req: Request, res: Response, next: NextFunction) => {
