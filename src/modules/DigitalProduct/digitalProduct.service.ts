@@ -60,6 +60,7 @@ export class DigitalProductService {
         search?: string;
         software?: string;
         isPublished?: boolean;
+        status?: string;
         page?: number;
         limit?: number;
     }) {
@@ -74,7 +75,11 @@ export class DigitalProductService {
         if (query.software) {
             filter.software = query.software;
         }
-        if (typeof query.isPublished === 'boolean') {
+        if (query.status === 'draft') {
+            filter.isPublished = false;
+        } else if (query.status === 'published') {
+            filter.isPublished = true;
+        } else if (typeof query.isPublished === 'boolean') {
             filter.isPublished = query.isPublished;
         }
 
@@ -103,20 +108,29 @@ export class DigitalProductService {
     }
 
     static async createProduct(payload: Partial<IDigitalProduct>, adminUserId?: string) {
-        if (!payload.slug && payload.title) {
-            let generated = payload.title
+        if (payload.status) {
+            payload.isPublished = payload.status === 'published';
+        } else if (typeof payload.isPublished === 'boolean') {
+            payload.status = payload.isPublished ? 'published' : 'draft';
+        } else {
+            payload.status = 'published';
+            payload.isPublished = true;
+        }
+
+        const requestedSlug = (payload.slug || '').toLowerCase().trim().replace(/^-+|-+$/g, '');
+        let baseSlug = requestedSlug;
+        if (baseSlug.length < 2 && payload.title) {
+            baseSlug = payload.title
                 .toLowerCase()
                 .trim()
                 .replace(/[^a-z0-9\s-]/g, '')
                 .replace(/\s+/g, '-')
-                .replace(/-+/g, '-');
-            if (!generated || generated.length < 2) {
-                generated = `${payload.software || 'product'}-${Date.now().toString(36)}`;
-            }
-            payload.slug = generated;
+                .replace(/-+/g, '-')
+                .replace(/^-+|-+$/g, '');
         }
-
-        const baseSlug = payload.slug?.toLowerCase() || `product-${Date.now().toString(36)}`;
+        if (baseSlug.length < 2) {
+            baseSlug = `${payload.software || 'product'}-${Date.now().toString(36)}`;
+        }
         let uniqueSlug = baseSlug;
         let counter = 1;
         while (await DigitalProductModel.exists({ slug: uniqueSlug })) {
@@ -133,6 +147,27 @@ export class DigitalProductService {
     }
 
     static async updateProduct(id: string, payload: Partial<IDigitalProduct>) {
+        if (payload.status !== undefined) {
+            payload.isPublished = payload.status === 'published';
+        } else if (payload.isPublished !== undefined) {
+            payload.status = payload.isPublished ? 'published' : 'draft';
+        }
+
+        if (payload.isPublished === true || payload.status === 'published') {
+            const existing = await DigitalProductModel.findById(id).lean();
+            if (!existing) {
+                throw new ApiError(StatusCodes.NOT_FOUND, 'Digital product not found');
+            }
+            const scriptUrl = payload.scriptFile?.url ?? existing.scriptFile?.url;
+            const guideUrl = payload.guidePdf?.url ?? existing.guidePdf?.url;
+            if (!scriptUrl || !guideUrl) {
+                throw new ApiError(
+                    StatusCodes.BAD_REQUEST,
+                    'Cannot publish product without script file and instruction guide PDF'
+                );
+            }
+        }
+
         if (payload.slug) {
             const existing = await DigitalProductModel.findOne({
                 slug: payload.slug.toLowerCase(),
@@ -549,9 +584,12 @@ export class DigitalProductService {
         await order.save();
 
         const file = fileType === 'script' ? product.scriptFile : product.guidePdf;
+        if (!file?.url) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Product file is not available for download');
+        }
         return {
             url: file.url,
-            fileName: file.fileName,
+            fileName: file.fileName || (fileType === 'script' ? 'script-file' : 'guide.pdf'),
             productTitle: product.title,
         };
     }

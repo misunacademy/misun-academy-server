@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 
 export type DigitalProductSoftware = 'photoshop' | 'illustrator' | 'bundle' | 'other';
+export type DigitalProductStatus = 'draft' | 'published';
 
 export interface IDigitalProductFile {
     fileName: string;
@@ -22,9 +23,10 @@ export interface IDigitalProduct {
     thumbnail?: string;
     badge?: string; // e.g. "বেস্টসেলার", "নতুন", "বান্ডেল সেভার"
     features: string[];
-    scriptFile: IDigitalProductFile;
-    guidePdf: IDigitalProductFile;
+    scriptFile?: IDigitalProductFile;
+    guidePdf?: IDigitalProductFile;
     isPublished: boolean;
+    status?: DigitalProductStatus;
     salesCount: number;
     createdBy?: Types.ObjectId;
     createdAt: Date;

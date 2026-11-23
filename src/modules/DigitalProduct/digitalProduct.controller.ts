@@ -176,10 +176,11 @@ export class DigitalProductController {
     // --- Admin Endpoints ---
 
     static getAllProductsAdmin = catchAsync(async (req: Request, res: Response) => {
-        const { search, software, isPublished, page, limit } = req.query as Record<string, string>;
+        const { search, software, isPublished, status, page, limit } = req.query as Record<string, string>;
         const result = await DigitalProductService.getAllProductsAdmin({
             search,
             software,
+            status,
             isPublished: isPublished !== undefined ? isPublished === 'true' : undefined,
             page: page ? Number(page) : undefined,
             limit: limit ? Number(limit) : undefined,

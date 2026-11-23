@@ -3,8 +3,8 @@ import { IDigitalProduct } from './digitalProduct.interface.js';
 
 const digitalProductFileSchema = new Schema(
     {
-        fileName: { type: String, required: true, trim: true },
-        url: { type: String, required: true, trim: true },
+        fileName: { type: String, trim: true },
+        url: { type: String, trim: true },
         fileSize: { type: String, trim: true },
     },
     { _id: false }
@@ -41,7 +41,7 @@ const digitalProductSchema = new Schema<IDigitalProduct>(
         },
         priceBDT: {
             type: Number,
-            required: true,
+            default: 0,
             min: 0,
         },
         discountPriceBDT: {
@@ -50,7 +50,7 @@ const digitalProductSchema = new Schema<IDigitalProduct>(
         },
         priceINR: {
             type: Number,
-            required: true,
+            default: 0,
             min: 0,
         },
         discountPriceINR: {
@@ -71,11 +71,17 @@ const digitalProductSchema = new Schema<IDigitalProduct>(
         },
         scriptFile: {
             type: digitalProductFileSchema,
-            required: true,
+            required: false,
         },
         guidePdf: {
             type: digitalProductFileSchema,
-            required: true,
+            required: false,
+        },
+        status: {
+            type: String,
+            enum: ['draft', 'published'],
+            default: 'published',
+            index: true,
         },
         isPublished: {
             type: Boolean,
