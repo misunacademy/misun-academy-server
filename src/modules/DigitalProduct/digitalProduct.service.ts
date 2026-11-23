@@ -117,20 +117,20 @@ export class DigitalProductService {
             payload.isPublished = true;
         }
 
-        if (!payload.slug && payload.title) {
-            let generated = payload.title
+        const requestedSlug = (payload.slug || '').toLowerCase().trim().replace(/^-+|-+$/g, '');
+        let baseSlug = requestedSlug;
+        if (baseSlug.length < 2 && payload.title) {
+            baseSlug = payload.title
                 .toLowerCase()
                 .trim()
                 .replace(/[^a-z0-9\s-]/g, '')
                 .replace(/\s+/g, '-')
-                .replace(/-+/g, '-');
-            if (!generated || generated.length < 2) {
-                generated = `${payload.software || 'product'}-${Date.now().toString(36)}`;
-            }
-            payload.slug = generated;
+                .replace(/-+/g, '-')
+                .replace(/^-+|-+$/g, '');
         }
-
-        const baseSlug = payload.slug?.toLowerCase() || `product-${Date.now().toString(36)}`;
+        if (baseSlug.length < 2) {
+            baseSlug = `${payload.software || 'product'}-${Date.now().toString(36)}`;
+        }
         let uniqueSlug = baseSlug;
         let counter = 1;
         while (await DigitalProductModel.exists({ slug: uniqueSlug })) {
