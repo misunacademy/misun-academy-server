@@ -214,6 +214,12 @@ export class DigitalProductService {
         }
 
         const amount = product.discountPriceBDT ?? product.priceBDT;
+        if (amount <= 0) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'This product is free. Please claim it without payment.'
+            );
+        }
         const orderNumber = generateOrderNumber();
         const transactionId = generateTransactionId();
         const callbackKey = getCallbackKey(transactionId);
@@ -306,6 +312,12 @@ export class DigitalProductService {
         }
 
         const amount = product.discountPriceINR ?? product.priceINR;
+        if (amount <= 0) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'This product is free for India. Please claim it without payment.'
+            );
+        }
         const orderNumber = generateOrderNumber();
         const downloadToken = crypto.randomBytes(24).toString('hex');
 
@@ -361,6 +373,125 @@ export class DigitalProductService {
             orderNumber: order.orderNumber,
             status: 'pending',
             message: 'PhonePe manual payment submitted successfully. Your files will be unlocked upon verification.',
+        };
+    }
+
+    /**
+     * Claim a free product (effective price 0) without going through a payment
+     * gateway. Creates an already-paid order so the standard download flow works.
+     */
+    static async claimFreeProduct(
+        productId: string,
+        customerData: { name: string; email: string; phone: string },
+        userId?: string,
+        preferredCurrency?: 'BDT' | 'INR'
+    ) {
+        const product = await DigitalProductModel.findById(productId).lean();
+        if (!product || !product.isPublished) {
+            throw new ApiError(StatusCodes.NOT_FOUND, 'Product not found or not available');
+        }
+
+        const bdtAmount = product.discountPriceBDT ?? product.priceBDT;
+        const inrAmount = product.discountPriceINR ?? product.priceINR;
+        const bdtFree = bdtAmount <= 0;
+        const inrFree = inrAmount <= 0;
+
+        if (!bdtFree && !inrFree) {
+            throw new ApiError(
+                StatusCodes.BAD_REQUEST,
+                'This product is not free. Please complete the payment instead.'
+            );
+        }
+
+        const currency: 'BDT' | 'INR' =
+            preferredCurrency === 'BDT' && bdtFree
+                ? 'BDT'
+                : preferredCurrency === 'INR' && inrFree
+                  ? 'INR'
+                  : bdtFree
+                    ? 'BDT'
+                    : 'INR';
+
+        // Idempotency: a customer who already owns the product just gets the
+        // existing download token instead of creating duplicate orders.
+        const existingFilter: FilterQuery<IDigitalProductOrder> = {
+            product: product._id,
+            status: 'paid',
+        };
+        if (userId) {
+            existingFilter.user = new Types.ObjectId(userId);
+        } else if (customerData.email) {
+            existingFilter['customer.email'] = customerData.email.toLowerCase();
+        }
+
+        const existingOrder = await DigitalProductOrderModel.findOne(existingFilter)
+            .sort({ createdAt: -1 })
+            .lean();
+
+        if (existingOrder) {
+            return {
+                orderNumber: existingOrder.orderNumber,
+                downloadToken: existingOrder.downloadToken,
+                alreadyClaimed: true,
+            };
+        }
+
+        const orderNumber = generateOrderNumber();
+        const downloadToken = crypto.randomBytes(24).toString('hex');
+
+        const order = await DigitalProductOrderModel.create({
+            orderNumber,
+            product: product._id,
+            productSnapshot: {
+                title: product.title,
+                slug: product.slug,
+                software: product.software,
+            },
+            user: userId ? new Types.ObjectId(userId) : undefined,
+            customer: {
+                name: customerData.name || 'Student',
+                email: customerData.email.toLowerCase(),
+                phone: customerData.phone || 'N/A',
+                country: currency === 'INR' ? 'IN' : 'BD',
+            },
+            paymentMethod: 'Free',
+            currency,
+            amount: 0,
+            transactionId: `FREE-DP-${Date.now().toString(36).toUpperCase()}-${crypto
+                .randomBytes(4)
+                .toString('hex')
+                .toUpperCase()}`,
+            status: 'paid',
+            downloadToken,
+            reviewedAt: new Date(),
+            adminNote: 'Free product claimed without payment',
+            gatewayResponse: {
+                source: 'free_claim',
+                claimedAt: new Date(),
+            },
+        });
+
+        await DigitalProductModel.findByIdAndUpdate(product._id, {
+            $inc: { salesCount: 1 },
+        });
+
+        try {
+            await sendDigitalProductPurchasedEmail({
+                email: order.customer.email,
+                name: order.customer.name,
+                productTitle: product.title,
+                orderNumber: order.orderNumber,
+                scriptDownloadUrl: `${config.SERVER_URL}/api/v1/digital-products/download/${order.downloadToken}/script`,
+                guideDownloadUrl: `${config.SERVER_URL}/api/v1/digital-products/download/${order.downloadToken}/guide`,
+            });
+        } catch (err) {
+            logger.warn({ err }, 'Failed to send free digital product purchase email');
+        }
+
+        return {
+            orderNumber: order.orderNumber,
+            downloadToken: order.downloadToken,
+            alreadyClaimed: false,
         };
     }
 

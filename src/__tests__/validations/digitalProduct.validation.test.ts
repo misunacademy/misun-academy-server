@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
 import {
+    claimFreeDigitalProductSchema,
     createDigitalProductSchema,
     updateDigitalProductSchema,
 } from '../../modules/DigitalProduct/digitalProduct.validation.js';
@@ -38,5 +39,24 @@ describe('updateDigitalProductSchema slug handling', () => {
     it('keeps a valid explicit slug', () => {
         const parsed = updateDigitalProductSchema.parse({ body: { slug: 'new-slug' } });
         expect(parsed.body.slug).toBe('new-slug');
+    });
+});
+
+describe('claimFreeDigitalProductSchema', () => {
+    it('accepts a product id with an optional currency', () => {
+        const parsed = claimFreeDigitalProductSchema.parse({
+            body: { productId: '64b7f0c0c0c0c0c0c0c0c0c0', currency: 'INR' },
+        });
+        expect(parsed.body.currency).toBe('INR');
+    });
+
+    it('rejects a missing product id', () => {
+        expect(() => claimFreeDigitalProductSchema.parse({ body: {} })).toThrow();
+    });
+
+    it('rejects an unsupported currency', () => {
+        expect(() =>
+            claimFreeDigitalProductSchema.parse({ body: { productId: 'abc', currency: 'USD' } })
+        ).toThrow();
     });
 });
