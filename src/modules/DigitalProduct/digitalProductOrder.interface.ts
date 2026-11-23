@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
 
-export type DigitalProductPaymentMethod = 'SSLCommerz' | 'PhonePe_Manual' | 'Perk';
+export type DigitalProductPaymentMethod = 'SSLCommerz' | 'PhonePe_Manual' | 'Perk' | 'Free';
 export type DigitalProductOrderStatus = 'pending' | 'paid' | 'rejected';
 export type DigitalProductCurrency = 'BDT' | 'INR';
 

@@ -9,6 +9,7 @@ import {
     updateDigitalProductSchema,
     initiateSSLCommerzOrderSchema,
     submitPhonePeManualOrderSchema,
+    claimFreeDigitalProductSchema,
     reviewDigitalProductOrderSchema,
 } from './digitalProduct.validation.js';
 import { requireAuth, requireAdmin } from '../../middlewares/betterAuth.js';
@@ -100,6 +101,14 @@ router.post(
     requireAuth,
     validateRequest(submitPhonePeManualOrderSchema),
     DigitalProductController.submitPhonePeManual
+);
+
+router.post(
+    '/checkout/free',
+    orderLimiter,
+    requireAuth,
+    validateRequest(claimFreeDigitalProductSchema),
+    DigitalProductController.claimFreeProduct
 );
 
 // SSLCommerz payment callback & webhook

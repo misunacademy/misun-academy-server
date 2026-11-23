@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import { connectTestDB, disconnectTestDB, clearTestDB } from '../helpers/db.js';
 import { DigitalProductService } from '../../modules/DigitalProduct/digitalProduct.service.js';
+import { DigitalProductOrderModel } from '../../modules/DigitalProduct/digitalProductOrder.model.js';
 
 const baseProduct = () => ({
     title: 'Draft product',
@@ -58,5 +59,118 @@ describe('DigitalProductService.createProduct slug generation', () => {
 
         expect(first.slug).toBe('explicit-slug');
         expect(second.slug).toBe('explicit-slug-1');
+    });
+});
+
+describe('DigitalProductService.claimFreeProduct', () => {
+    const customer = {
+        name: 'Free Learner',
+        email: 'free@example.com',
+        phone: '01700000000',
+    };
+
+    const createFreeProduct = () =>
+        DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Free script pack',
+            status: 'published',
+            priceBDT: 0,
+            priceINR: 0,
+            scriptFile: { fileName: 'free.jsx', url: 'https://example.com/free.jsx' },
+            guidePdf: { fileName: 'free.pdf', url: 'https://example.com/free.pdf' },
+        });
+
+    it('creates an already-paid zero-amount order for a free product', async () => {
+        const product = await createFreeProduct();
+
+        const result = await DigitalProductService.claimFreeProduct(product._id.toString(), customer);
+
+        expect(result.alreadyClaimed).toBe(false);
+        expect(result.downloadToken).toHaveLength(48);
+
+        const order = await DigitalProductOrderModel.findOne({
+            orderNumber: result.orderNumber,
+        }).lean();
+
+        expect(order).not.toBeNull();
+        expect(order?.status).toBe('paid');
+        expect(order?.paymentMethod).toBe('Free');
+        expect(order?.amount).toBe(0);
+        expect(order?.currency).toBe('BDT');
+    });
+
+    it('returns the existing order instead of creating a duplicate claim', async () => {
+        const product = await createFreeProduct();
+
+        const first = await DigitalProductService.claimFreeProduct(product._id.toString(), customer);
+        const second = await DigitalProductService.claimFreeProduct(product._id.toString(), customer);
+
+        expect(second.alreadyClaimed).toBe(true);
+        expect(second.orderNumber).toBe(first.orderNumber);
+        expect(second.downloadToken).toBe(first.downloadToken);
+        expect(await DigitalProductOrderModel.countDocuments()).toBe(1);
+    });
+
+    it('allows claiming the free region when the other region is paid', async () => {
+        const product = await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Free in BD only',
+            status: 'published',
+            priceBDT: 0,
+            priceINR: 499,
+        });
+
+        const result = await DigitalProductService.claimFreeProduct(product._id.toString(), customer, undefined, 'INR');
+
+        const order = await DigitalProductOrderModel.findOne({
+            orderNumber: result.orderNumber,
+        }).lean();
+
+        // INR is paid, so the service falls back to the free BDT side.
+        expect(order?.currency).toBe('BDT');
+        expect(order?.amount).toBe(0);
+    });
+
+    it('rejects claiming a product that requires payment', async () => {
+        const product = await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Paid product',
+            status: 'published',
+            priceBDT: 500,
+            priceINR: 399,
+        });
+
+        await expect(
+            DigitalProductService.claimFreeProduct(product._id.toString(), customer)
+        ).rejects.toThrow('not free');
+    });
+});
+
+describe('DigitalProductService.updateProduct — switching to free', () => {
+    it('clears existing discounts when the product becomes free', async () => {
+        const product = await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Becoming free',
+            status: 'published',
+            priceBDT: 500,
+            discountPriceBDT: 250,
+            priceINR: 399,
+            discountPriceINR: 199,
+        });
+
+        expect(product.discountPriceBDT).toBe(250);
+
+        await DigitalProductService.updateProduct(product._id.toString(), {
+            priceBDT: 0,
+            discountPriceBDT: null,
+            priceINR: 0,
+            discountPriceINR: null,
+        });
+
+        const updated = await DigitalProductService.getProductBySlug(product.slug);
+        expect(updated.priceBDT).toBe(0);
+        expect(updated.discountPriceBDT ?? null).toBeNull();
+        expect(updated.priceINR).toBe(0);
+        expect(updated.discountPriceINR ?? null).toBeNull();
     });
 });

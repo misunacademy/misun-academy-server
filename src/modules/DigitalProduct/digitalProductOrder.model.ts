@@ -42,7 +42,7 @@ const digitalProductOrderSchema = new Schema<IDigitalProductOrder>(
         },
         paymentMethod: {
             type: String,
-            enum: ['SSLCommerz', 'PhonePe_Manual', 'Perk'],
+            enum: ['SSLCommerz', 'PhonePe_Manual', 'Perk', 'Free'],
             required: true,
             index: true,
         },
