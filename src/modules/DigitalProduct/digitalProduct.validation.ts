@@ -6,11 +6,25 @@ const digitalProductFileSchema = z.object({
     fileSize: z.string().optional(),
 });
 
+// Slugs are optional and auto-generated from the title in the service when
+// missing. Treat blank / 1-character values (e.g. a lone "-" produced by
+// slugifying a Bengali title) as "not provided" instead of rejecting them.
+const optionalSlugSchema = z.preprocess(
+    (value) => {
+        if (typeof value !== 'string') return value;
+        const trimmed = value.trim();
+        // Count only real characters: a slug made of just separators ("--")
+        // is as unusable as an empty one.
+        return trimmed.replace(/-/g, '').length >= 2 ? trimmed : undefined;
+    },
+    z.string().trim().min(2, 'Slug must be at least 2 characters').optional()
+);
+
 export const createDigitalProductSchema = z.object({
     body: z
         .object({
             title: z.string().min(2, 'Title must be at least 2 characters'),
-            slug: z.string().min(2, 'Slug must be at least 2 characters').optional(),
+            slug: optionalSlugSchema,
             tagline: z.string().optional(),
             description: z.string().optional(),
             software: z.enum(['photoshop', 'illustrator', 'bundle', 'other']).default('other'),
@@ -50,7 +64,7 @@ export const createDigitalProductSchema = z.object({
 export const updateDigitalProductSchema = z.object({
     body: z.object({
         title: z.string().min(2).optional(),
-        slug: z.string().min(2).optional(),
+        slug: optionalSlugSchema,
         tagline: z.string().optional(),
         description: z.string().optional(),
         software: z.enum(['photoshop', 'illustrator', 'bundle', 'other']).optional(),
