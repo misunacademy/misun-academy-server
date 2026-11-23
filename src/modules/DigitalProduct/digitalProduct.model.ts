@@ -47,6 +47,8 @@ const digitalProductSchema = new Schema<IDigitalProduct>(
         discountPriceBDT: {
             type: Number,
             min: 0,
+            nullable: true,
+            default: null,
         },
         priceINR: {
             type: Number,
@@ -56,6 +58,8 @@ const digitalProductSchema = new Schema<IDigitalProduct>(
         discountPriceINR: {
             type: Number,
             min: 0,
+            nullable: true,
+            default: null,
         },
         thumbnail: {
             type: String,

@@ -17,9 +17,9 @@ export interface IDigitalProduct {
     description?: string;
     software: DigitalProductSoftware;
     priceBDT: number;
-    discountPriceBDT?: number;
+    discountPriceBDT?: number | null;
     priceINR: number;
-    discountPriceINR?: number;
+    discountPriceINR?: number | null;
     thumbnail?: string;
     badge?: string; // e.g. "বেস্টসেলার", "নতুন", "বান্ডেল সেভার"
     features: string[];

@@ -29,9 +29,9 @@ export const createDigitalProductSchema = z.object({
             description: z.string().optional(),
             software: z.enum(['photoshop', 'illustrator', 'bundle', 'other']).default('other'),
             priceBDT: z.number().min(0, 'Price in BDT must be at least 0').default(0),
-            discountPriceBDT: z.number().min(0).optional(),
+            discountPriceBDT: z.number().min(0).nullable().optional(),
             priceINR: z.number().min(0, 'Price in INR must be at least 0').default(0),
-            discountPriceINR: z.number().min(0).optional(),
+            discountPriceINR: z.number().min(0).nullable().optional(),
             thumbnail: z.string().optional(),
             badge: z.string().optional(),
             features: z.array(z.string()).default([]),
@@ -69,9 +69,9 @@ export const updateDigitalProductSchema = z.object({
         description: z.string().optional(),
         software: z.enum(['photoshop', 'illustrator', 'bundle', 'other']).optional(),
         priceBDT: z.number().min(0).optional(),
-        discountPriceBDT: z.number().min(0).optional(),
+        discountPriceBDT: z.number().min(0).nullable().optional(),
         priceINR: z.number().min(0).optional(),
-        discountPriceINR: z.number().min(0).optional(),
+        discountPriceINR: z.number().min(0).nullable().optional(),
         thumbnail: z.string().optional(),
         badge: z.string().optional(),
         features: z.array(z.string()).optional(),
@@ -101,6 +101,18 @@ export const submitPhonePeManualOrderSchema = z.object({
         phone: z.string().optional(),
         senderPhonePe: z.string().min(4, 'PhonePe sender number / UPI ID is required'),
         transactionId: z.string().min(4, 'PhonePe transaction ID / UTR is required'),
+    }),
+});
+
+export const claimFreeDigitalProductSchema = z.object({
+    body: z.object({
+        productId: z.string().min(1, 'Product ID is required'),
+        name: z.string().optional(),
+        email: z.string().email().optional(),
+        phone: z.string().optional(),
+        // Which regional price the customer is claiming. Optional — the service
+        // falls back to whichever side is actually free.
+        currency: z.enum(['BDT', 'INR']).optional(),
     }),
 });
 
