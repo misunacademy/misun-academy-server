@@ -253,8 +253,12 @@ export class DigitalProductController {
     });
 
     static reorderProductsAdmin = catchAsync(async (req: Request, res: Response) => {
-        const { items } = req.body as { items: { id: string; sortOrder: number }[] };
-        const result = await DigitalProductService.reorderProducts(items);
+        const { items, page, limit } = req.body as {
+            items: { id: string; sortOrder: number }[];
+            page?: number;
+            limit?: number;
+        };
+        const result = await DigitalProductService.reorderProducts(items, { page, limit });
         sendResponse(res, {
             statusCode: StatusCodes.OK,
             success: true,

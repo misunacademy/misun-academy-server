@@ -92,6 +92,10 @@ export const reorderDigitalProductsSchema = z.object({
                 })
             )
             .min(1, 'At least one product is required'),
+        // The admin list is paginated, so the client sends the page it just
+        // reordered. The service splices that page back into the global order.
+        page: z.number().int().min(1).optional(),
+        limit: z.number().int().min(1).max(100).optional(),
     }),
 });
 

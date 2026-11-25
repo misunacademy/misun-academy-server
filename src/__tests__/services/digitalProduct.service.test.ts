@@ -211,3 +211,53 @@ describe('DigitalProductService product ordering', () => {
         expect(products.map((p) => p.title)).toEqual(['Order B', 'Order A']);
     });
 });
+
+describe('DigitalProductService paginated reorder', () => {
+    it('reorders one page without disturbing products on other pages', async () => {
+        const created = [];
+        for (const title of ['Page A1', 'Page A2', 'Page B1', 'Page B2']) {
+            created.push(
+                await DigitalProductService.createProduct({
+                    ...baseProduct(),
+                    title,
+                    status: 'published',
+                })
+            );
+        }
+
+        // Page 2 (limit 2) contains [Page B1, Page B2]; swap them.
+        await DigitalProductService.reorderProducts(
+            [
+                { id: created[3]._id.toString(), sortOrder: 0 },
+                { id: created[2]._id.toString(), sortOrder: 1 },
+            ],
+            { page: 2, limit: 2 }
+        );
+
+        const products = await DigitalProductService.getBootcampProducts();
+        expect(products.map((p) => p.title)).toEqual([
+            'Page A1',
+            'Page A2',
+            'Page B2',
+            'Page B1',
+        ]);
+        expect(products.map((p) => p.sortOrder)).toEqual([0, 1, 2, 3]);
+    });
+
+    it('supports the admin paginated listing', async () => {
+        for (const title of ['List 1', 'List 2', 'List 3']) {
+            await DigitalProductService.createProduct({
+                ...baseProduct(),
+                title,
+                status: 'published',
+            });
+        }
+
+        const firstPage = await DigitalProductService.getAllProductsAdmin({ page: 1, limit: 2 });
+        const secondPage = await DigitalProductService.getAllProductsAdmin({ page: 2, limit: 2 });
+
+        expect(firstPage.data.map((p) => p.title)).toEqual(['List 1', 'List 2']);
+        expect(secondPage.data.map((p) => p.title)).toEqual(['List 3']);
+        expect(firstPage.meta).toMatchObject({ page: 1, limit: 2, total: 3, totalPage: 2 });
+    });
+});

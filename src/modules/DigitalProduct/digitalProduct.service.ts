@@ -209,18 +209,55 @@ export class DigitalProductService {
 
     /**
      * Persist a manually arranged display order (admin drag & drop).
-     * The client sends every visible product with its new zero-based index.
+     * The client sends the products of one page in their new order. Because the
+     * list is paginated, the new page order is spliced back into the global
+     * order and every product is renumbered, keeping pages deterministic.
      */
-    static async reorderProducts(items: { id: string; sortOrder: number }[]) {
+    static async reorderProducts(
+        items: { id: string; sortOrder: number }[],
+        options?: { page?: number; limit?: number }
+    ) {
         if (!items.length) {
             return { reordered: 0 };
         }
 
+        const limit = Math.max(1, Math.min(100, options?.limit ?? items.length));
+        const page = Math.max(1, options?.page ?? 1);
+        const offset = (page - 1) * limit;
+
+        const all = await DigitalProductModel.find()
+            .sort({ sortOrder: 1, createdAt: -1 })
+            .select('_id')
+            .lean();
+
+        const allIds = all.map((product) => product._id.toString());
+        const allIdsSet = new Set(allIds);
+
+        const orderedPageIds = items
+            .map((item) => item.id)
+            .filter((id) => allIdsSet.has(id));
+
+        if (!orderedPageIds.length) {
+            return { reordered: 0 };
+        }
+
+        const pageIds = new Set(orderedPageIds);
+        const remainingIds = allIds.filter((id) => !pageIds.has(id));
+
+        // The page's products occupied the [offset, offset + limit) slice, so
+        // everything before the offset keeps its position after removal.
+        const insertAt = Math.min(offset, remainingIds.length);
+        const finalIds = [
+            ...remainingIds.slice(0, insertAt),
+            ...orderedPageIds,
+            ...remainingIds.slice(insertAt),
+        ];
+
         const result = await DigitalProductModel.bulkWrite(
-            items.map(({ id, sortOrder }) => ({
+            finalIds.map((id, index) => ({
                 updateOne: {
                     filter: { _id: new Types.ObjectId(id) },
-                    update: { $set: { sortOrder } },
+                    update: { $set: { sortOrder: index } },
                 },
             }))
         );
