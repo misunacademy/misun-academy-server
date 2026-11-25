@@ -23,8 +23,25 @@ export class DigitalProductController {
         });
     });
 
-    static getProductBySlug = catchAsync(async (req: Request, res: Response) => {
-        const { slug } = req.params as { slug: string };
+    static getPublishedProducts = catchAsync(async (req: Request, res: Response) => {
+        const { page, limit, software, search } = req.query as Record<string, string>;
+        const result = await DigitalProductService.getPublishedProducts({
+            page: page ? Number(page) : undefined,
+            limit: limit ? Number(limit) : undefined,
+            software,
+            search,
+        });
+
+        sendResponse(res, {
+            statusCode: StatusCodes.OK,
+            success: true,
+            message: 'Digital products retrieved successfully',
+            data: result.data,
+            meta: result.meta,
+        });
+    });
+
+    static getProductBySlug = catchAsync(async (req: Request, res: Response) => {        const { slug } = req.params as { slug: string };
         const result = await DigitalProductService.getProductBySlug(slug);
         sendResponse(res, {
             statusCode: StatusCodes.OK,

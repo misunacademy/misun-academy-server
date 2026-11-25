@@ -261,3 +261,62 @@ describe('DigitalProductService paginated reorder', () => {
         expect(firstPage.meta).toMatchObject({ page: 1, limit: 2, total: 3, totalPage: 2 });
     });
 });
+
+describe('DigitalProductService.getPublishedProducts', () => {
+    it('paginates published products and returns category counts', async () => {
+        const seed = (title: string, software: 'photoshop' | 'illustrator' | 'bundle', status: 'draft' | 'published' = 'published') =>
+            DigitalProductService.createProduct({
+                ...baseProduct(),
+                title,
+                software,
+                status,
+            });
+
+        await seed('PS 1', 'photoshop');
+        await seed('PS 2', 'photoshop');
+        await seed('AI 1', 'illustrator');
+        await seed('Draft PS', 'photoshop', 'draft');
+
+        const page1 = await DigitalProductService.getPublishedProducts({ page: 1, limit: 2 });
+        expect(page1.data).toHaveLength(2);
+        expect(page1.meta).toMatchObject({ page: 1, limit: 2, total: 3, totalPage: 2 });
+        expect(page1.meta.counts).toEqual({
+            all: 3,
+            photoshop: 2,
+            illustrator: 1,
+            bundle: 0,
+        });
+
+        const page2 = await DigitalProductService.getPublishedProducts({ page: 2, limit: 2 });
+        expect(page2.data).toHaveLength(1);
+    });
+
+    it('applies category and search filters on the server', async () => {
+        await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Vector Pack',
+            software: 'illustrator',
+            status: 'published',
+        });
+        await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Brush Pack',
+            software: 'photoshop',
+            status: 'published',
+        });
+
+        const result = await DigitalProductService.getPublishedProducts({
+            software: 'illustrator',
+            search: 'vector',
+        });
+
+        expect(result.data.map((p) => p.title)).toEqual(['Vector Pack']);
+        expect(result.meta.total).toBe(1);
+        expect(result.meta.counts).toEqual({
+            all: 1,
+            photoshop: 0,
+            illustrator: 1,
+            bundle: 0,
+        });
+    });
+});

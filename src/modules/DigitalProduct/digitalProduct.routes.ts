@@ -85,6 +85,7 @@ const orderLimiter = createRateLimiter({
 });
 
 // --- Public Endpoints ---
+router.get('/', DigitalProductController.getPublishedProducts);
 router.get('/bootcamp', DigitalProductController.getBootcampProducts);
 router.get('/products/:slug', DigitalProductController.getProductBySlug);
 

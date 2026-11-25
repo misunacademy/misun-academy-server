@@ -46,6 +46,66 @@ export class DigitalProductService {
             .lean();
     }
 
+    /**
+     * Paginated public catalog for the /digital-products page. Category pills
+     * and search run on the server so pagination stays correct, and counts are
+     * returned alongside the page meta.
+     */
+    static async getPublishedProducts(query: {
+        page?: number;
+        limit?: number;
+        software?: string;
+        search?: string;
+    }) {
+        const searchFilter: FilterQuery<IDigitalProduct> = { isPublished: true };
+        if (query.search) {
+            searchFilter.$or = [
+                { title: { $regex: query.search, $options: 'i' } },
+                { tagline: { $regex: query.search, $options: 'i' } },
+                { software: { $regex: query.search, $options: 'i' } },
+            ];
+        }
+
+        const filter: FilterQuery<IDigitalProduct> = { ...searchFilter };
+        if (query.software && query.software !== 'all') {
+            filter.software = query.software;
+        }
+
+        const page = Math.max(1, Number(query.page) || 1);
+        const limit = Math.max(1, Math.min(100, Number(query.limit) || 9));
+        const skip = (page - 1) * limit;
+
+        const [data, total, allCount, photoshopCount, illustratorCount, bundleCount] =
+            await Promise.all([
+                DigitalProductModel.find(filter)
+                    .sort({ sortOrder: 1, createdAt: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                DigitalProductModel.countDocuments(filter),
+                DigitalProductModel.countDocuments(searchFilter),
+                DigitalProductModel.countDocuments({ ...searchFilter, software: 'photoshop' }),
+                DigitalProductModel.countDocuments({ ...searchFilter, software: 'illustrator' }),
+                DigitalProductModel.countDocuments({ ...searchFilter, software: 'bundle' }),
+            ]);
+
+        return {
+            data,
+            meta: {
+                page,
+                limit,
+                total,
+                totalPage: Math.ceil(total / limit),
+                counts: {
+                    all: allCount,
+                    photoshop: photoshopCount,
+                    illustrator: illustratorCount,
+                    bundle: bundleCount,
+                },
+            },
+        };
+    }
+
     static async getProductBySlug(slug: string): Promise<IDigitalProduct> {
         const product = await DigitalProductModel.findOne({ slug: slug.toLowerCase() }).lean();
         if (!product) {
