@@ -82,6 +82,19 @@ export const updateDigitalProductSchema = z.object({
     }),
 });
 
+export const reorderDigitalProductsSchema = z.object({
+    body: z.object({
+        items: z
+            .array(
+                z.object({
+                    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid product id'),
+                    sortOrder: z.number().int().min(0),
+                })
+            )
+            .min(1, 'At least one product is required'),
+    }),
+});
+
 export const initiateSSLCommerzOrderSchema = z.object({
     body: z.object({
         productId: z.string().min(1, 'Product ID is required'),

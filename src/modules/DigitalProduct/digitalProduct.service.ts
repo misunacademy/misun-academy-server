@@ -42,7 +42,7 @@ export class DigitalProductService {
         return DigitalProductModel.find({
             isPublished: true,
         })
-            .sort({ createdAt: -1 })
+            .sort({ sortOrder: 1, createdAt: -1 })
             .lean();
     }
 
@@ -89,7 +89,7 @@ export class DigitalProductService {
 
         const [data, total] = await Promise.all([
             DigitalProductModel.find(filter)
-                .sort({ createdAt: -1 })
+                .sort({ sortOrder: 1, createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
                 .lean(),
@@ -137,6 +137,15 @@ export class DigitalProductService {
             uniqueSlug = `${baseSlug}-${counter++}`;
         }
         payload.slug = uniqueSlug;
+
+        if (payload.sortOrder === undefined) {
+            // Append new products to the end of the admin-controlled order.
+            const lastProduct = await DigitalProductModel.findOne()
+                .sort({ sortOrder: -1 })
+                .select('sortOrder')
+                .lean();
+            payload.sortOrder = (lastProduct?.sortOrder ?? -1) + 1;
+        }
 
         const product = await DigitalProductModel.create({
             ...payload,
@@ -196,6 +205,27 @@ export class DigitalProductService {
             throw new ApiError(StatusCodes.NOT_FOUND, 'Digital product not found');
         }
         return deleted;
+    }
+
+    /**
+     * Persist a manually arranged display order (admin drag & drop).
+     * The client sends every visible product with its new zero-based index.
+     */
+    static async reorderProducts(items: { id: string; sortOrder: number }[]) {
+        if (!items.length) {
+            return { reordered: 0 };
+        }
+
+        const result = await DigitalProductModel.bulkWrite(
+            items.map(({ id, sortOrder }) => ({
+                updateOne: {
+                    filter: { _id: new Types.ObjectId(id) },
+                    update: { $set: { sortOrder } },
+                },
+            }))
+        );
+
+        return { reordered: result.modifiedCount };
     }
 
     // --- Purchases & Checkout ---

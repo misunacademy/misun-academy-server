@@ -174,3 +174,40 @@ describe('DigitalProductService.updateProduct — switching to free', () => {
         expect(updated.discountPriceINR ?? null).toBeNull();
     });
 });
+
+describe('DigitalProductService product ordering', () => {
+    it('appends newly created products to the end of the manual order', async () => {
+        const first = await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'First ordered product',
+        });
+        const second = await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Second ordered product',
+        });
+
+        expect(first.sortOrder).toBe(0);
+        expect(second.sortOrder).toBe(1);
+    });
+
+    it('persists a drag & drop reorder and reflects it in the storefront listing', async () => {
+        const first = await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Order A',
+            status: 'published',
+        });
+        const second = await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Order B',
+            status: 'published',
+        });
+
+        await DigitalProductService.reorderProducts([
+            { id: second._id.toString(), sortOrder: 0 },
+            { id: first._id.toString(), sortOrder: 1 },
+        ]);
+
+        const products = await DigitalProductService.getBootcampProducts();
+        expect(products.map((p) => p.title)).toEqual(['Order B', 'Order A']);
+    });
+});

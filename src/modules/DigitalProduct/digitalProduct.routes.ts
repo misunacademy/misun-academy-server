@@ -7,6 +7,7 @@ import { DigitalProductController } from './digitalProduct.controller.js';
 import {
     createDigitalProductSchema,
     updateDigitalProductSchema,
+    reorderDigitalProductsSchema,
     initiateSSLCommerzOrderSchema,
     submitPhonePeManualOrderSchema,
     claimFreeDigitalProductSchema,
@@ -141,6 +142,11 @@ router.post(
     '/admin/products',
     validateRequest(createDigitalProductSchema),
     DigitalProductController.createProductAdmin
+);
+router.patch(
+    '/admin/products/reorder',
+    validateRequest(reorderDigitalProductsSchema),
+    DigitalProductController.reorderProductsAdmin
 );
 router.patch(
     '/admin/products/:id',

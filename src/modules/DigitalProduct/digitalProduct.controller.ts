@@ -252,6 +252,17 @@ export class DigitalProductController {
         });
     });
 
+    static reorderProductsAdmin = catchAsync(async (req: Request, res: Response) => {
+        const { items } = req.body as { items: { id: string; sortOrder: number }[] };
+        const result = await DigitalProductService.reorderProducts(items);
+        sendResponse(res, {
+            statusCode: StatusCodes.OK,
+            success: true,
+            message: 'Digital product order updated successfully',
+            data: result,
+        });
+    });
+
     static listOrdersAdmin = catchAsync(async (req: Request, res: Response) => {
         const { status, paymentMethod, search, page, limit } = req.query as Record<string, string>;
         const result = await DigitalProductService.listOrdersAdmin({
