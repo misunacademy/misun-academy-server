@@ -42,8 +42,68 @@ export class DigitalProductService {
         return DigitalProductModel.find({
             isPublished: true,
         })
-            .sort({ createdAt: -1 })
+            .sort({ sortOrder: 1, createdAt: -1 })
             .lean();
+    }
+
+    /**
+     * Paginated public catalog for the /digital-products page. Category pills
+     * and search run on the server so pagination stays correct, and counts are
+     * returned alongside the page meta.
+     */
+    static async getPublishedProducts(query: {
+        page?: number;
+        limit?: number;
+        software?: string;
+        search?: string;
+    }) {
+        const searchFilter: FilterQuery<IDigitalProduct> = { isPublished: true };
+        if (query.search) {
+            searchFilter.$or = [
+                { title: { $regex: query.search, $options: 'i' } },
+                { tagline: { $regex: query.search, $options: 'i' } },
+                { software: { $regex: query.search, $options: 'i' } },
+            ];
+        }
+
+        const filter: FilterQuery<IDigitalProduct> = { ...searchFilter };
+        if (query.software && query.software !== 'all') {
+            filter.software = query.software;
+        }
+
+        const page = Math.max(1, Number(query.page) || 1);
+        const limit = Math.max(1, Math.min(100, Number(query.limit) || 9));
+        const skip = (page - 1) * limit;
+
+        const [data, total, allCount, photoshopCount, illustratorCount, bundleCount] =
+            await Promise.all([
+                DigitalProductModel.find(filter)
+                    .sort({ sortOrder: 1, createdAt: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                DigitalProductModel.countDocuments(filter),
+                DigitalProductModel.countDocuments(searchFilter),
+                DigitalProductModel.countDocuments({ ...searchFilter, software: 'photoshop' }),
+                DigitalProductModel.countDocuments({ ...searchFilter, software: 'illustrator' }),
+                DigitalProductModel.countDocuments({ ...searchFilter, software: 'bundle' }),
+            ]);
+
+        return {
+            data,
+            meta: {
+                page,
+                limit,
+                total,
+                totalPage: Math.ceil(total / limit),
+                counts: {
+                    all: allCount,
+                    photoshop: photoshopCount,
+                    illustrator: illustratorCount,
+                    bundle: bundleCount,
+                },
+            },
+        };
     }
 
     static async getProductBySlug(slug: string): Promise<IDigitalProduct> {
@@ -89,7 +149,7 @@ export class DigitalProductService {
 
         const [data, total] = await Promise.all([
             DigitalProductModel.find(filter)
-                .sort({ createdAt: -1 })
+                .sort({ sortOrder: 1, createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
                 .lean(),
@@ -137,6 +197,15 @@ export class DigitalProductService {
             uniqueSlug = `${baseSlug}-${counter++}`;
         }
         payload.slug = uniqueSlug;
+
+        if (payload.sortOrder === undefined) {
+            // Append new products to the end of the admin-controlled order.
+            const lastProduct = await DigitalProductModel.findOne()
+                .sort({ sortOrder: -1 })
+                .select('sortOrder')
+                .lean();
+            payload.sortOrder = (lastProduct?.sortOrder ?? -1) + 1;
+        }
 
         const product = await DigitalProductModel.create({
             ...payload,
@@ -196,6 +265,64 @@ export class DigitalProductService {
             throw new ApiError(StatusCodes.NOT_FOUND, 'Digital product not found');
         }
         return deleted;
+    }
+
+    /**
+     * Persist a manually arranged display order (admin drag & drop).
+     * The client sends the products of one page in their new order. Because the
+     * list is paginated, the new page order is spliced back into the global
+     * order and every product is renumbered, keeping pages deterministic.
+     */
+    static async reorderProducts(
+        items: { id: string; sortOrder: number }[],
+        options?: { page?: number; limit?: number }
+    ) {
+        if (!items.length) {
+            return { reordered: 0 };
+        }
+
+        const limit = Math.max(1, Math.min(100, options?.limit ?? items.length));
+        const page = Math.max(1, options?.page ?? 1);
+        const offset = (page - 1) * limit;
+
+        const all = await DigitalProductModel.find()
+            .sort({ sortOrder: 1, createdAt: -1 })
+            .select('_id')
+            .lean();
+
+        const allIds = all.map((product) => product._id.toString());
+        const allIdsSet = new Set(allIds);
+
+        const orderedPageIds = items
+            .map((item) => item.id)
+            .filter((id) => allIdsSet.has(id));
+
+        if (!orderedPageIds.length) {
+            return { reordered: 0 };
+        }
+
+        const pageIds = new Set(orderedPageIds);
+        const remainingIds = allIds.filter((id) => !pageIds.has(id));
+
+        // The page's products occupied the [offset, offset + limit) slice, so
+        // everything before the offset keeps its position after removal.
+        const insertAt = Math.min(offset, remainingIds.length);
+        const finalIds = [
+            ...remainingIds.slice(0, insertAt),
+            ...orderedPageIds,
+            ...remainingIds.slice(insertAt),
+        ];
+
+        const result = await DigitalProductModel.bulkWrite(
+            finalIds.map((id, index) => ({
+                updateOne: {
+                    filter: { _id: new Types.ObjectId(id) },
+                    update: { $set: { sortOrder: index } },
+                },
+            }))
+        );
+
+        return { reordered: result.modifiedCount };
     }
 
     // --- Purchases & Checkout ---
