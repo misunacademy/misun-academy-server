@@ -77,6 +77,30 @@ export class DigitalProductController {
         });
     });
 
+    static claimFreeProduct = catchAsync(async (req: Request, res: Response) => {
+        const { productId, currency } = req.body;
+        const user = req.user as { id: string; name?: string; email?: string; phone?: string };
+        const name = req.body.name || user?.name || 'Student';
+        const email = req.body.email || user?.email || '';
+        const phone = req.body.phone || (user as any)?.phone || 'N/A';
+
+        const result = await DigitalProductService.claimFreeProduct(
+            productId,
+            { name, email, phone },
+            user.id,
+            currency
+        );
+
+        sendResponse(res, {
+            statusCode: result.alreadyClaimed ? StatusCodes.OK : StatusCodes.CREATED,
+            success: true,
+            message: result.alreadyClaimed
+                ? 'You already own this free product'
+                : 'Free product claimed successfully',
+            data: result,
+        });
+    });
+
     static paymentStatusCallback = catchAsync(async (req: Request, res: Response) => {
         const body = (req.body ?? {}) as Record<string, unknown>;
         const query = req.query as Record<string, string | undefined>;

@@ -73,6 +73,10 @@
       "description": "Dashboard endpoints"
     },
     {
+      "name": "digital-products",
+      "description": "Digital Products endpoints"
+    },
+    {
       "name": "employee",
       "description": "Employee endpoints"
     },
@@ -12456,6 +12460,129 @@
         ]
       }
     },
+    "/api/v1/bootcamp/purchases/{id}/review": {
+      "patch": {
+        "tags": [
+          "bootcamp"
+        ],
+        "operationId": "patchBootcampPurchasesIdReview",
+        "summary": "PATCH bootcamp/purchases/:id/review",
+        "description": "Auto-generated from src/modules/Bootcamp/bootcamp.routes.ts. Handler: BootcampCatalogController.reviewBootcampPurchaseAdmin.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-roles": [
+          "admin",
+          "superadmin"
+        ]
+      }
+    },
     "/api/v1/bootcamp/purchases/stats": {
       "get": {
         "tags": [
@@ -13287,6 +13414,125 @@
                 "example": {
                   "success": true,
                   "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/bootcamp/slug/{slug}/payment/manual-phonepe": {
+      "post": {
+        "tags": [
+          "bootcamp"
+        ],
+        "operationId": "postBootcampSlugSlugPaymentManualphonepe",
+        "summary": "POST bootcamp/slug/:slug/payment/manual-phonepe",
+        "description": "Auto-generated from src/modules/Bootcamp/bootcamp.routes.ts. Handler: BootcampCatalogController.submitPhonePeManualPurchase.",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 201,
                   "message": "Request successful",
                   "data": {}
                 }
@@ -18147,6 +18393,2039 @@
           "admin",
           "superadmin"
         ]
+      }
+    },
+    "/api/v1/digital-products/admin/orders": {
+      "get": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "getDigitalproductsAdminOrders",
+        "summary": "GET digital-products/admin/orders",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.listOrdersAdmin.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/digital-products/admin/orders/{id}/review": {
+      "patch": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "patchDigitalproductsAdminOrdersIdReview",
+        "summary": "PATCH digital-products/admin/orders/:id/review",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.reviewOrderAdmin.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/digital-products/admin/orders/stats": {
+      "get": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "getDigitalproductsAdminOrdersStats",
+        "summary": "GET digital-products/admin/orders/stats",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.getOrdersStatsAdmin.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/digital-products/admin/products": {
+      "get": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "getDigitalproductsAdminProducts",
+        "summary": "GET digital-products/admin/products",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.getAllProductsAdmin.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "postDigitalproductsAdminProducts",
+        "summary": "POST digital-products/admin/products",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.createProductAdmin.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 201,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/digital-products/admin/products/{id}": {
+      "delete": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "deleteDigitalproductsAdminProductsId",
+        "summary": "DELETE digital-products/admin/products/:id",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.deleteProductAdmin.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "patchDigitalproductsAdminProductsId",
+        "summary": "PATCH digital-products/admin/products/:id",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.updateProductAdmin.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/digital-products/admin/upload-asset": {
+      "post": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "postDigitalproductsAdminUploadasset",
+        "summary": "POST digital-products/admin/upload-asset",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.uploadAssetAdmin.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/StandardSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "oneOf": [
+                            {
+                              "$ref": "#/components/schemas/Document"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/Document"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 201,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/digital-products/bootcamp": {
+      "get": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "getDigitalproductsBootcamp",
+        "summary": "GET digital-products/bootcamp",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.getBootcampProducts.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/digital-products/checkout/free": {
+      "post": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "postDigitalproductsCheckoutFree",
+        "summary": "POST digital-products/checkout/free",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.claimFreeProduct.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 201,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/digital-products/checkout/phonepe-manual": {
+      "post": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "postDigitalproductsCheckoutPhonepemanual",
+        "summary": "POST digital-products/checkout/phonepe-manual",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.submitPhonePeManual.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 201,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/digital-products/checkout/sslcommerz": {
+      "post": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "postDigitalproductsCheckoutSslcommerz",
+        "summary": "POST digital-products/checkout/sslcommerz",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.initiateSSLCommerz.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 201,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/digital-products/download/{token}/{fileType}": {
+      "get": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "getDigitalproductsDownloadTokenFileType",
+        "summary": "GET digital-products/download/:token/:fileType",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.downloadFile.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          },
+          {
+            "name": "fileType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/digital-products/my-purchases": {
+      "get": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "getDigitalproductsMypurchases",
+        "summary": "GET digital-products/my-purchases",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.getMyPurchasedProducts.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/digital-products/payments/status": {
+      "get": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "getDigitalproductsPaymentsStatus",
+        "summary": "GET digital-products/payments/status",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.paymentStatusCallback.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/StandardSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "oneOf": [
+                            {
+                              "$ref": "#/components/schemas/Payment"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/Payment"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "postDigitalproductsPaymentsStatus",
+        "summary": "POST digital-products/payments/status",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.paymentStatusCallback.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/StandardSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "oneOf": [
+                            {
+                              "$ref": "#/components/schemas/Payment"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/Payment"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 201,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/digital-products/payments/webhook": {
+      "post": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "postDigitalproductsPaymentsWebhook",
+        "summary": "POST digital-products/payments/webhook",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.paymentWebhook.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/StandardSuccess"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "oneOf": [
+                            {
+                              "$ref": "#/components/schemas/Payment"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/components/schemas/Payment"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 201,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/digital-products/products/{slug}": {
+      "get": {
+        "tags": [
+          "digital-products"
+        ],
+        "operationId": "getDigitalproductsProductsSlug",
+        "summary": "GET digital-products/products/:slug",
+        "description": "Auto-generated from src/modules/DigitalProduct/digitalProduct.routes.ts. Handler: DigitalProductController.getProductBySlug.",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "66f1ad6b2f4d7e0d4f9d1234"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandardSuccess"
+                },
+                "example": {
+                  "success": true,
+                  "statusCode": 200,
+                  "message": "Request successful",
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Validation failed",
+                  "errorMessages": [
+                    {
+                      "path": "field",
+                      "message": "Invalid value"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Authentication required",
+                  "errorMessages": [
+                    {
+                      "path": "auth",
+                      "message": "Invalid or expired session"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "You do not have permission to access this resource",
+                  "errorMessages": [
+                    {
+                      "path": "role",
+                      "message": "Insufficient permissions"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Something went wrong",
+                  "errorMessages": []
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/employee/admin/employees": {
