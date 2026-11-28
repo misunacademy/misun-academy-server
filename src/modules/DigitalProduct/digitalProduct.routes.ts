@@ -157,6 +157,7 @@ router.patch(
 router.delete('/admin/products/:id', DigitalProductController.deleteProductAdmin);
 
 router.get('/admin/orders', DigitalProductController.listOrdersAdmin);
+router.get('/admin/orders/export', DigitalProductController.exportOrdersCsv);
 router.get('/admin/orders/stats', DigitalProductController.getOrdersStatsAdmin);
 router.patch(
     '/admin/orders/:id/review',
