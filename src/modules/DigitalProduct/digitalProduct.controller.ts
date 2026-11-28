@@ -303,6 +303,25 @@ export class DigitalProductController {
         });
     });
 
+    /**
+     * Export all orders matching the current filters as CSV — customer name,
+     * email, phone (plus order/status context). No pagination so the admin gets
+     * every matching row.
+     */
+    static exportOrdersCsv = catchAsync(async (req: Request, res: Response) => {
+        const { status, paymentMethod, search } = req.query as Record<string, string>;
+        const csv = await DigitalProductService.exportOrdersCsv({
+            status: status as any,
+            paymentMethod,
+            search,
+        });
+
+        const filename = `digital-orders-${new Date().toISOString().slice(0, 10)}.csv`;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.status(StatusCodes.OK).send(csv);
+    });
+
     static reviewOrderAdmin = catchAsync(async (req: Request, res: Response) => {
         const { id } = req.params as { id: string };
         const { status, adminNote } = req.body;

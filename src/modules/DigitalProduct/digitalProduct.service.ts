@@ -35,6 +35,35 @@ const getCallbackKey = (transactionId: string): string => {
     return crypto.createHmac('sha256', secret).update(transactionId).digest('hex').slice(0, 16);
 };
 
+const buildOrdersFilter = (query: {
+    status?: DigitalProductOrderStatus;
+    paymentMethod?: string;
+    search?: string;
+}): FilterQuery<IDigitalProductOrder> => {
+    const filter: FilterQuery<IDigitalProductOrder> = {};
+    if (query.status) {
+        filter.status = query.status;
+    }
+    if (query.paymentMethod) {
+        filter.paymentMethod = query.paymentMethod;
+    }
+    if (query.search) {
+        filter.$or = [
+            { orderNumber: { $regex: query.search, $options: 'i' } },
+            { transactionId: { $regex: query.search, $options: 'i' } },
+            { 'customer.name': { $regex: query.search, $options: 'i' } },
+            { 'customer.email': { $regex: query.search, $options: 'i' } },
+            { 'customer.phone': { $regex: query.search, $options: 'i' } },
+        ];
+    }
+    return filter;
+};
+
+const escapeCsvValue = (value: unknown): string => {
+    const text = value === null || value === undefined ? '' : String(value);
+    return `"${text.replace(/"/g, '""')}"`;
+};
+
 export class DigitalProductService {
     // --- Public Catalog ---
 
@@ -144,7 +173,7 @@ export class DigitalProductService {
         }
 
         const page = Math.max(1, Number(query.page) || 1);
-        const limit = Math.max(1, Math.min(100, Number(query.limit) || 20));
+        const limit = Math.max(1, Math.min(500, Number(query.limit) || 20));
         const skip = (page - 1) * limit;
 
         const [data, total] = await Promise.all([
@@ -269,9 +298,13 @@ export class DigitalProductService {
 
     /**
      * Persist a manually arranged display order (admin drag & drop).
-     * The client sends the products of one page in their new order. Because the
-     * list is paginated, the new page order is spliced back into the global
-     * order and every product is renumbered, keeping pages deterministic.
+     *
+     * Two modes:
+     * 1. Page-wise reorder (existing): send items for one page + page/limit options.
+     * 2. Global reorder: send ALL products with new sortOrder values — no page/limit needed.
+     *
+     * For global reorder, items should be [{ id: string, sortOrder: number }] covering ALL
+     * products. Each product's sortOrder becomes its new position (0, 1, 2, ...).
      */
     static async reorderProducts(
         items: { id: string; sortOrder: number }[],
@@ -281,6 +314,43 @@ export class DigitalProductService {
             return { reordered: 0 };
         }
 
+        // Global reorder: no page/limit — place provided items in order and append
+        // any remaining products so sortOrder stays contiguous (0..N-1).
+        if (!options?.page && !options?.limit) {
+            const all = await DigitalProductModel.find()
+                .sort({ sortOrder: 1, createdAt: -1 })
+                .select('_id')
+                .lean();
+
+            const allIdsSet = new Set(all.map((product) => product._id.toString()));
+            const providedIds = items
+                .map((item) => item.id)
+                .filter((id) => allIdsSet.has(id));
+
+            if (!providedIds.length) {
+                return { reordered: 0 };
+            }
+
+            const providedSet = new Set(providedIds);
+            const remainingIds = all
+                .map((product) => product._id.toString())
+                .filter((id) => !providedSet.has(id));
+
+            const finalIds = [...providedIds, ...remainingIds];
+
+            const result = await DigitalProductModel.bulkWrite(
+                finalIds.map((id, index) => ({
+                    updateOne: {
+                        filter: { _id: new Types.ObjectId(id) },
+                        update: { $set: { sortOrder: index } },
+                    },
+                }))
+            );
+
+            return { reordered: result.modifiedCount };
+        }
+
+        // Page-wise reorder (existing behavior preserved).
         const limit = Math.max(1, Math.min(100, options?.limit ?? items.length));
         const page = Math.max(1, options?.page ?? 1);
         const offset = (page - 1) * limit;
@@ -685,54 +755,60 @@ export class DigitalProductService {
 
     // --- Admin Orders Review ---
 
-    static async listOrdersAdmin(query: {
+    /**
+     * Export all orders matching the current filters as CSV — customer name,
+     * email, phone (plus order/status context). No pagination so the admin gets
+     * every matching row.
+     */
+    static async exportOrdersCsv(query: {
         status?: DigitalProductOrderStatus;
         paymentMethod?: string;
         search?: string;
-        page?: number;
-        limit?: number;
-    }) {
-        const filter: FilterQuery<IDigitalProductOrder> = {};
-        if (query.status) {
-            filter.status = query.status;
-        }
-        if (query.paymentMethod) {
-            filter.paymentMethod = query.paymentMethod;
-        }
-        if (query.search) {
-            filter.$or = [
-                { orderNumber: { $regex: query.search, $options: 'i' } },
-                { transactionId: { $regex: query.search, $options: 'i' } },
-                { 'customer.name': { $regex: query.search, $options: 'i' } },
-                { 'customer.email': { $regex: query.search, $options: 'i' } },
-                { 'customer.phone': { $regex: query.search, $options: 'i' } },
-            ];
-        }
+    }): Promise<string> {
+        const filter = buildOrdersFilter(query);
 
-        const page = Math.max(1, Number(query.page) || 1);
-        const limit = Math.max(1, Math.min(100, Number(query.limit) || 20));
-        const skip = (page - 1) * limit;
+        const orders = await DigitalProductOrderModel.find(filter)
+            .sort({ createdAt: -1 })
+            .lean();
 
-        const [data, total] = await Promise.all([
-            DigitalProductOrderModel.find(filter)
-                .populate('product', 'title slug software thumbnail')
-                .populate('reviewedBy', 'name email')
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
-                .lean(),
-            DigitalProductOrderModel.countDocuments(filter),
-        ]);
+        const header = [
+            'Order Number',
+            'Customer Name',
+            'Customer Email',
+            'Customer Phone',
+            'Country',
+            'Product',
+            'Payment Method',
+            'Amount',
+            'Currency',
+            'Status',
+            'Transaction ID',
+            'Created At',
+        ];
 
-        return {
-            data,
-            meta: {
-                page,
-                limit,
-                total,
-                totalPage: Math.ceil(total / limit),
-            },
-        };
+        const rows = orders.map((order) =>
+            [
+                order.orderNumber,
+                order.customer?.name,
+                order.customer?.email,
+                order.customer?.phone,
+                order.customer?.country,
+                order.productSnapshot?.title,
+                order.paymentMethod,
+                order.amount,
+                order.currency,
+                order.status,
+                order.transactionId,
+                (order as { createdAt?: Date }).createdAt
+                    ? new Date((order as { createdAt: Date }).createdAt).toISOString()
+                    : '',
+            ]
+                .map(escapeCsvValue)
+                .join(',')
+        );
+
+        // BOM prefix so Excel reads UTF-8 (Bangla names) correctly.
+        return `\uFEFF${[header.map(escapeCsvValue).join(','), ...rows].join('\r\n')}\r\n`;
     }
 
     static async reviewOrderAdmin(
@@ -793,6 +869,41 @@ export class DigitalProductService {
         }
 
         return order;
+    }
+
+    static async listOrdersAdmin(query: {
+        status?: DigitalProductOrderStatus;
+        paymentMethod?: string;
+        search?: string;
+        page?: number;
+        limit?: number;
+    }) {
+        const filter = buildOrdersFilter(query);
+
+        const page = Math.max(1, Number(query.page) || 1);
+        const limit = Math.max(1, Math.min(500, Number(query.limit) || 20));
+        const skip = (page - 1) * limit;
+
+        const [data, total] = await Promise.all([
+            DigitalProductOrderModel.find(filter)
+                .populate('product', 'title slug software thumbnail')
+                .populate('reviewedBy', 'name email')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            DigitalProductOrderModel.countDocuments(filter),
+        ]);
+
+        return {
+            data,
+            meta: {
+                page,
+                limit,
+                total,
+                totalPage: Math.ceil(total / limit),
+            },
+        };
     }
 
     static async getOrdersStatsAdmin() {
