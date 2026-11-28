@@ -7,6 +7,7 @@ import { DigitalProductController } from './digitalProduct.controller.js';
 import {
     createDigitalProductSchema,
     updateDigitalProductSchema,
+    reorderDigitalProductsSchema,
     initiateSSLCommerzOrderSchema,
     submitPhonePeManualOrderSchema,
     claimFreeDigitalProductSchema,
@@ -84,6 +85,7 @@ const orderLimiter = createRateLimiter({
 });
 
 // --- Public Endpoints ---
+router.get('/', DigitalProductController.getPublishedProducts);
 router.get('/bootcamp', DigitalProductController.getBootcampProducts);
 router.get('/products/:slug', DigitalProductController.getProductBySlug);
 
@@ -141,6 +143,11 @@ router.post(
     '/admin/products',
     validateRequest(createDigitalProductSchema),
     DigitalProductController.createProductAdmin
+);
+router.patch(
+    '/admin/products/reorder',
+    validateRequest(reorderDigitalProductsSchema),
+    DigitalProductController.reorderProductsAdmin
 );
 router.patch(
     '/admin/products/:id',

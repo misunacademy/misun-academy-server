@@ -27,6 +27,7 @@ export interface IDigitalProduct {
     guidePdf?: IDigitalProductFile;
     isPublished: boolean;
     status?: DigitalProductStatus;
+    sortOrder: number;
     salesCount: number;
     createdBy?: Types.ObjectId;
     createdAt: Date;

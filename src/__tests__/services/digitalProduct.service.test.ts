@@ -174,3 +174,149 @@ describe('DigitalProductService.updateProduct — switching to free', () => {
         expect(updated.discountPriceINR ?? null).toBeNull();
     });
 });
+
+describe('DigitalProductService product ordering', () => {
+    it('appends newly created products to the end of the manual order', async () => {
+        const first = await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'First ordered product',
+        });
+        const second = await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Second ordered product',
+        });
+
+        expect(first.sortOrder).toBe(0);
+        expect(second.sortOrder).toBe(1);
+    });
+
+    it('persists a drag & drop reorder and reflects it in the storefront listing', async () => {
+        const first = await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Order A',
+            status: 'published',
+        });
+        const second = await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Order B',
+            status: 'published',
+        });
+
+        await DigitalProductService.reorderProducts([
+            { id: second._id.toString(), sortOrder: 0 },
+            { id: first._id.toString(), sortOrder: 1 },
+        ]);
+
+        const products = await DigitalProductService.getBootcampProducts();
+        expect(products.map((p) => p.title)).toEqual(['Order B', 'Order A']);
+    });
+});
+
+describe('DigitalProductService paginated reorder', () => {
+    it('reorders one page without disturbing products on other pages', async () => {
+        const created = [];
+        for (const title of ['Page A1', 'Page A2', 'Page B1', 'Page B2']) {
+            created.push(
+                await DigitalProductService.createProduct({
+                    ...baseProduct(),
+                    title,
+                    status: 'published',
+                })
+            );
+        }
+
+        // Page 2 (limit 2) contains [Page B1, Page B2]; swap them.
+        await DigitalProductService.reorderProducts(
+            [
+                { id: created[3]._id.toString(), sortOrder: 0 },
+                { id: created[2]._id.toString(), sortOrder: 1 },
+            ],
+            { page: 2, limit: 2 }
+        );
+
+        const products = await DigitalProductService.getBootcampProducts();
+        expect(products.map((p) => p.title)).toEqual([
+            'Page A1',
+            'Page A2',
+            'Page B2',
+            'Page B1',
+        ]);
+        expect(products.map((p) => p.sortOrder)).toEqual([0, 1, 2, 3]);
+    });
+
+    it('supports the admin paginated listing', async () => {
+        for (const title of ['List 1', 'List 2', 'List 3']) {
+            await DigitalProductService.createProduct({
+                ...baseProduct(),
+                title,
+                status: 'published',
+            });
+        }
+
+        const firstPage = await DigitalProductService.getAllProductsAdmin({ page: 1, limit: 2 });
+        const secondPage = await DigitalProductService.getAllProductsAdmin({ page: 2, limit: 2 });
+
+        expect(firstPage.data.map((p) => p.title)).toEqual(['List 1', 'List 2']);
+        expect(secondPage.data.map((p) => p.title)).toEqual(['List 3']);
+        expect(firstPage.meta).toMatchObject({ page: 1, limit: 2, total: 3, totalPage: 2 });
+    });
+});
+
+describe('DigitalProductService.getPublishedProducts', () => {
+    it('paginates published products and returns category counts', async () => {
+        const seed = (title: string, software: 'photoshop' | 'illustrator' | 'bundle', status: 'draft' | 'published' = 'published') =>
+            DigitalProductService.createProduct({
+                ...baseProduct(),
+                title,
+                software,
+                status,
+            });
+
+        await seed('PS 1', 'photoshop');
+        await seed('PS 2', 'photoshop');
+        await seed('AI 1', 'illustrator');
+        await seed('Draft PS', 'photoshop', 'draft');
+
+        const page1 = await DigitalProductService.getPublishedProducts({ page: 1, limit: 2 });
+        expect(page1.data).toHaveLength(2);
+        expect(page1.meta).toMatchObject({ page: 1, limit: 2, total: 3, totalPage: 2 });
+        expect(page1.meta.counts).toEqual({
+            all: 3,
+            photoshop: 2,
+            illustrator: 1,
+            bundle: 0,
+        });
+
+        const page2 = await DigitalProductService.getPublishedProducts({ page: 2, limit: 2 });
+        expect(page2.data).toHaveLength(1);
+    });
+
+    it('applies category and search filters on the server', async () => {
+        await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Vector Pack',
+            software: 'illustrator',
+            status: 'published',
+        });
+        await DigitalProductService.createProduct({
+            ...baseProduct(),
+            title: 'Brush Pack',
+            software: 'photoshop',
+            status: 'published',
+        });
+
+        const result = await DigitalProductService.getPublishedProducts({
+            software: 'illustrator',
+            search: 'vector',
+        });
+
+        expect(result.data.map((p) => p.title)).toEqual(['Vector Pack']);
+        expect(result.meta.total).toBe(1);
+        expect(result.meta.counts).toEqual({
+            all: 1,
+            photoshop: 0,
+            illustrator: 1,
+            bundle: 0,
+        });
+    });
+});

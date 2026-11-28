@@ -92,6 +92,13 @@ const digitalProductSchema = new Schema<IDigitalProduct>(
             default: true,
             index: true,
         },
+        // Manual display order controlled by admins via drag & drop.
+        // Lower values appear first in both the storefront and admin list.
+        sortOrder: {
+            type: Number,
+            default: 0,
+            index: true,
+        },
         salesCount: {
             type: Number,
             default: 0,
@@ -106,6 +113,6 @@ const digitalProductSchema = new Schema<IDigitalProduct>(
     }
 );
 
-digitalProductSchema.index({ isPublished: 1, createdAt: -1 });
+digitalProductSchema.index({ isPublished: 1, sortOrder: 1, createdAt: -1 });
 
 export const DigitalProductModel = model<IDigitalProduct>('DigitalProduct', digitalProductSchema);
